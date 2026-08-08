@@ -99,13 +99,13 @@
 
 .island {
     position: absolute;
-    bottom: -2px;
-    left: 1%;
-    width: 120px;
-    height: 40px;
+    bottom: -1px;
+    left: 2%;
+    width: 150px;
+    height: 52px;
 
     path {
-        fill: #223c58;
+        fill: #060f1c;
     }
 }
 
@@ -145,91 +145,51 @@
     }
 }
 
-// Переливающиеся блики: прерывистые светлые и тёмные штрихи, медленно сменяющие друг друга.
-.ripples {
+// Блик — короткий горизонтальный штрих света; мерцает и слегка вытягивается.
+.glint {
     position: absolute;
-    inset: 0;
-
-    &::before,
-    &::after {
-        content: '';
-        position: absolute;
-        inset: -6% -25%;
-        // Прерывистость: пересечение вертикального затухания (у горизонта и внизу)
-        // и мягких горизонтальных «окон», превращающих линии в отдельные блики-штрихи.
-        mask-composite: intersect;
-        -webkit-mask-composite: source-in;
-    }
-
-    // Светлые блики (лёгкий наклон, чтобы «дышали», а не лежали строго горизонтально).
-    &::before {
-        background: repeating-linear-gradient(178.6deg, rgba(156, 200, 238, 0.13) 0 1.4px, transparent 1.4px 10px);
-        mask-image:
-            linear-gradient(180deg, transparent 2%, #000 22%, #000 66%, transparent 96%),
-            repeating-linear-gradient(90.4deg, transparent 0 7px, #000 16px 26px, transparent 35px 46px);
-        -webkit-mask-image:
-            linear-gradient(180deg, transparent 2%, #000 22%, #000 66%, transparent 96%),
-            repeating-linear-gradient(90.4deg, transparent 0 7px, #000 16px 26px, transparent 35px 46px);
-        animation:
-            shimmer-light 10s ease-in-out infinite alternate,
-            drift-left 46s linear infinite;
-    }
-
-    // Тёмные разрывы между бликами, в противофазе к светлым.
-    &::after {
-        background: repeating-linear-gradient(181.4deg, rgba(3, 10, 20, 0.55) 0 1.6px, transparent 1.6px 12px);
-        mask-image:
-            linear-gradient(180deg, transparent 2%, #000 22%, #000 66%, transparent 96%),
-            repeating-linear-gradient(89.6deg, transparent 0 9px, #000 18px 30px, transparent 40px 52px);
-        -webkit-mask-image:
-            linear-gradient(180deg, transparent 2%, #000 22%, #000 66%, transparent 96%),
-            repeating-linear-gradient(89.6deg, transparent 0 9px, #000 18px 30px, transparent 40px 52px);
-        animation:
-            shimmer-dark 10s ease-in-out infinite alternate,
-            drift-right 62s linear infinite;
-        animation-delay: -5s;
-    }
+    height: 2px;
+    transform: translateX(-50%) scaleX(0.6);
+    border-radius: 2px;
+    background: linear-gradient(90deg, transparent, rgba(176, 214, 248, 0.85), transparent);
+    opacity: 0.1;
+    animation-name: glint-pulse;
+    animation-timing-function: ease-in-out;
+    animation-iteration-count: infinite;
+    animation-direction: alternate;
+    will-change: opacity, transform;
 }
 
-@keyframes shimmer-light {
-    0%,
-    100% {
-        opacity: 0.35;
-    }
+.glintDark {
+    .glint();
 
-    50% {
-        opacity: 0.9;
-    }
+    height: 3px;
+    background: linear-gradient(90deg, transparent, rgba(3, 9, 18, 0.6), transparent);
+    animation-name: glint-pulse-dark;
 }
 
-@keyframes shimmer-dark {
-    0%,
-    100% {
-        opacity: 0.85;
-    }
-
-    50% {
-        opacity: 0.3;
-    }
-}
-
-@keyframes drift-left {
+// Светлые и тёмные блики пульсируют в противофазе, поэтому вода «переливается».
+@keyframes glint-pulse {
     from {
-        transform: translateX(0);
+        opacity: 0.08;
+        transform: translateX(-50%) scaleX(0.6);
     }
 
     to {
-        transform: translateX(-40px);
+        opacity: 0.72;
+        transform: translateX(-42%) scaleX(1.05);
     }
 }
 
-@keyframes drift-right {
+@keyframes glint-pulse-dark {
     from {
-        transform: translateX(0);
+        opacity: 0.55;
+        transform: translateX(-50%) scaleX(1);
     }
 
     to {
-        transform: translateX(34px);
+        opacity: 0.1;
+        transform: translateX(-58%) scaleX(0.7);
     }
 }
 

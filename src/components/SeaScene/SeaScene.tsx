@@ -21,29 +21,27 @@ const OTHER_SLOTS: SceneSlot[] = [
     { left: 85, depth: 0.16, facing: 'right' },
 ];
 
-// Рассеянные фоновые звёзды (чистое небо, как над Каспием летней ночью).
+// Рассеянные фоновые звёзды.
 const STARS = [
     { x: 4, y: 12, s: 2, d: 0 },
     { x: 9, y: 34, s: 1, d: 1.2 },
     { x: 14, y: 8, s: 1, d: 2.1 },
-    { x: 7, y: 22, s: 1, d: 0.6 },
-    { x: 12, y: 44, s: 1, d: 2.8 },
-    { x: 18, y: 16, s: 1, d: 1.7 },
-    { x: 21, y: 40, s: 1, d: 0.3 },
-    { x: 46, y: 40, s: 1, d: 2.4 },
-    { x: 49, y: 18, s: 1, d: 1.1 },
-    { x: 54, y: 34, s: 1, d: 3.2 },
-    { x: 52, y: 9, s: 2, d: 0.9 },
-    { x: 58, y: 24, s: 1, d: 2.0 },
-    { x: 62, y: 13, s: 1, d: 1.5 },
-    { x: 66, y: 32, s: 1, d: 0.4 },
-    { x: 72, y: 20, s: 1, d: 2.6 },
-    { x: 78, y: 10, s: 2, d: 1.9 },
-    { x: 83, y: 28, s: 1, d: 0.8 },
-    { x: 88, y: 16, s: 1, d: 3.0 },
-    { x: 92, y: 38, s: 1, d: 1.4 },
-    { x: 96, y: 22, s: 1, d: 2.3 },
-    { x: 89, y: 44, s: 1, d: 0.5 },
+    { x: 19, y: 26, s: 2, d: 0.6 },
+    { x: 24, y: 15, s: 1, d: 2.8 },
+    { x: 29, y: 38, s: 1, d: 1.7 },
+    { x: 33, y: 6, s: 2, d: 0.3 },
+    { x: 38, y: 22, s: 1, d: 2.4 },
+    { x: 43, y: 33, s: 1, d: 1.1 },
+    { x: 47, y: 11, s: 2, d: 3.2 },
+    { x: 52, y: 28, s: 1, d: 0.9 },
+    { x: 57, y: 7, s: 1, d: 2.0 },
+    { x: 61, y: 19, s: 2, d: 1.5 },
+    { x: 76, y: 30, s: 1, d: 0.4 },
+    { x: 81, y: 9, s: 1, d: 2.6 },
+    { x: 86, y: 24, s: 2, d: 1.9 },
+    { x: 91, y: 14, s: 1, d: 0.8 },
+    { x: 95, y: 36, s: 1, d: 3.0 },
+    { x: 98, y: 5, s: 2, d: 1.4 },
 ];
 
 // Орион в положении «лёжа», как он виден над Каспием в июле перед рассветом (низко, боком).
@@ -73,6 +71,36 @@ const ORION_TONE_CLASS: Record<OrionStar['tone'], string> = {
 };
 
 const ORION_BELT = ORION_STARS.slice(2, 5);
+
+// Блики на воде: короткие горизонтальные штрихи, каждый мерцает в своей фазе,
+// поэтому вместе они «переливаются», не повторяясь. Гуще у лунной дорожки (~69%).
+interface Glint {
+    left: number;
+    top: number;
+    w: number;
+    dur: number;
+    delay: number;
+    tone: 'light' | 'dark';
+}
+
+const GLINTS: Glint[] = [
+    { left: 66, top: 8, w: 34, dur: 3.1, delay: 0, tone: 'light' },
+    { left: 71, top: 15, w: 26, dur: 4.2, delay: 1.4, tone: 'light' },
+    { left: 64, top: 23, w: 40, dur: 3.6, delay: 0.6, tone: 'light' },
+    { left: 73, top: 34, w: 30, dur: 5.0, delay: 2.1, tone: 'light' },
+    { left: 68, top: 46, w: 46, dur: 4.4, delay: 0.9, tone: 'light' },
+    { left: 70, top: 60, w: 34, dur: 5.6, delay: 3.0, tone: 'light' },
+    { left: 12, top: 18, w: 22, dur: 4.8, delay: 2.6, tone: 'light' },
+    { left: 20, top: 40, w: 30, dur: 3.9, delay: 1.1, tone: 'light' },
+    { left: 30, top: 58, w: 26, dur: 5.3, delay: 0.4, tone: 'light' },
+    { left: 44, top: 30, w: 24, dur: 4.1, delay: 2.9, tone: 'light' },
+    { left: 86, top: 26, w: 24, dur: 4.6, delay: 1.8, tone: 'light' },
+    { left: 90, top: 50, w: 30, dur: 3.4, delay: 0.7, tone: 'light' },
+    { left: 55, top: 12, w: 20, dur: 5.1, delay: 3.4, tone: 'light' },
+    { left: 62, top: 38, w: 22, dur: 4.0, delay: 1.5, tone: 'dark' },
+    { left: 24, top: 28, w: 26, dur: 4.7, delay: 0.2, tone: 'dark' },
+    { left: 78, top: 44, w: 24, dur: 5.4, delay: 2.3, tone: 'dark' },
+];
 
 interface SeaSceneProps {
     participants: Participant[];
@@ -136,13 +164,34 @@ export default function SeaScene({ participants, viewerId, morseFeeds }: SeaScen
                 </svg>
                 <div className={styles.cloud} />
                 <div className={styles.moon} />
-                <svg className={styles.island} viewBox="0 0 160 40" preserveAspectRatio="none" aria-hidden="true">
-                    <path d="M0 40 L0 37 Q10 33 22 34 Q34 22 56 27 Q70 16 92 24 Q114 20 130 29 Q146 33 160 36 L160 40 Z" />
+                <svg
+                    className={styles.island}
+                    viewBox="0 0 170 60"
+                    preserveAspectRatio="xMinYMax meet"
+                    aria-hidden="true"
+                >
+                    <path d="M0 60 L0 46 Q26 30 64 38 Q108 47 170 52 L170 60 Z" />
+                    <path d="M18 44 L24 24 L30 44 Z" />
+                    <path d="M34 46 L41 20 L48 46 Z" />
+                    <path d="M52 47 L57 31 L62 47 Z" />
+                    <path d="M8 47 L12 35 L16 47 Z" />
                 </svg>
             </div>
             <div className={styles.water}>
                 <div className={styles.moonGlade} />
-                <div className={styles.ripples} />
+                {GLINTS.map((glint) => (
+                    <i
+                        key={`${glint.left}-${glint.top}`}
+                        className={glint.tone === 'dark' ? styles.glintDark : styles.glint}
+                        style={{
+                            left: `${glint.left}%`,
+                            top: `${glint.top}%`,
+                            width: glint.w,
+                            animationDuration: `${glint.dur}s`,
+                            animationDelay: `${glint.delay}s`,
+                        }}
+                    />
+                ))}
             </div>
             {placed.map(({ participant, slot }, index) => (
                 <div
