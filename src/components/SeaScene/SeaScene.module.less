@@ -21,24 +21,25 @@
     overflow: hidden;
 }
 
-// Полоса центрирована по сцене; сдвиг вправо на треть плитки — это +11.111% от ширины полосы.
-// Двигать небо влево-вправо можно, меняя это слагаемое.
+// Полоса из трёх плиток, каждая шириной с кадр: в кадре всегда видна одна картинка,
+// поэтому узнаваемые узоры звёзд не задваиваются. Центр полосы совмещён с центром сцены,
+// слагаемое в translateX двигает небо влево-вправо (11.111% полосы = треть кадра).
 .skyStrip {
     position: absolute;
     top: 0;
     left: 50%;
     height: 100%;
+    width: 300%;
     display: flex;
-    width: max-content;
     transform: translateX(calc(-50% + 11.111%));
 }
 
 .skyTile {
     display: block;
+    flex: 0 0 33.3333%;
     height: 100%;
-    width: auto;
-    // Перекрытие в пиксель убирает щель от дробной ширины картинок.
-    margin-right: -1px;
+    object-fit: cover;
+    object-position: center bottom;
 }
 
 .skyTileMirrored {
@@ -55,23 +56,24 @@
     overflow: hidden;
 }
 
-// Полоса центрирована: лунная дорожка на воде оказывается под месяцем.
+// Так же, как небо: каждая плитка шириной с кадр, лунная дорожка попадает под месяц.
 // Двигать воду влево-вправо — слагаемым в translateX.
 .seaStrip {
     position: absolute;
     top: 0;
     left: 50%;
     height: 100%;
+    width: 300%;
     display: flex;
-    width: max-content;
     transform: translateX(-50%);
 }
 
 .seaTile {
     display: block;
+    flex: 0 0 33.3333%;
     height: 100%;
-    width: auto;
-    margin-right: -1px;
+    object-fit: cover;
+    object-position: center top;
 }
 
 .seaTileMirrored {
