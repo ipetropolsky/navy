@@ -94,9 +94,7 @@
       используют их с разным масштабом.
     - Слои сцены не растягиваются: небо и вода вписываются с сохранением пропорций (`object-fit: cover`),
       лишнее обрезается.
-    - `ships/` — SVG-силуэты 5 типов кораблей (`shipShapes.ts`) + компонент `Ship` (название на борту,
-      лампа Морзе, ходовые огни).
-    - `chat/` — `MessageList`, `MessageBubble`, `Composer`, `ParticipantsSheet` (шторка участников).
+    - `chat/` — `MessageList`, `Composer`, `ParticipantsSheet` (шторка участников), `HullBadge` (номер борта).
     - `useMorseLamp` (`src/hooks/`) — очередь символов → тайминги вкл/выкл лампы.
 - **Типы кораблей** (`ShipKind`): `patrol` (сторожевой катер), `missile` (ракетный катер),
   `minesweeper` (тральщик), `corvette` (малый противолодочный корабль), `torpedo` (торпедный катер).
