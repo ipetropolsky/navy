@@ -1,0 +1,90 @@
+// Пропорции исходника src/assets/sources/sea.png.
+@sea-image-width: 1672;
+@sea-image-height: 468;
+
+// Цвет нижней кромки sea.png (среднее по четырём последним строкам пикселей).
+// Им залит фон под слоями, чтобы море продолжалось до низа экрана без стыка.
+@sea-deep-color: #010615;
+
+// Спокойные волны: один медленный вдох на цикл.
+@sea-duration: 8s;
+@sea-scale: 1.1;
+
+// Доля цикла, за которую нижний слой успевает проявиться до непрозрачности.
+// Пока верхний слой полностью непрозрачен, нижний не виден, поэтому фон
+// ни в один момент не просвечивает между слоями — перекрёстное затухание
+// получается без провала яркости в середине цикла.
+@sea-handover: 25%;
+
+.sea {
+    position: relative;
+    overflow: hidden;
+    width: 100%;
+    aspect-ratio: ~'@{sea-image-width} / @{sea-image-height}';
+    background-color: @sea-deep-color;
+}
+
+// Слои совмещены по верхней грани: обе картинки начинаются от линии горизонта.
+.layer {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-image: url('@/assets/sources/sea.png');
+    background-position: top center;
+    background-size: cover;
+    animation-duration: @sea-duration;
+    animation-timing-function: linear;
+    animation-iteration-count: infinite;
+    will-change: opacity, transform;
+}
+
+// Нижний слой: только проявляется, масштаб не трогаем.
+.back {
+    animation-name: sea-fade-in;
+}
+
+// Верхний слой: расходится от центра верхней грани и растворяется.
+.front {
+    transform-origin: 50% 0;
+    animation-name: sea-fade-out;
+}
+
+@keyframes sea-fade-out {
+    0% {
+        opacity: 1;
+        transform: scale(1);
+    }
+
+    @{sea-handover} {
+        opacity: 1;
+    }
+
+    100% {
+        opacity: 0;
+        transform: scale(@sea-scale);
+    }
+}
+
+@keyframes sea-fade-in {
+    0% {
+        opacity: 0;
+    }
+
+    @{sea-handover} {
+        opacity: 1;
+    }
+
+    100% {
+        opacity: 1;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    // Без анимации оба слоя остаются в исходном состоянии
+    // (opacity: 1, scale: 1) и выглядят как одна статичная картинка.
+    .layer {
+        animation: none;
+    }
+}
