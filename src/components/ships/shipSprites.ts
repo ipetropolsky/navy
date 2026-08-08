@@ -1,0 +1,69 @@
+import corvetteUrl from '@/assets/scene/ship-corvette.png';
+import frigateUrl from '@/assets/scene/ship-frigate.png';
+import patrolUrl from '@/assets/scene/ship-patrol.png';
+import { ShipKind } from '@/types/chat';
+
+export interface ShipSprite {
+    url: string;
+    /** Пропорции спрайта, чтобы резервировать место до загрузки картинки. */
+    ratio: number;
+    /** Относительный размер в сцене (крупный корабль = 1). */
+    scale: number;
+    /** Сигнальная лампа — верхняя точка мачты, % от размеров спрайта. */
+    lamp: { x: number; y: number };
+    /** Ходовые огни на носу и корме, % от размеров спрайта. */
+    bowLight: { x: number; y: number };
+    sternLight: { x: number; y: number };
+    /** Центр надписи на борту, % от размеров спрайта. */
+    name: { x: number; y: number };
+}
+
+// Спрайты нарисованы носом влево; в сцене отражаем по горизонтали, если нужно наоборот.
+// Пока картинок три, поэтому пять типов кораблей используют их с разным масштабом.
+export const SHIP_SPRITES: Record<ShipKind, ShipSprite> = {
+    corvette: {
+        url: corvetteUrl,
+        ratio: 1100 / 366,
+        scale: 1,
+        lamp: { x: 55.4, y: 1 },
+        bowLight: { x: 6, y: 83 },
+        sternLight: { x: 97, y: 83 },
+        name: { x: 42, y: 87 },
+    },
+    missile: {
+        url: frigateUrl,
+        ratio: 1100 / 337,
+        scale: 0.82,
+        lamp: { x: 53.3, y: 1.1 },
+        bowLight: { x: 7, y: 82 },
+        sternLight: { x: 97, y: 82 },
+        name: { x: 44, y: 87 },
+    },
+    patrol: {
+        url: patrolUrl,
+        ratio: 1100 / 355,
+        scale: 0.68,
+        lamp: { x: 55.2, y: 1 },
+        bowLight: { x: 7, y: 82 },
+        sternLight: { x: 97, y: 82 },
+        name: { x: 43, y: 86 },
+    },
+    minesweeper: {
+        url: patrolUrl,
+        ratio: 1100 / 355,
+        scale: 0.78,
+        lamp: { x: 55.2, y: 1 },
+        bowLight: { x: 7, y: 82 },
+        sternLight: { x: 97, y: 82 },
+        name: { x: 43, y: 86 },
+    },
+    torpedo: {
+        url: frigateUrl,
+        ratio: 1100 / 337,
+        scale: 0.55,
+        lamp: { x: 53.3, y: 1.1 },
+        bowLight: { x: 7, y: 82 },
+        sternLight: { x: 97, y: 82 },
+        name: { x: 44, y: 87 },
+    },
+};

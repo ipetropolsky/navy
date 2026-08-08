@@ -1,6 +1,6 @@
 import { ShipKind } from '@/types/chat';
 
-import { SHIP_SHAPES, SHIP_VIEWBOX } from '@/components/ships/shipShapes';
+import { SHIP_SPRITES } from '@/components/ships/shipSprites';
 
 import styles from './Ship.module.less';
 
@@ -9,21 +9,16 @@ interface ShipReflectionProps {
     facing?: 'left' | 'right';
 }
 
-/** Тёмное зеркальное отражение силуэта на воде (переворачивается контейнером). */
-export default function ShipReflection({ kind, facing = 'right' }: ShipReflectionProps) {
-    const shape = SHIP_SHAPES[kind];
-    const flip = facing === 'left';
+/** Отражение корабля на воде: тот же спрайт, перевёрнутый и притушенный. */
+export default function ShipReflection({ kind, facing = 'left' }: ShipReflectionProps) {
+    const sprite = SHIP_SPRITES[kind];
 
     return (
-        <svg className={styles.ship} viewBox={`0 0 ${SHIP_VIEWBOX.width} ${SHIP_VIEWBOX.height}`} aria-hidden="true">
-            <g transform={flip ? `translate(${SHIP_VIEWBOX.width} 0) scale(-1 1)` : undefined}>
-                {shape.parts.map((part) => (
-                    <path key={part.d} className={styles.reflectionBody} d={part.d} />
-                ))}
-                {shape.strokes.map((d) => (
-                    <path key={d} className={styles.reflectionRig} d={d} />
-                ))}
-            </g>
-        </svg>
+        <img
+            className={facing === 'right' ? styles.reflectionFlipped : styles.reflection}
+            src={sprite.url}
+            alt=""
+            aria-hidden="true"
+        />
     );
 }

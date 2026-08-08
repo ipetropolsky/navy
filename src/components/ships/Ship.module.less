@@ -1,85 +1,93 @@
 .ship {
+    position: relative;
+    width: 100%;
+    container-type: inline-size;
+}
+
+.sprite {
     display: block;
     width: 100%;
     height: auto;
-    overflow: visible;
 }
 
-.rig {
-    stroke-width: 2.5;
-    stroke-linecap: round;
-    fill: none;
+.spriteFlipped {
+    .sprite();
+
+    transform: scaleX(-1);
 }
 
-.reflectionBody {
-    fill: rgba(20, 34, 58, 0.55);
-}
-
-.reflectionRig {
-    stroke: rgba(20, 34, 58, 0.45);
-    stroke-width: 2.5;
-    stroke-linecap: round;
-    fill: none;
+.name {
+    position: absolute;
+    transform: translate(-50%, -50%);
+    white-space: nowrap;
+    font-family: 'Roboto', sans-serif;
+    font-weight: 500;
+    letter-spacing: 0.3px;
+    opacity: 0.85;
+    text-shadow: 0 1px 2px rgba(4, 10, 20, 0.55);
+    pointer-events: none;
 }
 
 .lamp {
-    fill: var(--color-lamp);
-    opacity: 0.14;
+    position: absolute;
+    width: 6px;
+    height: 6px;
+    margin: -3px 0 0 -3px;
+    border-radius: 50%;
+    background: var(--color-lamp);
+    opacity: 0.12;
     transition: opacity 0.07s ease-out;
 }
 
 .lampOn {
-    opacity: 0.95;
-}
-
-.lampGlow {
-    fill: var(--color-lamp);
-    opacity: 0;
-    filter: blur(4px);
-    transition: opacity 0.09s ease-out;
-}
-
-.lampGlowOn {
-    opacity: 0.4;
+    opacity: 1;
+    box-shadow:
+        0 0 6px 2px rgba(255, 233, 168, 0.55),
+        0 0 16px 6px rgba(255, 233, 168, 0.25);
 }
 
 .bowLight {
-    fill: #7be3a2;
+    position: absolute;
+    width: 4px;
+    height: 4px;
+    margin: -2px 0 0 -2px;
+    border-radius: 50%;
+    background: #7be3a2;
     opacity: 0.12;
     transition: opacity 0.4s ease;
 }
 
 .sternLight {
-    fill: #f0a48a;
-    opacity: 0.12;
-    transition: opacity 0.4s ease;
+    .bowLight();
+
+    background: #f0a48a;
 }
 
 .lightOn {
     opacity: 0.95;
+    box-shadow: 0 0 5px 1px currentcolor;
 }
 
-.name {
-    // Как имена в чате: Roboto, тот же вес; чуть прозрачное, чтобы силуэт слегка притемнял цвет.
-    font-family: 'Roboto', sans-serif;
-    font-weight: 500;
-    fill-opacity: 0.82;
-    letter-spacing: 0.3px;
-}
-
-.avatar {
+.reflection {
     display: block;
     width: 100%;
     height: auto;
+    transform: scaleY(-1);
 }
 
-.avatarBody {
-    fill: #9db8d4;
+.reflectionFlipped {
+    .reflection();
+
+    transform: scale(-1, -1);
 }
 
-.avatarRig {
-    stroke: #9db8d4;
-    stroke-width: 4;
-    stroke-linecap: round;
-    fill: none;
+// В кружке аватарки показываем среднюю часть корабля крупным планом.
+.avatar {
+    position: absolute;
+    top: 52%;
+    left: 50%;
+    width: auto;
+    max-width: none;
+    height: 230%;
+    transform: translate(-50%, -50%);
 }

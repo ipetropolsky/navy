@@ -1,9 +1,10 @@
-@horizon: 54%;
+@horizon: 56%;
 
 .scene {
     position: relative;
     height: 100%;
     overflow: hidden;
+    background: #0b1c38;
     user-select: none;
 
     img {
@@ -11,13 +12,16 @@
     }
 }
 
-// Базовые градиенты — отдельные файлы, растянутые по слоям.
+// Небо (месяц, звёзды и облака уже внутри картинки) и вода — отдельные слои.
+// Небо тянем на всю ширину, чтобы подсветка у горизонта была видна целиком,
+// и отражаем: месяц уходит вправо и не спорит с названием чата в шапке.
 .sky {
     position: absolute;
-    inset: 0 0 (100% - @horizon);
+    inset: 0 0 auto;
     width: 100%;
     height: @horizon;
     object-fit: fill;
+    transform: scaleX(-1);
 }
 
 .sea {
@@ -25,108 +29,57 @@
     inset: @horizon 0 0;
     width: 100%;
     height: (100% - @horizon);
-    object-fit: fill;
-}
-
-.stars {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 50%;
     object-fit: cover;
-    opacity: 0.95;
-    mask-image: linear-gradient(180deg, #000 55%, transparent 100%);
+    object-position: center top;
 }
 
-.orion {
-    position: absolute;
-    top: 3%;
-    left: 41%;
-    width: 132px;
-    height: auto;
-}
-
-.moon {
-    position: absolute;
-    top: 10%;
-    left: 8%;
-    width: 92px;
-    height: auto;
-}
-
-.cloudLeft {
-    position: absolute;
-    top: 30%;
-    left: 34%;
-    width: 52%;
-    height: auto;
-    opacity: 0.75;
-}
-
-.cloudRight {
-    position: absolute;
-    top: 16%;
-    left: 56%;
-    width: 48%;
-    height: auto;
-    opacity: 0.6;
-}
-
-// Острова: три плана, каждый можно двигать отдельно.
+// Острова: три плана, каждый двигается отдельно.
+// Основание островов уводим под линию горизонта — слой воды перекрывает его,
+// над водой остаётся только гребень силуэта.
 .islandFar {
     position: absolute;
-    bottom: (100% - @horizon);
-    left: -2%;
-    width: 46%;
-    max-width: 420px;
+    bottom: calc(100% - @horizon - 16px);
+    left: -4%;
+    width: 30%;
+    max-width: 300px;
     height: auto;
+    opacity: 0.4;
 }
 
 .islandMid {
     position: absolute;
-    bottom: (100% - @horizon);
-    left: 4%;
-    width: 34%;
-    max-width: 300px;
+    bottom: calc(100% - @horizon - 12px);
+    left: -2%;
+    width: 22%;
+    max-width: 220px;
     height: auto;
+    opacity: 0.6;
 }
 
 .islandNear {
     position: absolute;
-    bottom: calc(100% - @horizon - 3px);
+    bottom: calc(100% - @horizon - 9px);
     left: -3%;
-    width: 26%;
-    max-width: 230px;
+    width: 17%;
+    max-width: 170px;
     height: auto;
+    opacity: 0.9;
 }
 
 .islandReflection {
     position: absolute;
     top: @horizon;
     left: -3%;
-    width: 26%;
-    max-width: 230px;
+    width: 17%;
+    max-width: 170px;
     height: auto;
-    transform: scaleY(-0.6);
+    transform: scaleY(-0.5);
     transform-origin: top;
-    opacity: 0.2;
+    opacity: 0.14;
     filter: blur(2px);
 }
 
-// Статичные блики-волны (анимацию добавим отдельным шагом).
-.waves {
-    position: absolute;
-    inset: @horizon 0 0;
-    pointer-events: none;
-}
-
-.wave {
-    position: absolute;
-    height: auto;
-}
-
-// Зеркальные отражения кораблей.
+// Отражения кораблей под слоем воды по тем же слотам, что и сами корабли.
 .reflections {
     position: absolute;
     inset: 0;
@@ -135,10 +88,10 @@
 
 .reflectionSlot {
     position: absolute;
-    transform: translate(-50%, 76%) scaleY(-1);
-    opacity: 0.3;
-    filter: blur(2px);
-    mask-image: linear-gradient(0deg, rgba(0, 0, 0, 0.85) 50%, transparent 90%);
+    transform: translate(-50%, 97%);
+    opacity: 0.22;
+    filter: blur(1.6px);
+    mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.9), transparent 70%);
 }
 
 .shipSlot {
@@ -148,7 +101,7 @@
 
 .shipFloat {
     position: relative;
-    animation: bob 6.5s ease-in-out infinite alternate;
+    animation: bob 7s ease-in-out infinite alternate;
 }
 
 @keyframes bob {
@@ -165,8 +118,8 @@
 .bottomFade {
     position: absolute;
     inset: auto 0 0;
-    height: 16px;
-    background: linear-gradient(180deg, transparent, rgba(8, 21, 36, 0.55));
+    height: 18px;
+    background: linear-gradient(180deg, transparent, rgba(8, 21, 36, 0.6));
 }
 
 @media (prefers-reduced-motion: reduce) {

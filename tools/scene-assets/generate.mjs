@@ -12,9 +12,8 @@ import { chromium } from 'playwright-core';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const outDir = path.resolve(here, '../../src/assets/scene');
 
+// sky и sea готовятся отдельно из src/assets/sources (tools/scene-assets/prepare-backgrounds.py).
 const ASSETS = [
-    'sky',
-    'sea',
     'stars',
     'orion',
     'moon',
