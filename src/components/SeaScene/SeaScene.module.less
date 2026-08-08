@@ -139,31 +139,40 @@
     mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.85), transparent 75%);
 }
 
-// Под островом вода особенно тёмная: он большой и близко.
+// Под островом вода особенно тёмная: он большой и близко. Тоже нижняя половина овала.
 .islandShadow {
     position: absolute;
     top: 100%;
     left: 4%;
     width: 92%;
-    aspect-ratio: 7 / 1;
-    transform: translateY(-45%);
-    border-radius: 50%;
-    background: radial-gradient(ellipse at center, rgba(0, 2, 6, 0.98) 0%, rgba(0, 2, 6, 0.75) 40%, transparent 72%);
+    aspect-ratio: 12 / 1;
+    transform: translateY(-30%);
+    background: radial-gradient(
+        ellipse 50% 100% at 50% 0%,
+        rgba(3, 11, 26, 0.95) 0%,
+        rgba(3, 11, 26, 0.62) 42%,
+        transparent 78%
+    );
     filter: blur(4px);
     pointer-events: none;
 }
 
-// Под кораблём — не зеркальное отражение, а тёмное пятно вытянутой формы:
-// на почти чёрной воде это читается лучше и стоит дешевле.
+// Под кораблём — не зеркальное отражение, а тёмное пятно: нижняя половина овала,
+// поэтому тень уходит только вниз от ватерлинии и не выглядывает за корпусом.
+// Центр градиента прижат к верхней кромке блока — это и даёт полуовал.
 .shipShadow {
     position: absolute;
     left: 50%;
-    bottom: -6%;
-    width: 116%;
-    aspect-ratio: 8 / 1;
-    transform: translateX(-50%);
-    border-radius: 50%;
-    background: radial-gradient(ellipse at center, rgba(0, 3, 9, 0.9) 0%, rgba(0, 3, 9, 0.55) 42%, transparent 70%);
+    top: 100%;
+    width: 112%;
+    aspect-ratio: 14 / 1;
+    transform: translate(-50%, -34%);
+    background: radial-gradient(
+        ellipse 50% 100% at 50% 0%,
+        rgba(6, 18, 40, 0.85) 0%,
+        rgba(6, 18, 40, 0.5) 45%,
+        transparent 78%
+    );
     filter: blur(2px);
     pointer-events: none;
 }
