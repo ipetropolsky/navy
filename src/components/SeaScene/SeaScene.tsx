@@ -1,3 +1,5 @@
+import { CSSProperties } from 'react';
+
 import cloudFarUrl from '@/assets/scene/cloud-1.png';
 import cloudNearUrl from '@/assets/scene/cloud-2.png';
 import islandUrl from '@/assets/scene/island.png';
@@ -106,10 +108,14 @@ export default function SeaScene({ participants, viewerId, morseFeeds }: SeaScen
                     {/* Корабль вместе с номером, лампой и огнями качается как единое целое. */}
                     <div
                         className={styles.shipFloat}
-                        style={{
-                            animationDuration: `${item.slot.bob}s`,
-                            animationDelay: `-${(index * BOB_PHASE_STEP).toFixed(2)}s`,
-                        }}
+                        style={
+                            {
+                                animationDuration: `${item.slot.bob}s`,
+                                animationDelay: `-${(index * BOB_PHASE_STEP).toFixed(2)}s`,
+                                // Амплитуда падает с расстоянием: дальний корабль качается еле заметно.
+                                '--bob-amplitude': `${(0.3 + item.slot.depth * 1.9).toFixed(2)}px`,
+                            } as CSSProperties
+                        }
                     >
                         <Ship
                             kind={item.participant.shipKind}

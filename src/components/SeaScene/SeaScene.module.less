@@ -166,13 +166,14 @@
     will-change: transform;
 }
 
+// Амплитуду задаёт слот через --bob-amplitude: чем дальше корабль, тем она меньше.
 @keyframes bob {
     from {
-        transform: translateY(-1.5px);
+        transform: translateY(calc(var(--bob-amplitude, 2px) * -0.75));
     }
 
     to {
-        transform: translateY(2px);
+        transform: translateY(var(--bob-amplitude, 2px));
     }
 }
 
