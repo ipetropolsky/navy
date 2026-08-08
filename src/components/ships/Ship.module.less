@@ -1,0 +1,76 @@
+.ship {
+    display: block;
+    width: 100%;
+    height: auto;
+    overflow: visible;
+}
+
+.rig {
+    stroke-width: 2.5;
+    stroke-linecap: round;
+    fill: none;
+}
+
+.lamp {
+    fill: var(--color-lamp);
+    opacity: 0.14;
+    transition: opacity 0.07s ease-out;
+}
+
+.lampOn {
+    opacity: 0.95;
+}
+
+.lampGlow {
+    fill: var(--color-lamp);
+    opacity: 0;
+    filter: blur(4px);
+    transition: opacity 0.09s ease-out;
+}
+
+.lampGlowOn {
+    opacity: 0.4;
+}
+
+.bowLight {
+    fill: #7be3a2;
+    opacity: 0.12;
+    transition: opacity 0.4s ease;
+}
+
+.sternLight {
+    fill: #f0a48a;
+    opacity: 0.12;
+    transition: opacity 0.4s ease;
+}
+
+.lightOn {
+    opacity: 0.95;
+}
+
+.name {
+    fill: #b6d1ea;
+    font-family: 'Roboto Slab', serif;
+    font-weight: 500;
+    letter-spacing: 1.5px;
+    paint-order: stroke;
+    stroke: rgba(3, 9, 18, 0.45);
+    stroke-width: 2px;
+}
+
+.avatar {
+    display: block;
+    width: 100%;
+    height: auto;
+}
+
+.avatarBody {
+    fill: #9db8d4;
+}
+
+.avatarRig {
+    stroke: #9db8d4;
+    stroke-width: 4;
+    stroke-linecap: round;
+    fill: none;
+}

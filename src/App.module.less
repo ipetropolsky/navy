@@ -1,17 +1,93 @@
-.main {
-    height: 100vh;
+.app {
+    position: relative;
     display: flex;
-    justify-content: center;
-    align-items: center;
-    background-color: #eeeeee;
-
-    font-size: 75px;
-    font-family: 'Roboto Slab', serif;
-    font-weight: 300;
-    color: darkslategray;
+    flex-direction: column;
+    height: 100%;
+    max-width: 760px;
+    margin: 0 auto;
+    overflow: hidden;
+    background: var(--color-bg-chat);
+    box-shadow:
+        0 0 0 1px var(--color-border),
+        0 0 60px rgba(0, 0, 0, 0.6);
 }
 
-.accent {
-    font-family: 'Roboto', sans-serif;
+.header {
+    position: relative;
+    flex: none;
+    height: clamp(210px, 34dvh, 300px);
+}
+
+.scene {
+    height: 100%;
+    opacity: 1;
+    transition: opacity 0.18s ease-in;
+    animation: scene-in 0.28s ease-out;
+}
+
+.sceneExiting {
+    opacity: 0;
+}
+
+@keyframes scene-in {
+    from {
+        opacity: 0;
+    }
+}
+
+.headerBar {
+    position: absolute;
+    inset: 0 0 auto;
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 10px 8px 18px 16px;
+    background: linear-gradient(180deg, rgba(2, 7, 16, 0.82) 0%, rgba(2, 7, 16, 0.4) 60%, transparent 100%);
+}
+
+.headerInfo {
+    flex: 1;
+    min-width: 0;
+}
+
+.chatTitle {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-family: 'Roboto Slab', serif;
+    font-size: 18px;
     font-weight: 500;
+    text-shadow: 0 1px 6px rgba(0, 0, 0, 0.7);
+}
+
+.chatStatus {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    color: var(--color-accent);
+    font-size: 13px;
+    text-shadow: 0 1px 6px rgba(0, 0, 0, 0.7);
+}
+
+.crewButton {
+    flex: none;
+    display: flex;
+    padding: 8px;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--color-text);
+    cursor: pointer;
+    transition: background 0.15s ease;
+
+    &:hover {
+        background: rgba(98, 174, 230, 0.12);
+    }
+}
+
+.chat {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
 }

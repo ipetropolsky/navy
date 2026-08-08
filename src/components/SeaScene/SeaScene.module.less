@@ -1,0 +1,178 @@
+@horizon: 54%;
+
+.scene {
+    position: relative;
+    height: 100%;
+    overflow: hidden;
+    user-select: none;
+}
+
+.sky {
+    position: absolute;
+    inset: 0 0 (100% - @horizon);
+    background: linear-gradient(180deg, #020714 0%, #081830 62%, #12304e 96%, #1a3d5c 100%);
+}
+
+.star {
+    position: absolute;
+    border-radius: 50%;
+    background: #d7e6f5;
+    opacity: 0.7;
+    animation: twinkle 4.5s ease-in-out infinite;
+}
+
+@keyframes twinkle {
+    0%,
+    100% {
+        opacity: 0.75;
+    }
+
+    50% {
+        opacity: 0.2;
+    }
+}
+
+.cloud {
+    position: absolute;
+    top: 18%;
+    left: 40%;
+    width: 55%;
+    height: 26%;
+    border-radius: 50%;
+    background: radial-gradient(closest-side, rgba(190, 214, 238, 0.07), transparent);
+    filter: blur(6px);
+    animation: cloud-drift 80s ease-in-out infinite alternate;
+}
+
+@keyframes cloud-drift {
+    from {
+        transform: translateX(-18%);
+    }
+
+    to {
+        transform: translateX(14%);
+    }
+}
+
+.moon {
+    position: absolute;
+    top: 16%;
+    left: 69%;
+    width: 42px;
+    height: 42px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 38% 34%, #fdf9e8 0%, #efe6c4 58%, #d9cfa6 100%);
+    box-shadow:
+        0 0 26px 8px rgba(248, 240, 212, 0.28),
+        0 0 70px 30px rgba(248, 240, 212, 0.1);
+}
+
+.island {
+    position: absolute;
+    bottom: -2px;
+    left: 1%;
+    width: 120px;
+    height: 40px;
+
+    path {
+        fill: #223c58;
+    }
+}
+
+.water {
+    position: absolute;
+    inset: @horizon 0 0;
+    background: linear-gradient(180deg, #123152 0%, #0b2138 34%, #071527 70%, #040d19 100%);
+
+    &::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background: repeating-linear-gradient(180deg, rgba(150, 194, 232, 0.055) 0 1px, transparent 1px 7px);
+        mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.9), transparent 65%);
+    }
+}
+
+.moonGlade {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: calc(69% - 30px);
+    width: 100px;
+    background: linear-gradient(180deg, rgba(247, 239, 214, 0.2) 0%, rgba(247, 239, 214, 0.06) 55%, transparent 90%);
+    filter: blur(3px);
+    mask-image: radial-gradient(60% 160% at 50% 0%, rgba(0, 0, 0, 0.9) 30%, transparent 75%);
+
+    &::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background: repeating-linear-gradient(180deg, rgba(4, 12, 24, 0.55) 0 2px, transparent 2px 5px);
+        animation: glade-shimmer 7s linear infinite;
+    }
+}
+
+@keyframes glade-shimmer {
+    from {
+        background-position-y: 0;
+    }
+
+    to {
+        background-position-y: 24px;
+    }
+}
+
+.ripples {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent 0%, rgba(140, 184, 226, 0.05) 35%, transparent 60%);
+    background-size: 200% 100%;
+    animation: ripple-drift 26s ease-in-out infinite alternate;
+}
+
+@keyframes ripple-drift {
+    from {
+        background-position-x: 0%;
+    }
+
+    to {
+        background-position-x: 100%;
+    }
+}
+
+.shipSlot {
+    position: absolute;
+    transform: translateX(-50%);
+}
+
+.shipFloat {
+    position: relative;
+    animation: bob 6.5s ease-in-out infinite alternate;
+}
+
+@keyframes bob {
+    from {
+        transform: translateY(-1.5px);
+    }
+
+    to {
+        transform: translateY(2px);
+    }
+}
+
+.reflection {
+    position: absolute;
+    left: 15%;
+    right: 15%;
+    bottom: -7px;
+    height: 10px;
+    border-radius: 50%;
+    background: radial-gradient(closest-side, rgba(150, 200, 250, 0.14), transparent);
+}
+
+.reflectionActive {
+    .reflection();
+
+    background: radial-gradient(closest-side, rgba(170, 215, 255, 0.3), transparent);
+    box-shadow: 0 0 18px 4px rgba(120, 180, 240, 0.12);
+}

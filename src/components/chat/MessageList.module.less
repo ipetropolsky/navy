@@ -1,0 +1,119 @@
+.list {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 12px 12px 8px;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(120, 168, 214, 0.25) transparent;
+}
+
+.dateChip {
+    align-self: center;
+    margin-bottom: 6px;
+    padding: 3px 12px;
+    border-radius: 12px;
+    background: rgba(10, 26, 44, 0.75);
+    color: var(--color-text-muted);
+    font-size: 13px;
+}
+
+.row {
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+}
+
+.rowOwn {
+    .row();
+
+    justify-content: flex-end;
+}
+
+.avatarCell {
+    flex: 0 0 34px;
+}
+
+.avatar {
+    display: flex;
+    align-items: center;
+    width: 34px;
+    height: 34px;
+    padding: 4px;
+    border-radius: 50%;
+    background: #11263c;
+    box-shadow: inset 0 0 0 1px var(--color-border);
+}
+
+.bubble {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    max-width: 78%;
+    margin: 0;
+    padding: 6px 10px 7px;
+    border: 0;
+    border-radius: 15px;
+    border-bottom-left-radius: 5px;
+    background: var(--color-bubble-in);
+    color: var(--color-text);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: transform 0.08s ease;
+
+    &:active {
+        transform: scale(0.98);
+    }
+}
+
+.bubbleOwn {
+    .bubble();
+
+    border-radius: 15px;
+    border-bottom-right-radius: 5px;
+    background: var(--color-bubble-out);
+}
+
+.author {
+    font-size: 13px;
+    font-weight: 500;
+    margin-bottom: 1px;
+}
+
+.replyQuote {
+    display: flex;
+    flex-direction: column;
+    align-self: stretch;
+    margin: 2px 0 4px;
+    padding: 3px 8px;
+    border-left: 2px solid var(--color-accent);
+    border-radius: 5px;
+    background: rgba(255, 255, 255, 0.05);
+    font-size: 13px;
+}
+
+.replyAuthor {
+    font-weight: 500;
+}
+
+.replyText {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    max-width: 240px;
+    color: var(--color-text-muted);
+}
+
+.text {
+    word-break: break-word;
+}
+
+.time {
+    float: right;
+    margin: 7px 0 -4px 8px;
+    color: var(--color-text-muted);
+    font-size: 11px;
+}

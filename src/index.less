@@ -1,3 +1,35 @@
 // https://github.com/sindresorhus/modern-normalize?tab=readme-ov-file#usage
 @import '~/modern-normalize';
 @import '@/fonts.less';
+
+:root {
+    color-scheme: dark;
+
+    --color-bg-page: #030910;
+    --color-bg-chat: #081524;
+    --color-bg-raised: #0d2033;
+    --color-bg-overlay: rgba(2, 7, 14, 0.55);
+    --color-bubble-in: #102539;
+    --color-bubble-out: #1c405d;
+    --color-text: #e3edf8;
+    --color-text-muted: #7f9dbd;
+    --color-accent: #62aee6;
+    --color-lamp: #ffe9a8;
+    --color-border: rgba(120, 168, 214, 0.14);
+}
+
+html,
+body,
+#root {
+    height: 100%;
+}
+
+body {
+    margin: 0;
+    background: var(--color-bg-page);
+    color: var(--color-text);
+    font-family: 'Roboto', sans-serif;
+    font-size: 15px;
+    line-height: 1.35;
+    overflow: hidden;
+}
