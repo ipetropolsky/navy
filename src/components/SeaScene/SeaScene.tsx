@@ -1,3 +1,21 @@
+import cloud1Url from '@/assets/scene/cloud-1.png';
+import cloud2Url from '@/assets/scene/cloud-2.png';
+import islandFarUrl from '@/assets/scene/island-far.png';
+import islandMidUrl from '@/assets/scene/island-mid.png';
+import islandNearUrl from '@/assets/scene/island-near.png';
+import moonUrl from '@/assets/scene/moon.png';
+import orionUrl from '@/assets/scene/orion.png';
+import seaUrl from '@/assets/scene/sea.png';
+import skyUrl from '@/assets/scene/sky.png';
+import starsUrl from '@/assets/scene/stars.png';
+import wave1Url from '@/assets/scene/wave-1.png';
+import wave2Url from '@/assets/scene/wave-2.png';
+import wave3Url from '@/assets/scene/wave-3.png';
+import wave4Url from '@/assets/scene/wave-4.png';
+import wave5Url from '@/assets/scene/wave-5.png';
+import wave6Url from '@/assets/scene/wave-6.png';
+import wave7Url from '@/assets/scene/wave-7.png';
+import wave8Url from '@/assets/scene/wave-8.png';
 import Ship from '@/components/ships/Ship';
 import ShipReflection from '@/components/ships/ShipReflection';
 import { SHIP_SHAPES } from '@/components/ships/shipShapes';
@@ -23,80 +41,33 @@ const OTHER_SLOTS: SceneSlot[] = [
     { left: 88, depth: 0.22, facing: 'left' },
 ];
 
-// Рассеянные фоновые звёзды.
-const STARS = [
-    { x: 4, y: 12, s: 2, d: 0 },
-    { x: 9, y: 34, s: 1, d: 1.2 },
-    { x: 14, y: 8, s: 1, d: 2.1 },
-    { x: 19, y: 26, s: 2, d: 0.6 },
-    { x: 24, y: 15, s: 1, d: 2.8 },
-    { x: 29, y: 38, s: 1, d: 1.7 },
-    { x: 33, y: 6, s: 2, d: 0.3 },
-    { x: 38, y: 22, s: 1, d: 2.4 },
-    { x: 43, y: 33, s: 1, d: 1.1 },
-    { x: 47, y: 11, s: 2, d: 3.2 },
-    { x: 52, y: 28, s: 1, d: 0.9 },
-    { x: 57, y: 7, s: 1, d: 2.0 },
-    { x: 61, y: 19, s: 2, d: 1.5 },
-    { x: 76, y: 30, s: 1, d: 0.4 },
-    { x: 81, y: 9, s: 1, d: 2.6 },
-    { x: 86, y: 24, s: 2, d: 1.9 },
-    { x: 91, y: 14, s: 1, d: 0.8 },
-    { x: 95, y: 36, s: 1, d: 3.0 },
-    { x: 98, y: 5, s: 2, d: 1.4 },
-];
+const WAVE_URLS = [wave1Url, wave2Url, wave3Url, wave4Url, wave5Url, wave6Url, wave7Url, wave8Url];
 
-// Орион (июльское «лежачее» положение): некрупные звёзды, без соединительных линий.
-interface OrionStar {
-    x: number;
-    y: number;
-    r: number;
-    tone: 'warm' | 'cool' | 'plain';
+// Статичная раскладка бликов-волн: позиции в % слоя моря, ниже — крупнее (перспектива).
+interface WavePlacement {
+    variant: number;
+    left: number;
+    top: number;
+    width: number;
+    flip?: boolean;
 }
 
-const ORION_STARS: OrionStar[] = [
-    { x: 20, y: 9, r: 1.3, tone: 'warm' }, // Бетельгейзе
-    { x: 39, y: 5, r: 1, tone: 'plain' }, // Беллатрикс
-    { x: 26, y: 21, r: 0.9, tone: 'plain' }, // Альнитак (пояс)
-    { x: 31, y: 24, r: 0.95, tone: 'plain' }, // Альнилам (пояс)
-    { x: 36, y: 27, r: 0.9, tone: 'plain' }, // Минтака (пояс)
-    { x: 32, y: 33, r: 0.5, tone: 'plain' }, // меч
-    { x: 24, y: 39, r: 1, tone: 'plain' }, // Саиф
-    { x: 45, y: 36, r: 1.35, tone: 'cool' }, // Ригель
+const WAVE_PLACEMENTS: WavePlacement[] = [
+    { variant: 3, left: 8, top: 6, width: 120 },
+    { variant: 7, left: 46, top: 4, width: 100, flip: true },
+    { variant: 1, left: 74, top: 9, width: 140 },
+    { variant: 6, left: 24, top: 16, width: 150 },
+    { variant: 8, left: 60, top: 20, width: 170, flip: true },
+    { variant: 2, left: 4, top: 28, width: 180 },
+    { variant: 4, left: 42, top: 33, width: 200 },
+    { variant: 5, left: 78, top: 38, width: 190 },
+    { variant: 1, left: 14, top: 48, width: 230, flip: true },
+    { variant: 3, left: 56, top: 55, width: 260 },
+    { variant: 8, left: 6, top: 66, width: 280 },
+    { variant: 4, left: 66, top: 72, width: 300, flip: true },
+    { variant: 2, left: 30, top: 82, width: 340 },
+    { variant: 7, left: 70, top: 90, width: 320, flip: true },
 ];
-
-const ORION_TONE_CLASS: Record<OrionStar['tone'], string> = {
-    warm: styles.orionWarm,
-    cool: styles.orionCool,
-    plain: styles.orionStar,
-};
-
-// Волны: катятся из-за горизонта к наблюдателю, вырастая по пути (см. keyframes wave-roll).
-const WAVE_PERIOD_S = 18;
-const WAVES = [0, 1, 2, 3, 4, 5].map((index, _, all) => ({
-    delay: -(index * WAVE_PERIOD_S) / all.length,
-    shift: (index % 3) * 17 - 17,
-}));
-
-function IslandSilhouette({ className }: { className: string }) {
-    return (
-        <svg className={className} viewBox="0 0 240 80" preserveAspectRatio="xMinYMax meet" aria-hidden="true">
-            <path
-                className={styles.islandBack}
-                d="M0 80 L0 52 Q30 38 62 46 Q96 30 134 44 Q172 36 200 52 Q222 66 240 78 L240 80 Z"
-            />
-            <g className={styles.islandFront}>
-                <path d="M0 80 L0 62 Q50 54 110 60 Q170 58 214 72 Q228 77 240 80 Z" />
-                <path d="M12 62 L17 40 L22 62 Z" />
-                <path d="M26 62 L32 34 L38 62 Z" />
-                <path d="M44 61 L49 44 L54 61 Z" />
-                <path d="M58 60 L64 38 L70 60 Z" />
-                <path d="M80 60 L85 46 L90 60 Z" />
-                <path d="M96 60 L101 48 L106 60 Z" />
-            </g>
-        </svg>
-    );
-}
 
 interface SeaSceneProps {
     participants: Participant[];
@@ -104,7 +75,7 @@ interface SeaSceneProps {
     morseFeeds: Partial<Record<string, MorseFeed>>;
 }
 
-/** Ночное море: звёзды с Орионом, месяц с дорожкой, остров с соснами, волны и корабли на рейде. */
+/** Ночное море из отдельных слоёв-ассетов: небо, звёзды, месяц, облака, острова, волны, корабли. */
 export default function SeaScene({ participants, viewerId, morseFeeds }: SeaSceneProps) {
     const viewer = participants.find((participant) => participant.id === viewerId);
     const others = participants
@@ -135,63 +106,38 @@ export default function SeaScene({ participants, viewerId, morseFeeds }: SeaScen
 
     return (
         <div className={styles.scene}>
-            <div className={styles.sky}>
-                {STARS.map((star) => (
-                    <i
-                        key={`${star.x}-${star.y}`}
-                        className={styles.star}
+            <img className={styles.sky} src={skyUrl} alt="" />
+            <img className={styles.stars} src={starsUrl} alt="" />
+            <img className={styles.orion} src={orionUrl} alt="" />
+            <img className={styles.moon} src={moonUrl} alt="" />
+            <img className={styles.cloudLeft} src={cloud1Url} alt="" />
+            <img className={styles.cloudRight} src={cloud2Url} alt="" />
+            <img className={styles.islandFar} src={islandFarUrl} alt="" />
+            <img className={styles.islandMid} src={islandMidUrl} alt="" />
+            <img className={styles.islandNear} src={islandNearUrl} alt="" />
+            <img className={styles.sea} src={seaUrl} alt="" />
+            <img className={styles.islandReflection} src={islandNearUrl} alt="" />
+            <div className={styles.waves}>
+                {WAVE_PLACEMENTS.map((wave) => (
+                    <img
+                        key={`${wave.variant}-${wave.left}-${wave.top}`}
+                        className={styles.wave}
+                        src={WAVE_URLS[wave.variant - 1]}
                         style={{
-                            left: `${star.x}%`,
-                            top: `${star.y}%`,
-                            width: star.s,
-                            height: star.s,
-                            animationDelay: `${star.d}s`,
+                            left: `${wave.left}%`,
+                            top: `${wave.top}%`,
+                            width: wave.width,
+                            transform: wave.flip ? 'translateX(-50%) scaleX(-1)' : 'translateX(-50%)',
                         }}
+                        alt=""
                     />
                 ))}
-                <svg
-                    className={styles.orion}
-                    viewBox="0 0 100 60"
-                    preserveAspectRatio="xMidYMid meet"
-                    aria-hidden="true"
-                >
-                    {ORION_STARS.map((star) => (
-                        <circle
-                            key={`${star.x}-${star.y}`}
-                            className={ORION_TONE_CLASS[star.tone]}
-                            cx={star.x}
-                            cy={star.y}
-                            r={star.r}
-                        />
-                    ))}
-                </svg>
-                <svg className={styles.moon} viewBox="0 0 60 60" aria-hidden="true">
-                    <mask id="moon-crescent">
-                        <rect width="60" height="60" fill="#fff" />
-                        <circle cx="41" cy="23" r="19" fill="#000" />
-                    </mask>
-                    <circle cx="30" cy="30" r="21" fill="#f5efd8" mask="url(#moon-crescent)" />
-                </svg>
-                <IslandSilhouette className={styles.island} />
-            </div>
-            <div className={styles.water}>
-                <div className={styles.moonGlade} />
-                <IslandSilhouette className={styles.islandReflection} />
             </div>
             <div className={styles.reflections}>
                 {placed.map((item) => (
                     <div key={item.participant.id} className={styles.reflectionSlot} style={slotStyle(item)}>
                         <ShipReflection kind={item.participant.shipKind} facing={item.slot.facing} />
                     </div>
-                ))}
-            </div>
-            <div className={styles.waves}>
-                {WAVES.map((wave) => (
-                    <i
-                        key={wave.delay}
-                        className={styles.wave}
-                        style={{ animationDelay: `${wave.delay}s`, marginLeft: `${wave.shift}%` }}
-                    />
                 ))}
             </div>
             {placed.map((item) => (
@@ -213,6 +159,7 @@ export default function SeaScene({ participants, viewerId, morseFeeds }: SeaScen
                     </div>
                 </div>
             ))}
+            <div className={styles.bottomFade} />
         </div>
     );
 }

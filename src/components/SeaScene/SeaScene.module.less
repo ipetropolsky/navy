@@ -5,130 +5,128 @@
     height: 100%;
     overflow: hidden;
     user-select: none;
+
+    img {
+        pointer-events: none;
+    }
 }
 
+// Базовые градиенты — отдельные файлы, растянутые по слоям.
 .sky {
     position: absolute;
     inset: 0 0 (100% - @horizon);
-    background: linear-gradient(180deg, #050f26 0%, #0b2348 58%, #1c4674 92%, #275685 100%);
+    width: 100%;
+    height: @horizon;
+    object-fit: fill;
 }
 
-.star {
+.sea {
     position: absolute;
-    border-radius: 50%;
-    background: #d7e6f5;
-    opacity: 0.7;
-    animation: twinkle 4.5s ease-in-out infinite;
+    inset: @horizon 0 0;
+    width: 100%;
+    height: (100% - @horizon);
+    object-fit: fill;
 }
 
-@keyframes twinkle {
-    0%,
-    100% {
-        opacity: 0.75;
-    }
-
-    50% {
-        opacity: 0.2;
-    }
+.stars {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 50%;
+    object-fit: cover;
+    opacity: 0.95;
+    mask-image: linear-gradient(180deg, #000 55%, transparent 100%);
 }
 
 .orion {
     position: absolute;
-    top: 5%;
-    left: 24%;
-    width: 42%;
-    height: 42%;
-    overflow: visible;
-}
-
-.orionStar {
-    fill: #e9f1fb;
-    animation: twinkle 5s ease-in-out infinite;
-}
-
-.orionWarm {
-    fill: #ffd6ac;
-    filter: drop-shadow(0 0 1.2px rgba(255, 214, 172, 0.7));
-}
-
-.orionCool {
-    fill: #d2e2ff;
-    filter: drop-shadow(0 0 1.4px rgba(210, 226, 255, 0.75));
+    top: 3%;
+    left: 41%;
+    width: 132px;
+    height: auto;
 }
 
 .moon {
     position: absolute;
     top: 10%;
-    left: 76%;
-    width: 52px;
-    height: 52px;
-    filter: drop-shadow(0 0 14px rgba(245, 239, 216, 0.5)) drop-shadow(0 0 42px rgba(245, 239, 216, 0.2));
+    left: 8%;
+    width: 92px;
+    height: auto;
 }
 
-.island {
+.cloudLeft {
     position: absolute;
-    bottom: -1px;
-    left: 0;
-    width: 168px;
-    height: 54px;
+    top: 30%;
+    left: 34%;
+    width: 52%;
+    height: auto;
+    opacity: 0.75;
 }
 
-.islandBack {
-    fill: #1c3a5f;
+.cloudRight {
+    position: absolute;
+    top: 16%;
+    left: 56%;
+    width: 48%;
+    height: auto;
+    opacity: 0.6;
 }
 
-.islandFront {
-    fill: #081831;
+// Острова: три плана, каждый можно двигать отдельно.
+.islandFar {
+    position: absolute;
+    bottom: (100% - @horizon);
+    left: -2%;
+    width: 46%;
+    max-width: 420px;
+    height: auto;
+}
+
+.islandMid {
+    position: absolute;
+    bottom: (100% - @horizon);
+    left: 4%;
+    width: 34%;
+    max-width: 300px;
+    height: auto;
+}
+
+.islandNear {
+    position: absolute;
+    bottom: calc(100% - @horizon - 3px);
+    left: -3%;
+    width: 26%;
+    max-width: 230px;
+    height: auto;
 }
 
 .islandReflection {
     position: absolute;
-    top: 0;
-    left: 0;
-    width: 168px;
-    height: 32px;
-    transform: scaleY(-1);
-    opacity: 0.16;
+    top: @horizon;
+    left: -3%;
+    width: 26%;
+    max-width: 230px;
+    height: auto;
+    transform: scaleY(-0.6);
+    transform-origin: top;
+    opacity: 0.2;
     filter: blur(2px);
 }
 
-.water {
+// Статичные блики-волны (анимацию добавим отдельным шагом).
+.waves {
     position: absolute;
     inset: @horizon 0 0;
-    overflow: hidden;
-    background: linear-gradient(180deg, #2c5b8b 0%, #1b3f66 30%, #0e2846 65%, #081830 100%);
+    pointer-events: none;
 }
 
-.moonGlade {
+.wave {
     position: absolute;
-    top: 0;
-    bottom: 0;
-    left: calc(76% - 26px);
-    width: 104px;
-    background: linear-gradient(180deg, rgba(247, 239, 214, 0.28) 0%, rgba(247, 239, 214, 0.07) 55%, transparent 92%);
-    filter: blur(3px);
-    mask-image: radial-gradient(60% 160% at 50% 0%, rgba(0, 0, 0, 0.9) 30%, transparent 75%);
-
-    &::after {
-        content: '';
-        position: absolute;
-        inset: 0;
-        background: repeating-linear-gradient(180deg, rgba(4, 12, 24, 0.5) 0 2px, transparent 2px 5px);
-        animation: glade-shimmer 7s linear infinite;
-    }
+    height: auto;
 }
 
-@keyframes glade-shimmer {
-    from {
-        background-position-y: 0;
-    }
-
-    to {
-        background-position-y: 24px;
-    }
-}
-
-// Зеркальные отражения кораблей: под волнами, привязаны к тем же слотам, что и корабли.
+// Зеркальные отражения кораблей.
 .reflections {
     position: absolute;
     inset: 0;
@@ -141,52 +139,6 @@
     opacity: 0.3;
     filter: blur(2px);
     mask-image: linear-gradient(0deg, rgba(0, 0, 0, 0.85) 50%, transparent 90%);
-}
-
-// Слой волн: над отражениями, под кораблями.
-.waves {
-    position: absolute;
-    inset: @horizon 0 0;
-    overflow: hidden;
-    pointer-events: none;
-}
-
-// Волна: мягкий световой гребень, катится от горизонта вниз и вырастает (перспектива).
-.wave {
-    position: absolute;
-    top: 0;
-    left: -12%;
-    right: -12%;
-    height: 22px;
-    border-radius: 50%;
-    background: linear-gradient(180deg, rgba(163, 203, 240, 0.28) 0%, rgba(163, 203, 240, 0.07) 45%, transparent 75%);
-    mask-image: repeating-linear-gradient(90deg, #000 0 110px, rgba(0, 0, 0, 0.3) 110px 170px, #000 170px 240px);
-    filter: blur(1px);
-    opacity: 0;
-    animation: wave-roll 18s cubic-bezier(0.45, 0.1, 0.85, 0.6) infinite;
-}
-
-@keyframes wave-roll {
-    0% {
-        top: -4%;
-        transform: scale(0.35, 0.25);
-        opacity: 0;
-    }
-
-    12% {
-        opacity: 0.4;
-    }
-
-    70% {
-        opacity: 0.55;
-        transform: scale(0.85, 0.85);
-    }
-
-    100% {
-        top: 97%;
-        transform: scale(1.2, 1.5);
-        opacity: 0;
-    }
 }
 
 .shipSlot {
@@ -207,6 +159,14 @@
     to {
         transform: translateY(2px);
     }
+}
+
+// Мягкий переход из сцены в ленту чата.
+.bottomFade {
+    position: absolute;
+    inset: auto 0 0;
+    height: 16px;
+    background: linear-gradient(180deg, transparent, rgba(8, 21, 36, 0.55));
 }
 
 @media (prefers-reduced-motion: reduce) {
