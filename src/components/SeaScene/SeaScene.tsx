@@ -1,4 +1,5 @@
 import Ship from '@/components/ships/Ship';
+import { AUTHOR_COLORS } from '@/data/demo';
 import { MorseFeed, Participant } from '@/types/chat';
 
 import styles from './SeaScene.module.less';
@@ -20,27 +21,58 @@ const OTHER_SLOTS: SceneSlot[] = [
     { left: 85, depth: 0.16, facing: 'right' },
 ];
 
+// Рассеянные фоновые звёзды (чистое небо, как над Каспием летней ночью).
 const STARS = [
     { x: 4, y: 12, s: 2, d: 0 },
     { x: 9, y: 34, s: 1, d: 1.2 },
     { x: 14, y: 8, s: 1, d: 2.1 },
-    { x: 19, y: 26, s: 2, d: 0.6 },
-    { x: 24, y: 15, s: 1, d: 2.8 },
-    { x: 29, y: 38, s: 1, d: 1.7 },
-    { x: 33, y: 6, s: 2, d: 0.3 },
-    { x: 38, y: 22, s: 1, d: 2.4 },
-    { x: 43, y: 33, s: 1, d: 1.1 },
-    { x: 47, y: 11, s: 2, d: 3.2 },
-    { x: 52, y: 28, s: 1, d: 0.9 },
-    { x: 57, y: 7, s: 1, d: 2.0 },
-    { x: 61, y: 19, s: 2, d: 1.5 },
-    { x: 76, y: 30, s: 1, d: 0.4 },
-    { x: 81, y: 9, s: 1, d: 2.6 },
-    { x: 86, y: 24, s: 2, d: 1.9 },
-    { x: 91, y: 14, s: 1, d: 0.8 },
-    { x: 95, y: 36, s: 1, d: 3.0 },
-    { x: 98, y: 5, s: 2, d: 1.4 },
+    { x: 7, y: 22, s: 1, d: 0.6 },
+    { x: 12, y: 44, s: 1, d: 2.8 },
+    { x: 18, y: 16, s: 1, d: 1.7 },
+    { x: 21, y: 40, s: 1, d: 0.3 },
+    { x: 46, y: 40, s: 1, d: 2.4 },
+    { x: 49, y: 18, s: 1, d: 1.1 },
+    { x: 54, y: 34, s: 1, d: 3.2 },
+    { x: 52, y: 9, s: 2, d: 0.9 },
+    { x: 58, y: 24, s: 1, d: 2.0 },
+    { x: 62, y: 13, s: 1, d: 1.5 },
+    { x: 66, y: 32, s: 1, d: 0.4 },
+    { x: 72, y: 20, s: 1, d: 2.6 },
+    { x: 78, y: 10, s: 2, d: 1.9 },
+    { x: 83, y: 28, s: 1, d: 0.8 },
+    { x: 88, y: 16, s: 1, d: 3.0 },
+    { x: 92, y: 38, s: 1, d: 1.4 },
+    { x: 96, y: 22, s: 1, d: 2.3 },
+    { x: 89, y: 44, s: 1, d: 0.5 },
 ];
+
+// Орион в положении «лёжа», как он виден над Каспием в июле перед рассветом (низко, боком).
+// Координаты в системе SVG-слоя (0..100 × 0..60), яркость r — по звёздной величине.
+interface OrionStar {
+    x: number;
+    y: number;
+    r: number;
+    tone: 'warm' | 'cool' | 'plain';
+}
+
+const ORION_STARS: OrionStar[] = [
+    { x: 20, y: 9, r: 2.3, tone: 'warm' }, // Бетельгейзе
+    { x: 39, y: 5, r: 1.9, tone: 'plain' }, // Беллатрикс
+    { x: 26, y: 21, r: 1.7, tone: 'plain' }, // Альнитак (пояс)
+    { x: 31, y: 24, r: 1.8, tone: 'plain' }, // Альнилам (пояс)
+    { x: 36, y: 27, r: 1.7, tone: 'plain' }, // Минтака (пояс)
+    { x: 32, y: 33, r: 0.9, tone: 'plain' }, // меч
+    { x: 24, y: 39, r: 1.9, tone: 'plain' }, // Саиф
+    { x: 45, y: 36, r: 2.4, tone: 'cool' }, // Ригель
+];
+
+const ORION_TONE_CLASS: Record<OrionStar['tone'], string> = {
+    warm: styles.orionWarm,
+    cool: styles.orionCool,
+    plain: styles.orionStar,
+};
+
+const ORION_BELT = ORION_STARS.slice(2, 5);
 
 interface SeaSceneProps {
     participants: Participant[];
@@ -82,6 +114,26 @@ export default function SeaScene({ participants, viewerId, morseFeeds }: SeaScen
                         }}
                     />
                 ))}
+                <svg
+                    className={styles.orion}
+                    viewBox="0 0 100 60"
+                    preserveAspectRatio="xMidYMid meet"
+                    aria-hidden="true"
+                >
+                    <polyline
+                        className={styles.orionBelt}
+                        points={ORION_BELT.map((star) => `${star.x},${star.y}`).join(' ')}
+                    />
+                    {ORION_STARS.map((star) => (
+                        <circle
+                            key={`${star.x}-${star.y}`}
+                            className={ORION_TONE_CLASS[star.tone]}
+                            cx={star.x}
+                            cy={star.y}
+                            r={star.r}
+                        />
+                    ))}
+                </svg>
                 <div className={styles.cloud} />
                 <div className={styles.moon} />
                 <svg className={styles.island} viewBox="0 0 160 40" preserveAspectRatio="none" aria-hidden="true">
@@ -111,6 +163,7 @@ export default function SeaScene({ participants, viewerId, morseFeeds }: SeaScen
                             facing={slot.facing}
                             active={participant.id === viewerId}
                             depth={slot.depth}
+                            nameColor={AUTHOR_COLORS[participants.indexOf(participant) % AUTHOR_COLORS.length]}
                             morseFeed={morseFeeds[participant.id] ?? null}
                         />
                         <div className={participant.id === viewerId ? styles.reflectionActive : styles.reflection} />

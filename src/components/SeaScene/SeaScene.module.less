@@ -67,6 +67,36 @@
         0 0 70px 30px rgba(248, 240, 212, 0.1);
 }
 
+.orion {
+    position: absolute;
+    top: 4%;
+    left: 8%;
+    width: 50%;
+    height: 46%;
+    overflow: visible;
+}
+
+.orionStar {
+    fill: #e9f1fb;
+    animation: twinkle 5s ease-in-out infinite;
+}
+
+.orionWarm {
+    fill: #ffd6ac;
+    filter: drop-shadow(0 0 1.4px rgba(255, 214, 172, 0.8));
+}
+
+.orionCool {
+    fill: #d2e2ff;
+    filter: drop-shadow(0 0 1.6px rgba(210, 226, 255, 0.85));
+}
+
+.orionBelt {
+    fill: none;
+    stroke: rgba(200, 220, 245, 0.22);
+    stroke-width: 0.4;
+}
+
 .island {
     position: absolute;
     bottom: -2px;
@@ -82,15 +112,8 @@
 .water {
     position: absolute;
     inset: @horizon 0 0;
+    overflow: hidden;
     background: linear-gradient(180deg, #123152 0%, #0b2138 34%, #071527 70%, #040d19 100%);
-
-    &::before {
-        content: '';
-        position: absolute;
-        inset: 0;
-        background: repeating-linear-gradient(180deg, rgba(150, 194, 232, 0.055) 0 1px, transparent 1px 7px);
-        mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.9), transparent 65%);
-    }
 }
 
 .moonGlade {
@@ -122,21 +145,91 @@
     }
 }
 
+// Переливающиеся блики: прерывистые светлые и тёмные штрихи, медленно сменяющие друг друга.
 .ripples {
     position: absolute;
     inset: 0;
-    background: linear-gradient(90deg, transparent 0%, rgba(140, 184, 226, 0.05) 35%, transparent 60%);
-    background-size: 200% 100%;
-    animation: ripple-drift 26s ease-in-out infinite alternate;
+
+    &::before,
+    &::after {
+        content: '';
+        position: absolute;
+        inset: -6% -25%;
+        // Прерывистость: пересечение вертикального затухания (у горизонта и внизу)
+        // и мягких горизонтальных «окон», превращающих линии в отдельные блики-штрихи.
+        mask-composite: intersect;
+        -webkit-mask-composite: source-in;
+    }
+
+    // Светлые блики (лёгкий наклон, чтобы «дышали», а не лежали строго горизонтально).
+    &::before {
+        background: repeating-linear-gradient(178.6deg, rgba(156, 200, 238, 0.13) 0 1.4px, transparent 1.4px 10px);
+        mask-image:
+            linear-gradient(180deg, transparent 2%, #000 22%, #000 66%, transparent 96%),
+            repeating-linear-gradient(90.4deg, transparent 0 7px, #000 16px 26px, transparent 35px 46px);
+        -webkit-mask-image:
+            linear-gradient(180deg, transparent 2%, #000 22%, #000 66%, transparent 96%),
+            repeating-linear-gradient(90.4deg, transparent 0 7px, #000 16px 26px, transparent 35px 46px);
+        animation:
+            shimmer-light 10s ease-in-out infinite alternate,
+            drift-left 46s linear infinite;
+    }
+
+    // Тёмные разрывы между бликами, в противофазе к светлым.
+    &::after {
+        background: repeating-linear-gradient(181.4deg, rgba(3, 10, 20, 0.55) 0 1.6px, transparent 1.6px 12px);
+        mask-image:
+            linear-gradient(180deg, transparent 2%, #000 22%, #000 66%, transparent 96%),
+            repeating-linear-gradient(89.6deg, transparent 0 9px, #000 18px 30px, transparent 40px 52px);
+        -webkit-mask-image:
+            linear-gradient(180deg, transparent 2%, #000 22%, #000 66%, transparent 96%),
+            repeating-linear-gradient(89.6deg, transparent 0 9px, #000 18px 30px, transparent 40px 52px);
+        animation:
+            shimmer-dark 10s ease-in-out infinite alternate,
+            drift-right 62s linear infinite;
+        animation-delay: -5s;
+    }
 }
 
-@keyframes ripple-drift {
+@keyframes shimmer-light {
+    0%,
+    100% {
+        opacity: 0.35;
+    }
+
+    50% {
+        opacity: 0.9;
+    }
+}
+
+@keyframes shimmer-dark {
+    0%,
+    100% {
+        opacity: 0.85;
+    }
+
+    50% {
+        opacity: 0.3;
+    }
+}
+
+@keyframes drift-left {
     from {
-        background-position-x: 0%;
+        transform: translateX(0);
     }
 
     to {
-        background-position-x: 100%;
+        transform: translateX(-40px);
+    }
+}
+
+@keyframes drift-right {
+    from {
+        transform: translateX(0);
+    }
+
+    to {
+        transform: translateX(34px);
     }
 }
 

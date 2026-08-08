@@ -104,7 +104,7 @@ export default function App() {
                         <div className={styles.chatTitle}>{DEMO_CHAT_TITLE}</div>
                         <div className={styles.chatStatus}>
                             {typingParticipant && typingParticipant.id !== viewerId
-                                ? `«${typingParticipant.name}» печатает…`
+                                ? `«${typingParticipant.name}» передаёт…`
                                 : `${participants.length} на связи · ты — «${viewer.name}»`}
                         </div>
                     </div>

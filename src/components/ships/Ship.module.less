@@ -5,7 +5,12 @@
     overflow: visible;
 }
 
+.body {
+    fill: var(--color-ship);
+}
+
 .rig {
+    stroke: var(--color-ship);
     stroke-width: 2.5;
     stroke-linecap: round;
     fill: none;
@@ -49,13 +54,11 @@
 }
 
 .name {
-    fill: #b6d1ea;
-    font-family: 'Roboto Slab', serif;
+    // Как имена в чате: Roboto, тот же вес; чуть прозрачное, чтобы силуэт слегка притемнял цвет.
+    font-family: 'Roboto', sans-serif;
     font-weight: 500;
-    letter-spacing: 1.5px;
-    paint-order: stroke;
-    stroke: rgba(3, 9, 18, 0.45);
-    stroke-width: 2px;
+    fill-opacity: 0.82;
+    letter-spacing: 0.3px;
 }
 
 .avatar {
