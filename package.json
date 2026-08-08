@@ -1,0 +1,52 @@
+{
+  "name": "project-template",
+  "description": "Static project template with TS, linter, formatter, etc.",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "ts-check": "tsc --noEmit",
+    "lint": "eslint --fix .",
+    "lint-check": "eslint .",
+    "lint-files": "eslint --fix",
+    "lint-files-check": "eslint",
+    "format": "prettier --write --ignore-unknown .",
+    "format-check": "prettier --check --ignore-unknown .",
+    "format-files": "prettier --write --ignore-unknown",
+    "format-files-check": "prettier --check --ignore-unknown",
+    "check": "npm run ts-check && npm run lint-check && npm run format-check",
+    "check-and-fix": "npm run lint && npm run format",
+    "deploy": "npm run build && gh-pages -d build",
+    "deps-latest": "node tools/get-latest-deps.cjs",
+    "lint-staged": "lint-staged",
+    "postinstall": "cp tools/githooks/* .git/hooks || true"
+  },
+  "engines": {
+    "node": ">22.0.0"
+  },
+  "dependencies": {
+    "modern-normalize": "3.0.1",
+    "react": "19.2.4",
+    "react-dom": "19.2.4"
+  },
+  "devDependencies": {
+    "@hh.ru/eslint-config": "18.1.5",
+    "@types/node": "25.5.0",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react-swc": "4.3.0",
+    "autoprefixer": "10.4.27",
+    "eslint": "9.39.4",
+    "eslint-config-prettier": "10.1.8",
+    "gh-pages": "6.3.0",
+    "globals": "17.4.0",
+    "less": "4.6.4",
+    "lint-staged": "16.4.0",
+    "postcss": "8.5.8",
+    "prettier": "3.8.1",
+    "typescript": "6.0.2",
+    "vite": "8.0.3"
+  }
+}
