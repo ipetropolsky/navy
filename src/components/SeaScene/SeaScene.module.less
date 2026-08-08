@@ -12,24 +12,72 @@
     }
 }
 
-// Небо и вода — отдельные слои. Пропорции картинок сохраняем (object-fit: cover),
-// лишнее обрезается: у неба прижимаем нижний край к горизонту, у воды — верхний.
+// Небо — текстура из повторяющейся картинки: соседние плитки зеркальны, поэтому стыков не видно.
+// Ряд сдвинут вправо на треть плитки. Месяц и облака лежат отдельными слоями и не двигаются.
 .sky {
     position: absolute;
     inset: 0 0 auto;
-    width: 100%;
     height: @horizon;
-    object-fit: cover;
-    object-position: center bottom;
+    overflow: hidden;
 }
 
+// Полоса центрирована по сцене; сдвиг вправо на треть плитки — это +11.111% от ширины полосы.
+// Двигать небо влево-вправо можно, меняя это слагаемое.
+.skyStrip {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    height: 100%;
+    display: flex;
+    width: max-content;
+    transform: translateX(calc(-50% + 11.111%));
+}
+
+.skyTile {
+    display: block;
+    height: 100%;
+    width: auto;
+    // Перекрытие в пиксель убирает щель от дробной ширины картинок.
+    margin-right: -1px;
+}
+
+.skyTileMirrored {
+    .skyTile();
+
+    transform: scaleX(-1);
+}
+
+// Вода собрана так же, как небо: три плитки в ряд (зеркальная, обычная, зеркальная),
+// полосу можно двигать по горизонтали, меняя translateX у .seaStrip.
 .sea {
     position: absolute;
     inset: @horizon 0 0;
-    width: 100%;
-    height: (100% - @horizon);
-    object-fit: cover;
-    object-position: center top;
+    overflow: hidden;
+}
+
+// Полоса центрирована: лунная дорожка на воде оказывается под месяцем.
+// Двигать воду влево-вправо — слагаемым в translateX.
+.seaStrip {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    height: 100%;
+    display: flex;
+    width: max-content;
+    transform: translateX(-50%);
+}
+
+.seaTile {
+    display: block;
+    height: 100%;
+    width: auto;
+    margin-right: -1px;
+}
+
+.seaTileMirrored {
+    .seaTile();
+
+    transform: scaleX(-1);
 }
 
 // Месяц вырезан отдельным слоем: стоит примерно по центру, над лунной дорожкой на воде.
@@ -61,42 +109,47 @@
     opacity: 0.6;
 }
 
-// Остров стоит на линии горизонта, основание уходит под воду.
-.island {
+// Остров крупный и уходит за левый край: в кадре остаётся правая треть.
+// Стоит не на горизонте, а ближе — на воде, поэтому за ним видно море.
+.islandGroup {
     position: absolute;
-    bottom: calc(100% - @horizon - 4px);
-    left: 2%;
-    width: 34%;
-    max-width: 330px;
+    left: -60%; // -2/3 ширины: видна правая треть
+    bottom: 34%;
+    width: 90%;
+}
+
+.island {
+    display: block;
+    width: 100%;
     height: auto;
 }
 
 .islandReflection {
     position: absolute;
-    top: @horizon;
-    left: 2%;
-    width: 34%;
-    max-width: 330px;
+    top: 100%;
+    left: 0;
+    width: 100%;
     height: auto;
-    transform: scaleY(-0.5);
+    transform: scaleY(-0.55);
     transform-origin: top;
-    opacity: 0.16;
+    opacity: 0.22;
+    filter: blur(2.5px);
+    mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.85), transparent 75%);
+}
+
+// Под кораблём — не зеркальное отражение, а тёмное пятно вытянутой формы:
+// на почти чёрной воде это читается лучше и стоит дешевле.
+.shipShadow {
+    position: absolute;
+    left: 50%;
+    bottom: -4%;
+    width: 86%;
+    aspect-ratio: 7 / 1;
+    transform: translateX(-50%);
+    border-radius: 50%;
+    background: radial-gradient(ellipse at center, rgba(2, 8, 18, 0.55) 0%, rgba(2, 8, 18, 0.28) 55%, transparent 78%);
     filter: blur(2px);
-}
-
-// Отражения кораблей под слоем воды по тем же слотам, что и сами корабли.
-.reflections {
-    position: absolute;
-    inset: 0;
     pointer-events: none;
-}
-
-.reflectionSlot {
-    position: absolute;
-    transform: translate(-50%, 97%);
-    opacity: 0.18;
-    filter: blur(1.6px);
-    mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.9), transparent 70%);
 }
 
 .shipSlot {

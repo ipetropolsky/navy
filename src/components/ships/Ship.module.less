@@ -33,11 +33,13 @@
     pointer-events: none;
 }
 
+// Размеры огней заданы в долях ширины спрайта (cqw), поэтому работает перспектива:
+// дальний корабль мельче — и лампочка у него мельче.
 .lamp {
     position: absolute;
-    width: 6px;
-    height: 6px;
-    margin: -3px 0 0 -3px;
+    width: max(1.5px, 1.15cqw);
+    height: max(1.5px, 1.15cqw);
+    transform: translate(-50%, -50%);
     border-radius: 50%;
     background: var(--color-lamp);
     opacity: 0.12;
@@ -47,15 +49,15 @@
 .lampOn {
     opacity: 1;
     box-shadow:
-        0 0 6px 2px rgba(255, 233, 168, 0.55),
-        0 0 16px 6px rgba(255, 233, 168, 0.25);
+        0 0 1.2cqw 0.4cqw rgba(255, 233, 168, 0.55),
+        0 0 3cqw 1.1cqw rgba(255, 233, 168, 0.25);
 }
 
 .bowLight {
     position: absolute;
-    width: 4px;
-    height: 4px;
-    margin: -2px 0 0 -2px;
+    width: max(1.2px, 0.8cqw);
+    height: max(1.2px, 0.8cqw);
+    transform: translate(-50%, -50%);
     border-radius: 50%;
     background: #7be3a2;
     opacity: 0.12;
@@ -70,20 +72,7 @@
 
 .lightOn {
     opacity: 0.95;
-    box-shadow: 0 0 5px 1px currentcolor;
-}
-
-.reflection {
-    display: block;
-    width: 100%;
-    height: auto;
-    transform: scaleY(-1);
-}
-
-.reflectionFlipped {
-    .reflection();
-
-    transform: scale(-1, -1);
+    box-shadow: 0 0 1cqw 0.2cqw currentcolor;
 }
 
 // Бортовой номер вместо аватарки участника.

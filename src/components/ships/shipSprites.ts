@@ -22,7 +22,7 @@ export const SHIP_SPRITES: Record<ShipKind, ShipSprite> = {
     corvette: {
         url: corvetteUrl,
         scale: 1,
-        lamp: { x: 55.4, y: 1 },
+        lamp: { x: 55.85, y: 1.2 },
         bowLight: { x: 6, y: 85 },
         sternLight: { x: 97, y: 85 },
         hullNumber: { x: 22, y: 87 },
@@ -30,7 +30,7 @@ export const SHIP_SPRITES: Record<ShipKind, ShipSprite> = {
     missile: {
         url: frigateUrl,
         scale: 0.82,
-        lamp: { x: 53.3, y: 1.1 },
+        lamp: { x: 53.4, y: 1.3 },
         bowLight: { x: 6, y: 85 },
         sternLight: { x: 97, y: 85 },
         hullNumber: { x: 23, y: 87 },
@@ -38,7 +38,7 @@ export const SHIP_SPRITES: Record<ShipKind, ShipSprite> = {
     patrol: {
         url: patrolUrl,
         scale: 0.68,
-        lamp: { x: 55.2, y: 1 },
+        lamp: { x: 55.5, y: 1.2 },
         bowLight: { x: 6, y: 85 },
         sternLight: { x: 97, y: 85 },
         hullNumber: { x: 22, y: 86 },
@@ -46,7 +46,7 @@ export const SHIP_SPRITES: Record<ShipKind, ShipSprite> = {
     minesweeper: {
         url: patrolUrl,
         scale: 0.78,
-        lamp: { x: 55.2, y: 1 },
+        lamp: { x: 55.5, y: 1.2 },
         bowLight: { x: 6, y: 85 },
         sternLight: { x: 97, y: 85 },
         hullNumber: { x: 22, y: 86 },
@@ -54,7 +54,7 @@ export const SHIP_SPRITES: Record<ShipKind, ShipSprite> = {
     torpedo: {
         url: frigateUrl,
         scale: 0.55,
-        lamp: { x: 53.3, y: 1.1 },
+        lamp: { x: 53.4, y: 1.3 },
         bowLight: { x: 6, y: 85 },
         sternLight: { x: 97, y: 85 },
         hullNumber: { x: 23, y: 87 },
