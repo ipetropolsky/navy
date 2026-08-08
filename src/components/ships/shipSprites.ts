@@ -5,8 +5,6 @@ import { ShipKind } from '@/types/chat';
 
 export interface ShipSprite {
     url: string;
-    /** Пропорции спрайта, чтобы резервировать место до загрузки картинки. */
-    ratio: number;
     /** Относительный размер в сцене (крупный корабль = 1). */
     scale: number;
     /** Сигнальная лампа — верхняя точка мачты, % от размеров спрайта. */
@@ -23,7 +21,6 @@ export interface ShipSprite {
 export const SHIP_SPRITES: Record<ShipKind, ShipSprite> = {
     corvette: {
         url: corvetteUrl,
-        ratio: 3.005,
         scale: 1,
         lamp: { x: 55.4, y: 1 },
         bowLight: { x: 6, y: 85 },
@@ -32,7 +29,6 @@ export const SHIP_SPRITES: Record<ShipKind, ShipSprite> = {
     },
     missile: {
         url: frigateUrl,
-        ratio: 3.264,
         scale: 0.82,
         lamp: { x: 53.3, y: 1.1 },
         bowLight: { x: 6, y: 85 },
@@ -41,7 +37,6 @@ export const SHIP_SPRITES: Record<ShipKind, ShipSprite> = {
     },
     patrol: {
         url: patrolUrl,
-        ratio: 3.099,
         scale: 0.68,
         lamp: { x: 55.2, y: 1 },
         bowLight: { x: 6, y: 85 },
@@ -50,7 +45,6 @@ export const SHIP_SPRITES: Record<ShipKind, ShipSprite> = {
     },
     minesweeper: {
         url: patrolUrl,
-        ratio: 3.099,
         scale: 0.78,
         lamp: { x: 55.2, y: 1 },
         bowLight: { x: 6, y: 85 },
@@ -59,7 +53,6 @@ export const SHIP_SPRITES: Record<ShipKind, ShipSprite> = {
     },
     torpedo: {
         url: frigateUrl,
-        ratio: 3.264,
         scale: 0.55,
         lamp: { x: 53.3, y: 1.1 },
         bowLight: { x: 6, y: 85 },

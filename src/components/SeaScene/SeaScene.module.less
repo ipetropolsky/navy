@@ -4,7 +4,7 @@
     position: relative;
     height: 100%;
     overflow: hidden;
-    background: #0b1c38;
+    background: #050d1c;
     user-select: none;
 
     img {
@@ -12,9 +12,8 @@
     }
 }
 
-// Небо (месяц, звёзды и облака уже внутри картинки) и вода — отдельные слои.
-// Пропорции картинок сохраняем: лишнее обрезается (object-fit: cover).
-// У неба прижимаем нижний край к горизонту, у воды — верхний.
+// Небо и вода — отдельные слои. Пропорции картинок сохраняем (object-fit: cover),
+// лишнее обрезается: у неба прижимаем нижний край к горизонту, у воды — верхний.
 .sky {
     position: absolute;
     inset: 0 0 auto;
@@ -33,60 +32,55 @@
     object-position: center top;
 }
 
-// Месяц вырезан из картинки неба отдельным слоем: небо обрезается по высоте,
-// а месяц остаётся видимым и ставится туда, где не спорит с шапкой чата.
+// Месяц вырезан отдельным слоем: стоит примерно по центру, над лунной дорожкой на воде.
 .moon {
     position: absolute;
-    top: 6%;
-    left: 76%;
-    width: 15%;
-    max-width: 130px;
+    top: 8%;
+    left: 50%;
+    width: 14%;
+    max-width: 120px;
     height: auto;
+    transform: translateX(-50%);
 }
 
-// Острова: три плана, каждый двигается отдельно.
-// Основание островов уводим под линию горизонта — слой воды перекрывает его,
-// над водой остаётся только гребень силуэта.
-.islandFar {
+.cloudFar {
     position: absolute;
-    bottom: calc(100% - @horizon - 16px);
-    left: -4%;
-    width: 30%;
-    max-width: 300px;
+    top: 30%;
+    left: 4%;
+    width: 56%;
     height: auto;
-    opacity: 0.4;
+    opacity: 0.75;
 }
 
-.islandMid {
+.cloudNear {
     position: absolute;
-    bottom: calc(100% - @horizon - 12px);
-    left: -2%;
-    width: 22%;
-    max-width: 220px;
+    top: 16%;
+    left: 48%;
+    width: 60%;
     height: auto;
     opacity: 0.6;
 }
 
-.islandNear {
+// Остров стоит на линии горизонта, основание уходит под воду.
+.island {
     position: absolute;
-    bottom: calc(100% - @horizon - 9px);
-    left: -3%;
-    width: 17%;
-    max-width: 170px;
+    bottom: calc(100% - @horizon - 4px);
+    left: 2%;
+    width: 34%;
+    max-width: 330px;
     height: auto;
-    opacity: 0.9;
 }
 
 .islandReflection {
     position: absolute;
     top: @horizon;
-    left: -3%;
-    width: 17%;
-    max-width: 170px;
+    left: 2%;
+    width: 34%;
+    max-width: 330px;
     height: auto;
     transform: scaleY(-0.5);
     transform-origin: top;
-    opacity: 0.14;
+    opacity: 0.16;
     filter: blur(2px);
 }
 
@@ -100,7 +94,7 @@
 .reflectionSlot {
     position: absolute;
     transform: translate(-50%, 97%);
-    opacity: 0.22;
+    opacity: 0.18;
     filter: blur(1.6px);
     mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.9), transparent 70%);
 }
@@ -110,9 +104,11 @@
     transform: translateX(-50%);
 }
 
+// Единый качающийся блок: спрайт, бортовой номер и огни неподвижны друг относительно друга.
 .shipFloat {
     position: relative;
     animation: bob 7s ease-in-out infinite alternate;
+    will-change: transform;
 }
 
 @keyframes bob {

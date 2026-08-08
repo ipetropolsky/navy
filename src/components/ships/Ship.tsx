@@ -42,10 +42,17 @@ export default function Ship({
     const mirror = (x: number) => (flip ? 100 - x : x);
     // Дальние корабли мельче, поэтому номер для них крупнее в долях спрайта.
     const numberSize = `max(7px, ${3.4 + (1 - depth) * 2.4}cqw)`;
+    // Чем дальше корабль, тем сильнее он тонет в ночной дымке.
+    const haze = { filter: `brightness(${(0.62 + depth * 0.26).toFixed(2)})` };
 
     return (
-        <div className={styles.ship} style={{ aspectRatio: sprite.ratio }}>
-            <img className={flip ? styles.spriteFlipped : styles.sprite} src={sprite.url} alt={`Корабль «${name}»`} />
+        <div className={styles.ship}>
+            <img
+                className={flip ? styles.spriteFlipped : styles.sprite}
+                style={haze}
+                src={sprite.url}
+                alt={`Корабль «${name}»`}
+            />
             <span
                 className={styles.hullNumber}
                 style={{

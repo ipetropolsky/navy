@@ -1,6 +1,6 @@
-import islandFarUrl from '@/assets/scene/island-far.png';
-import islandMidUrl from '@/assets/scene/island-mid.png';
-import islandNearUrl from '@/assets/scene/island-near.png';
+import cloudFarUrl from '@/assets/scene/cloud-1.png';
+import cloudNearUrl from '@/assets/scene/cloud-2.png';
+import islandUrl from '@/assets/scene/island.png';
 import moonUrl from '@/assets/scene/moon.png';
 import seaUrl from '@/assets/scene/sea.png';
 import skyUrl from '@/assets/scene/sky.png';
@@ -34,7 +34,7 @@ interface SeaSceneProps {
     morseFeeds: Partial<Record<string, MorseFeed>>;
 }
 
-/** Ночное море: слои неба и воды, острова и корабли-участники на рейде. */
+/** Ночное море: слои неба, облаков, месяца, острова и воды с кораблями-участниками. */
 export default function SeaScene({ participants, viewerId, morseFeeds }: SeaSceneProps) {
     const viewer = participants.find((participant) => participant.id === viewerId);
     const others = participants
@@ -66,11 +66,11 @@ export default function SeaScene({ participants, viewerId, morseFeeds }: SeaScen
         <div className={styles.scene}>
             <img className={styles.sky} src={skyUrl} alt="" />
             <img className={styles.moon} src={moonUrl} alt="" />
-            <img className={styles.islandFar} src={islandFarUrl} alt="" />
-            <img className={styles.islandMid} src={islandMidUrl} alt="" />
-            <img className={styles.islandNear} src={islandNearUrl} alt="" />
+            <img className={styles.cloudFar} src={cloudFarUrl} alt="" />
+            <img className={styles.cloudNear} src={cloudNearUrl} alt="" />
+            <img className={styles.island} src={islandUrl} alt="" />
             <img className={styles.sea} src={seaUrl} alt="" />
-            <img className={styles.islandReflection} src={islandNearUrl} alt="" />
+            <img className={styles.islandReflection} src={islandUrl} alt="" />
             <div className={styles.reflections}>
                 {placed.map((item) => (
                     <div key={item.participant.id} className={styles.reflectionSlot} style={slotStyle(item)}>
@@ -84,6 +84,7 @@ export default function SeaScene({ participants, viewerId, morseFeeds }: SeaScen
                     className={styles.shipSlot}
                     style={{ ...slotStyle(item), zIndex: Math.max(Math.round(item.slot.depth * 10), 1) }}
                 >
+                    {/* Корабль вместе с номером, лампой и огнями качается как единое целое. */}
                     <div className={styles.shipFloat} style={{ animationDelay: `${(item.slot.left % 4) * 1.1}s` }}>
                         <Ship
                             kind={item.participant.shipKind}
