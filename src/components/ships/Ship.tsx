@@ -19,7 +19,7 @@ interface ShipProps {
     morseFeed?: MorseFeed | null;
 }
 
-/** Тёмный однотонный силуэт корабля с названием на борту, сигнальной лампой и ходовыми огнями. */
+/** Корабль в «реалистичном» стиле: серый корпус, надстройки, сигнальная лампа, ходовые огни. */
 export default function Ship({
     kind,
     name,
@@ -41,8 +41,8 @@ export default function Ship({
     const flip = facing === 'left';
     const mirror = (x: number) => (flip ? SHIP_VIEWBOX.width - x : x);
 
-    // Мельче на ближнем плане, чуть крупнее у горизонта — компенсирует уменьшение силуэта.
-    const nameSize = 12 + (1 - depth) * 5;
+    // Компенсация перспективы и размера класса корабля, чтобы название оставалось читаемым.
+    const nameSize = (14 + (1 - depth) * 8) / shape.scale;
 
     return (
         <svg
@@ -52,12 +52,11 @@ export default function Ship({
             aria-label={`Корабль «${name}»`}
         >
             <g transform={flip ? `translate(${SHIP_VIEWBOX.width} 0) scale(-1 1)` : undefined}>
-                <path className={styles.body} d={shape.hull} />
-                {shape.details.map((d) => (
-                    <path key={d} className={styles.body} d={d} />
+                {shape.parts.map((part) => (
+                    <path key={part.d} d={part.d} fill={part.fill} />
                 ))}
                 {shape.strokes.map((d) => (
-                    <path key={d} className={styles.rig} d={d} />
+                    <path key={d} className={styles.rig} d={d} stroke={shape.rigColor} />
                 ))}
             </g>
             <circle

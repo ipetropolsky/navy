@@ -1,4 +1,6 @@
 import Ship from '@/components/ships/Ship';
+import ShipReflection from '@/components/ships/ShipReflection';
+import { SHIP_SHAPES } from '@/components/ships/shipShapes';
 import { AUTHOR_COLORS } from '@/data/demo';
 import { MorseFeed, Participant } from '@/types/chat';
 
@@ -12,13 +14,13 @@ interface SceneSlot {
     facing: 'left' | 'right';
 }
 
-const VIEWER_SLOT: SceneSlot = { left: 34, depth: 1, facing: 'right' };
+const VIEWER_SLOT: SceneSlot = { left: 58, depth: 1, facing: 'right' };
 
 const OTHER_SLOTS: SceneSlot[] = [
-    { left: 76, depth: 0.55, facing: 'left' },
-    { left: 16, depth: 0.4, facing: 'right' },
-    { left: 50, depth: 0.24, facing: 'left' },
-    { left: 85, depth: 0.16, facing: 'right' },
+    { left: 32, depth: 0.55, facing: 'right' },
+    { left: 80, depth: 0.66, facing: 'left' },
+    { left: 10, depth: 0.4, facing: 'right' },
+    { left: 88, depth: 0.22, facing: 'left' },
 ];
 
 // Рассеянные фоновые звёзды.
@@ -44,8 +46,7 @@ const STARS = [
     { x: 98, y: 5, s: 2, d: 1.4 },
 ];
 
-// Орион в положении «лёжа», как он виден над Каспием в июле перед рассветом (низко, боком).
-// Координаты в системе SVG-слоя (0..100 × 0..60), яркость r — по звёздной величине.
+// Орион (июльское «лежачее» положение): некрупные звёзды, без соединительных линий.
 interface OrionStar {
     x: number;
     y: number;
@@ -54,14 +55,14 @@ interface OrionStar {
 }
 
 const ORION_STARS: OrionStar[] = [
-    { x: 20, y: 9, r: 2.3, tone: 'warm' }, // Бетельгейзе
-    { x: 39, y: 5, r: 1.9, tone: 'plain' }, // Беллатрикс
-    { x: 26, y: 21, r: 1.7, tone: 'plain' }, // Альнитак (пояс)
-    { x: 31, y: 24, r: 1.8, tone: 'plain' }, // Альнилам (пояс)
-    { x: 36, y: 27, r: 1.7, tone: 'plain' }, // Минтака (пояс)
-    { x: 32, y: 33, r: 0.9, tone: 'plain' }, // меч
-    { x: 24, y: 39, r: 1.9, tone: 'plain' }, // Саиф
-    { x: 45, y: 36, r: 2.4, tone: 'cool' }, // Ригель
+    { x: 20, y: 9, r: 1.3, tone: 'warm' }, // Бетельгейзе
+    { x: 39, y: 5, r: 1, tone: 'plain' }, // Беллатрикс
+    { x: 26, y: 21, r: 0.9, tone: 'plain' }, // Альнитак (пояс)
+    { x: 31, y: 24, r: 0.95, tone: 'plain' }, // Альнилам (пояс)
+    { x: 36, y: 27, r: 0.9, tone: 'plain' }, // Минтака (пояс)
+    { x: 32, y: 33, r: 0.5, tone: 'plain' }, // меч
+    { x: 24, y: 39, r: 1, tone: 'plain' }, // Саиф
+    { x: 45, y: 36, r: 1.35, tone: 'cool' }, // Ригель
 ];
 
 const ORION_TONE_CLASS: Record<OrionStar['tone'], string> = {
@@ -70,37 +71,32 @@ const ORION_TONE_CLASS: Record<OrionStar['tone'], string> = {
     plain: styles.orionStar,
 };
 
-const ORION_BELT = ORION_STARS.slice(2, 5);
+// Волны: катятся из-за горизонта к наблюдателю, вырастая по пути (см. keyframes wave-roll).
+const WAVE_PERIOD_S = 18;
+const WAVES = [0, 1, 2, 3, 4, 5].map((index, _, all) => ({
+    delay: -(index * WAVE_PERIOD_S) / all.length,
+    shift: (index % 3) * 17 - 17,
+}));
 
-// Блики на воде: короткие горизонтальные штрихи, каждый мерцает в своей фазе,
-// поэтому вместе они «переливаются», не повторяясь. Гуще у лунной дорожки (~69%).
-interface Glint {
-    left: number;
-    top: number;
-    w: number;
-    dur: number;
-    delay: number;
-    tone: 'light' | 'dark';
+function IslandSilhouette({ className }: { className: string }) {
+    return (
+        <svg className={className} viewBox="0 0 240 80" preserveAspectRatio="xMinYMax meet" aria-hidden="true">
+            <path
+                className={styles.islandBack}
+                d="M0 80 L0 52 Q30 38 62 46 Q96 30 134 44 Q172 36 200 52 Q222 66 240 78 L240 80 Z"
+            />
+            <g className={styles.islandFront}>
+                <path d="M0 80 L0 62 Q50 54 110 60 Q170 58 214 72 Q228 77 240 80 Z" />
+                <path d="M12 62 L17 40 L22 62 Z" />
+                <path d="M26 62 L32 34 L38 62 Z" />
+                <path d="M44 61 L49 44 L54 61 Z" />
+                <path d="M58 60 L64 38 L70 60 Z" />
+                <path d="M80 60 L85 46 L90 60 Z" />
+                <path d="M96 60 L101 48 L106 60 Z" />
+            </g>
+        </svg>
+    );
 }
-
-const GLINTS: Glint[] = [
-    { left: 66, top: 8, w: 34, dur: 3.1, delay: 0, tone: 'light' },
-    { left: 71, top: 15, w: 26, dur: 4.2, delay: 1.4, tone: 'light' },
-    { left: 64, top: 23, w: 40, dur: 3.6, delay: 0.6, tone: 'light' },
-    { left: 73, top: 34, w: 30, dur: 5.0, delay: 2.1, tone: 'light' },
-    { left: 68, top: 46, w: 46, dur: 4.4, delay: 0.9, tone: 'light' },
-    { left: 70, top: 60, w: 34, dur: 5.6, delay: 3.0, tone: 'light' },
-    { left: 12, top: 18, w: 22, dur: 4.8, delay: 2.6, tone: 'light' },
-    { left: 20, top: 40, w: 30, dur: 3.9, delay: 1.1, tone: 'light' },
-    { left: 30, top: 58, w: 26, dur: 5.3, delay: 0.4, tone: 'light' },
-    { left: 44, top: 30, w: 24, dur: 4.1, delay: 2.9, tone: 'light' },
-    { left: 86, top: 26, w: 24, dur: 4.6, delay: 1.8, tone: 'light' },
-    { left: 90, top: 50, w: 30, dur: 3.4, delay: 0.7, tone: 'light' },
-    { left: 55, top: 12, w: 20, dur: 5.1, delay: 3.4, tone: 'light' },
-    { left: 62, top: 38, w: 22, dur: 4.0, delay: 1.5, tone: 'dark' },
-    { left: 24, top: 28, w: 26, dur: 4.7, delay: 0.2, tone: 'dark' },
-    { left: 78, top: 44, w: 24, dur: 5.4, delay: 2.3, tone: 'dark' },
-];
 
 interface SeaSceneProps {
     participants: Participant[];
@@ -108,7 +104,7 @@ interface SeaSceneProps {
     morseFeeds: Partial<Record<string, MorseFeed>>;
 }
 
-/** Ночное море: небо со звёздами, луна с лунной дорожкой, остров и корабли-участники. */
+/** Ночное море: звёзды с Орионом, месяц с дорожкой, остров с соснами, волны и корабли на рейде. */
 export default function SeaScene({ participants, viewerId, morseFeeds }: SeaSceneProps) {
     const viewer = participants.find((participant) => participant.id === viewerId);
     const others = participants
@@ -125,6 +121,17 @@ export default function SeaScene({ participants, viewerId, morseFeeds }: SeaScen
             placed.push({ participant, slot });
         }
     });
+
+    const slotStyle = ({ participant, slot }: (typeof placed)[number]) => {
+        const shipScale = SHIP_SHAPES[participant.shipKind].scale;
+        const widthPct = (slot.depth === 1 ? 52 : 21 + slot.depth * 26) * shipScale;
+        return {
+            left: `${slot.left}%`,
+            bottom: `${6 + (1 - slot.depth) * 36}%`,
+            width: `${widthPct}%`,
+            maxWidth: (170 + slot.depth * 170) * shipScale,
+        };
+    };
 
     return (
         <div className={styles.scene}>
@@ -148,10 +155,6 @@ export default function SeaScene({ participants, viewerId, morseFeeds }: SeaScen
                     preserveAspectRatio="xMidYMid meet"
                     aria-hidden="true"
                 >
-                    <polyline
-                        className={styles.orionBelt}
-                        points={ORION_BELT.map((star) => `${star.x},${star.y}`).join(' ')}
-                    />
                     {ORION_STARS.map((star) => (
                         <circle
                             key={`${star.x}-${star.y}`}
@@ -162,60 +165,51 @@ export default function SeaScene({ participants, viewerId, morseFeeds }: SeaScen
                         />
                     ))}
                 </svg>
-                <div className={styles.cloud} />
-                <div className={styles.moon} />
-                <svg
-                    className={styles.island}
-                    viewBox="0 0 170 60"
-                    preserveAspectRatio="xMinYMax meet"
-                    aria-hidden="true"
-                >
-                    <path d="M0 60 L0 46 Q26 30 64 38 Q108 47 170 52 L170 60 Z" />
-                    <path d="M18 44 L24 24 L30 44 Z" />
-                    <path d="M34 46 L41 20 L48 46 Z" />
-                    <path d="M52 47 L57 31 L62 47 Z" />
-                    <path d="M8 47 L12 35 L16 47 Z" />
+                <svg className={styles.moon} viewBox="0 0 60 60" aria-hidden="true">
+                    <mask id="moon-crescent">
+                        <rect width="60" height="60" fill="#fff" />
+                        <circle cx="41" cy="23" r="19" fill="#000" />
+                    </mask>
+                    <circle cx="30" cy="30" r="21" fill="#f5efd8" mask="url(#moon-crescent)" />
                 </svg>
+                <IslandSilhouette className={styles.island} />
             </div>
             <div className={styles.water}>
                 <div className={styles.moonGlade} />
-                {GLINTS.map((glint) => (
+                <IslandSilhouette className={styles.islandReflection} />
+            </div>
+            <div className={styles.reflections}>
+                {placed.map((item) => (
+                    <div key={item.participant.id} className={styles.reflectionSlot} style={slotStyle(item)}>
+                        <ShipReflection kind={item.participant.shipKind} facing={item.slot.facing} />
+                    </div>
+                ))}
+            </div>
+            <div className={styles.waves}>
+                {WAVES.map((wave) => (
                     <i
-                        key={`${glint.left}-${glint.top}`}
-                        className={glint.tone === 'dark' ? styles.glintDark : styles.glint}
-                        style={{
-                            left: `${glint.left}%`,
-                            top: `${glint.top}%`,
-                            width: glint.w,
-                            animationDuration: `${glint.dur}s`,
-                            animationDelay: `${glint.delay}s`,
-                        }}
+                        key={wave.delay}
+                        className={styles.wave}
+                        style={{ animationDelay: `${wave.delay}s`, marginLeft: `${wave.shift}%` }}
                     />
                 ))}
             </div>
-            {placed.map(({ participant, slot }, index) => (
+            {placed.map((item) => (
                 <div
-                    key={participant.id}
+                    key={item.participant.id}
                     className={styles.shipSlot}
-                    style={{
-                        left: `${slot.left}%`,
-                        bottom: `${5 + (1 - slot.depth) * 40}%`,
-                        zIndex: Math.round(slot.depth * 10),
-                        width: slot.depth === 1 ? '50%' : `${24 + slot.depth * 24}%`,
-                        maxWidth: slot.depth === 1 ? 330 : 160 + slot.depth * 120,
-                    }}
+                    style={{ ...slotStyle(item), zIndex: Math.max(Math.round(item.slot.depth * 10), 1) }}
                 >
-                    <div className={styles.shipFloat} style={{ animationDelay: `${index * 1.3}s` }}>
+                    <div className={styles.shipFloat} style={{ animationDelay: `${(item.slot.left % 4) * 1.1}s` }}>
                         <Ship
-                            kind={participant.shipKind}
-                            name={participant.name}
-                            facing={slot.facing}
-                            active={participant.id === viewerId}
-                            depth={slot.depth}
-                            nameColor={AUTHOR_COLORS[participants.indexOf(participant) % AUTHOR_COLORS.length]}
-                            morseFeed={morseFeeds[participant.id] ?? null}
+                            kind={item.participant.shipKind}
+                            name={item.participant.name}
+                            facing={item.slot.facing}
+                            active={item.participant.id === viewerId}
+                            depth={item.slot.depth}
+                            nameColor={AUTHOR_COLORS[participants.indexOf(item.participant) % AUTHOR_COLORS.length]}
+                            morseFeed={morseFeeds[item.participant.id] ?? null}
                         />
-                        <div className={participant.id === viewerId ? styles.reflectionActive : styles.reflection} />
                     </div>
                 </div>
             ))}

@@ -4,7 +4,7 @@ import { SHIP_SHAPES, SHIP_VIEWBOX } from '@/components/ships/shipShapes';
 
 import styles from './Ship.module.less';
 
-/** Маленький силуэт корабля для аватарок и списков (без названия и огней). */
+/** Маленький силуэт корабля для аватарок и списков (один цвет, без названия и огней). */
 export default function ShipAvatar({ kind }: { kind: ShipKind }) {
     const shape = SHIP_SHAPES[kind];
 
@@ -13,9 +13,8 @@ export default function ShipAvatar({ kind }: { kind: ShipKind }) {
             {shape.strokes.map((d) => (
                 <path key={d} className={styles.avatarRig} d={d} />
             ))}
-            <path className={styles.avatarBody} d={shape.hull} />
-            {shape.details.map((d) => (
-                <path key={d} className={styles.avatarBody} d={d} />
+            {shape.parts.map((part) => (
+                <path key={part.d} className={styles.avatarBody} d={part.d} />
             ))}
         </svg>
     );

@@ -10,7 +10,7 @@
 .sky {
     position: absolute;
     inset: 0 0 (100% - @horizon);
-    background: linear-gradient(180deg, #020714 0%, #081830 62%, #12304e 96%, #1a3d5c 100%);
+    background: linear-gradient(180deg, #050f26 0%, #0b2348 58%, #1c4674 92%, #275685 100%);
 }
 
 .star {
@@ -32,47 +32,12 @@
     }
 }
 
-.cloud {
-    position: absolute;
-    top: 18%;
-    left: 40%;
-    width: 55%;
-    height: 26%;
-    border-radius: 50%;
-    background: radial-gradient(closest-side, rgba(190, 214, 238, 0.07), transparent);
-    filter: blur(6px);
-    animation: cloud-drift 80s ease-in-out infinite alternate;
-}
-
-@keyframes cloud-drift {
-    from {
-        transform: translateX(-18%);
-    }
-
-    to {
-        transform: translateX(14%);
-    }
-}
-
-.moon {
-    position: absolute;
-    top: 16%;
-    left: 69%;
-    width: 42px;
-    height: 42px;
-    border-radius: 50%;
-    background: radial-gradient(circle at 38% 34%, #fdf9e8 0%, #efe6c4 58%, #d9cfa6 100%);
-    box-shadow:
-        0 0 26px 8px rgba(248, 240, 212, 0.28),
-        0 0 70px 30px rgba(248, 240, 212, 0.1);
-}
-
 .orion {
     position: absolute;
-    top: 4%;
-    left: 8%;
-    width: 50%;
-    height: 46%;
+    top: 5%;
+    left: 24%;
+    width: 42%;
+    height: 42%;
     overflow: visible;
 }
 
@@ -83,46 +48,64 @@
 
 .orionWarm {
     fill: #ffd6ac;
-    filter: drop-shadow(0 0 1.4px rgba(255, 214, 172, 0.8));
+    filter: drop-shadow(0 0 1.2px rgba(255, 214, 172, 0.7));
 }
 
 .orionCool {
     fill: #d2e2ff;
-    filter: drop-shadow(0 0 1.6px rgba(210, 226, 255, 0.85));
+    filter: drop-shadow(0 0 1.4px rgba(210, 226, 255, 0.75));
 }
 
-.orionBelt {
-    fill: none;
-    stroke: rgba(200, 220, 245, 0.22);
-    stroke-width: 0.4;
+.moon {
+    position: absolute;
+    top: 10%;
+    left: 76%;
+    width: 52px;
+    height: 52px;
+    filter: drop-shadow(0 0 14px rgba(245, 239, 216, 0.5)) drop-shadow(0 0 42px rgba(245, 239, 216, 0.2));
 }
 
 .island {
     position: absolute;
     bottom: -1px;
-    left: 2%;
-    width: 150px;
-    height: 52px;
+    left: 0;
+    width: 168px;
+    height: 54px;
+}
 
-    path {
-        fill: #060f1c;
-    }
+.islandBack {
+    fill: #1c3a5f;
+}
+
+.islandFront {
+    fill: #081831;
+}
+
+.islandReflection {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 168px;
+    height: 32px;
+    transform: scaleY(-1);
+    opacity: 0.16;
+    filter: blur(2px);
 }
 
 .water {
     position: absolute;
     inset: @horizon 0 0;
     overflow: hidden;
-    background: linear-gradient(180deg, #123152 0%, #0b2138 34%, #071527 70%, #040d19 100%);
+    background: linear-gradient(180deg, #2c5b8b 0%, #1b3f66 30%, #0e2846 65%, #081830 100%);
 }
 
 .moonGlade {
     position: absolute;
     top: 0;
     bottom: 0;
-    left: calc(69% - 30px);
-    width: 100px;
-    background: linear-gradient(180deg, rgba(247, 239, 214, 0.2) 0%, rgba(247, 239, 214, 0.06) 55%, transparent 90%);
+    left: calc(76% - 26px);
+    width: 104px;
+    background: linear-gradient(180deg, rgba(247, 239, 214, 0.28) 0%, rgba(247, 239, 214, 0.07) 55%, transparent 92%);
     filter: blur(3px);
     mask-image: radial-gradient(60% 160% at 50% 0%, rgba(0, 0, 0, 0.9) 30%, transparent 75%);
 
@@ -130,7 +113,7 @@
         content: '';
         position: absolute;
         inset: 0;
-        background: repeating-linear-gradient(180deg, rgba(4, 12, 24, 0.55) 0 2px, transparent 2px 5px);
+        background: repeating-linear-gradient(180deg, rgba(4, 12, 24, 0.5) 0 2px, transparent 2px 5px);
         animation: glade-shimmer 7s linear infinite;
     }
 }
@@ -145,51 +128,64 @@
     }
 }
 
-// Блик — короткий горизонтальный штрих света; мерцает и слегка вытягивается.
-.glint {
+// Зеркальные отражения кораблей: под волнами, привязаны к тем же слотам, что и корабли.
+.reflections {
     position: absolute;
-    height: 2px;
-    transform: translateX(-50%) scaleX(0.6);
-    border-radius: 2px;
-    background: linear-gradient(90deg, transparent, rgba(176, 214, 248, 0.85), transparent);
-    opacity: 0.1;
-    animation-name: glint-pulse;
-    animation-timing-function: ease-in-out;
-    animation-iteration-count: infinite;
-    animation-direction: alternate;
-    will-change: opacity, transform;
+    inset: 0;
+    pointer-events: none;
 }
 
-.glintDark {
-    .glint();
-
-    height: 3px;
-    background: linear-gradient(90deg, transparent, rgba(3, 9, 18, 0.6), transparent);
-    animation-name: glint-pulse-dark;
+.reflectionSlot {
+    position: absolute;
+    transform: translate(-50%, 76%) scaleY(-1);
+    opacity: 0.3;
+    filter: blur(2px);
+    mask-image: linear-gradient(0deg, rgba(0, 0, 0, 0.85) 50%, transparent 90%);
 }
 
-// Светлые и тёмные блики пульсируют в противофазе, поэтому вода «переливается».
-@keyframes glint-pulse {
-    from {
-        opacity: 0.08;
-        transform: translateX(-50%) scaleX(0.6);
+// Слой волн: над отражениями, под кораблями.
+.waves {
+    position: absolute;
+    inset: @horizon 0 0;
+    overflow: hidden;
+    pointer-events: none;
+}
+
+// Волна: мягкий световой гребень, катится от горизонта вниз и вырастает (перспектива).
+.wave {
+    position: absolute;
+    top: 0;
+    left: -12%;
+    right: -12%;
+    height: 22px;
+    border-radius: 50%;
+    background: linear-gradient(180deg, rgba(163, 203, 240, 0.28) 0%, rgba(163, 203, 240, 0.07) 45%, transparent 75%);
+    mask-image: repeating-linear-gradient(90deg, #000 0 110px, rgba(0, 0, 0, 0.3) 110px 170px, #000 170px 240px);
+    filter: blur(1px);
+    opacity: 0;
+    animation: wave-roll 18s cubic-bezier(0.45, 0.1, 0.85, 0.6) infinite;
+}
+
+@keyframes wave-roll {
+    0% {
+        top: -4%;
+        transform: scale(0.35, 0.25);
+        opacity: 0;
     }
 
-    to {
-        opacity: 0.72;
-        transform: translateX(-42%) scaleX(1.05);
+    12% {
+        opacity: 0.4;
     }
-}
 
-@keyframes glint-pulse-dark {
-    from {
+    70% {
         opacity: 0.55;
-        transform: translateX(-50%) scaleX(1);
+        transform: scale(0.85, 0.85);
     }
 
-    to {
-        opacity: 0.1;
-        transform: translateX(-58%) scaleX(0.7);
+    100% {
+        top: 97%;
+        transform: scale(1.2, 1.5);
+        opacity: 0;
     }
 }
 
@@ -213,19 +209,10 @@
     }
 }
 
-.reflection {
-    position: absolute;
-    left: 15%;
-    right: 15%;
-    bottom: -7px;
-    height: 10px;
-    border-radius: 50%;
-    background: radial-gradient(closest-side, rgba(150, 200, 250, 0.14), transparent);
-}
-
-.reflectionActive {
-    .reflection();
-
-    background: radial-gradient(closest-side, rgba(170, 215, 255, 0.3), transparent);
-    box-shadow: 0 0 18px 4px rgba(120, 180, 240, 0.12);
+@media (prefers-reduced-motion: reduce) {
+    .scene *,
+    .scene *::before,
+    .scene *::after {
+        animation: none !important;
+    }
 }
