@@ -9,24 +9,24 @@ import styles from './Ship.module.less';
 
 interface ShipProps {
     kind: ShipKind;
+    /** Название корабля — для подписи в разметке, на борту рисуется номер. */
     name: string;
+    hullNumber: string;
     facing?: 'left' | 'right';
     active?: boolean;
-    /** Глубина в сцене: 1 — ближний план, 0 — у горизонта. Влияет на размер названия. */
+    /** Глубина в сцене: 1 — ближний план, 0 — у горизонта. Влияет на размер номера. */
     depth?: number;
-    /** Цвет названия на борту (цвет автора, как имя в чате). */
-    nameColor?: string;
     morseFeed?: MorseFeed | null;
 }
 
-/** Корабль-спрайт с названием на борту, сигнальной лампой и ходовыми огнями. */
+/** Корабль-спрайт с бортовым номером, сигнальной лампой и ходовыми огнями. */
 export default function Ship({
     kind,
     name,
+    hullNumber,
     facing = 'left',
     active = false,
     depth = 1,
-    nameColor = 'var(--color-text)',
     morseFeed = null,
 }: ShipProps) {
     const sprite = SHIP_SPRITES[kind];
@@ -40,22 +40,21 @@ export default function Ship({
 
     const flip = facing === 'right';
     const mirror = (x: number) => (flip ? 100 - x : x);
-    // Дальние корабли мельче, поэтому шрифт названия для них чуть крупнее в долях спрайта.
-    const nameSize = `max(7px, ${3.2 + (1 - depth) * 2.6}cqw)`;
+    // Дальние корабли мельче, поэтому номер для них крупнее в долях спрайта.
+    const numberSize = `max(7px, ${3.4 + (1 - depth) * 2.4}cqw)`;
 
     return (
         <div className={styles.ship} style={{ aspectRatio: sprite.ratio }}>
             <img className={flip ? styles.spriteFlipped : styles.sprite} src={sprite.url} alt={`Корабль «${name}»`} />
             <span
-                className={styles.name}
+                className={styles.hullNumber}
                 style={{
-                    left: `${mirror(sprite.name.x)}%`,
-                    top: `${sprite.name.y}%`,
-                    color: nameColor,
-                    fontSize: nameSize,
+                    left: `${mirror(sprite.hullNumber.x)}%`,
+                    top: `${sprite.hullNumber.y}%`,
+                    fontSize: numberSize,
                 }}
             >
-                {name}
+                {hullNumber}
             </span>
             <i
                 className={`${styles.lamp} ${on ? styles.lampOn : ''}`}

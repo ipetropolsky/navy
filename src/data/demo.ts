@@ -3,11 +3,11 @@ import { Message, Participant } from '@/types/chat';
 export const DEMO_CHAT_TITLE = 'Эскадра «Полночь»';
 
 export const DEMO_PARTICIPANTS: Participant[] = [
-    { id: 'p1', name: 'Гроза', shipKind: 'corvette', joinedAt: 1 },
-    { id: 'p2', name: 'Альбатрос', shipKind: 'patrol', joinedAt: 2 },
-    { id: 'p3', name: 'Вымпел', shipKind: 'missile', joinedAt: 3 },
-    { id: 'p4', name: 'Резвый', shipKind: 'torpedo', joinedAt: 4 },
-    { id: 'p5', name: 'Кайра', shipKind: 'minesweeper', joinedAt: 5 },
+    { id: 'p1', name: 'Гроза', hullNumber: '042', shipKind: 'corvette', joinedAt: 1 },
+    { id: 'p2', name: 'Альбатрос', hullNumber: '317', shipKind: 'patrol', joinedAt: 2 },
+    { id: 'p3', name: 'Вымпел', hullNumber: '561', shipKind: 'missile', joinedAt: 3 },
+    { id: 'p4', name: 'Резвый', hullNumber: '208', shipKind: 'torpedo', joinedAt: 4 },
+    { id: 'p5', name: 'Кайра', hullNumber: '719', shipKind: 'minesweeper', joinedAt: 5 },
 ];
 
 export const DEMO_MESSAGES: Message[] = [

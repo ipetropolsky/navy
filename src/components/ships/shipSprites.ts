@@ -14,8 +14,8 @@ export interface ShipSprite {
     /** Ходовые огни на носу и корме, % от размеров спрайта. */
     bowLight: { x: number; y: number };
     sternLight: { x: number; y: number };
-    /** Центр надписи на борту, % от размеров спрайта. */
-    name: { x: number; y: number };
+    /** Центр бортового номера, % от размеров спрайта. */
+    hullNumber: { x: number; y: number };
 }
 
 // Спрайты нарисованы носом влево; в сцене отражаем по горизонтали, если нужно наоборот.
@@ -23,47 +23,47 @@ export interface ShipSprite {
 export const SHIP_SPRITES: Record<ShipKind, ShipSprite> = {
     corvette: {
         url: corvetteUrl,
-        ratio: 1100 / 366,
+        ratio: 3.005,
         scale: 1,
         lamp: { x: 55.4, y: 1 },
-        bowLight: { x: 6, y: 83 },
-        sternLight: { x: 97, y: 83 },
-        name: { x: 42, y: 87 },
+        bowLight: { x: 6, y: 85 },
+        sternLight: { x: 97, y: 85 },
+        hullNumber: { x: 22, y: 87 },
     },
     missile: {
         url: frigateUrl,
-        ratio: 1100 / 337,
+        ratio: 3.264,
         scale: 0.82,
         lamp: { x: 53.3, y: 1.1 },
-        bowLight: { x: 7, y: 82 },
-        sternLight: { x: 97, y: 82 },
-        name: { x: 44, y: 87 },
+        bowLight: { x: 6, y: 85 },
+        sternLight: { x: 97, y: 85 },
+        hullNumber: { x: 23, y: 87 },
     },
     patrol: {
         url: patrolUrl,
-        ratio: 1100 / 355,
+        ratio: 3.099,
         scale: 0.68,
         lamp: { x: 55.2, y: 1 },
-        bowLight: { x: 7, y: 82 },
-        sternLight: { x: 97, y: 82 },
-        name: { x: 43, y: 86 },
+        bowLight: { x: 6, y: 85 },
+        sternLight: { x: 97, y: 85 },
+        hullNumber: { x: 22, y: 86 },
     },
     minesweeper: {
         url: patrolUrl,
-        ratio: 1100 / 355,
+        ratio: 3.099,
         scale: 0.78,
         lamp: { x: 55.2, y: 1 },
-        bowLight: { x: 7, y: 82 },
-        sternLight: { x: 97, y: 82 },
-        name: { x: 43, y: 86 },
+        bowLight: { x: 6, y: 85 },
+        sternLight: { x: 97, y: 85 },
+        hullNumber: { x: 22, y: 86 },
     },
     torpedo: {
         url: frigateUrl,
-        ratio: 1100 / 337,
+        ratio: 3.264,
         scale: 0.55,
         lamp: { x: 53.3, y: 1.1 },
-        bowLight: { x: 7, y: 82 },
-        sternLight: { x: 97, y: 82 },
-        name: { x: 44, y: 87 },
+        bowLight: { x: 6, y: 85 },
+        sternLight: { x: 97, y: 85 },
+        hullNumber: { x: 23, y: 87 },
     },
 };

@@ -1,4 +1,4 @@
-import ShipAvatar from '@/components/ships/ShipAvatar';
+import HullBadge from '@/components/ships/HullBadge';
 import { Participant, SHIP_KIND_LABELS } from '@/types/chat';
 
 import styles from './ParticipantsSheet.module.less';
@@ -34,7 +34,7 @@ export default function ParticipantsSheet({ open, participants, activeId, onSwit
                             onClick={() => onSwitch(participant.id)}
                         >
                             <span className={styles.avatar}>
-                                <ShipAvatar kind={participant.shipKind} />
+                                <HullBadge number={participant.hullNumber} />
                             </span>
                             <span className={styles.info}>
                                 <span className={styles.name}>{participant.name}</span>

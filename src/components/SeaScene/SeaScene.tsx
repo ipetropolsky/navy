@@ -1,12 +1,12 @@
 import islandFarUrl from '@/assets/scene/island-far.png';
 import islandMidUrl from '@/assets/scene/island-mid.png';
 import islandNearUrl from '@/assets/scene/island-near.png';
+import moonUrl from '@/assets/scene/moon.png';
 import seaUrl from '@/assets/scene/sea.png';
 import skyUrl from '@/assets/scene/sky.png';
 import Ship from '@/components/ships/Ship';
 import ShipReflection from '@/components/ships/ShipReflection';
 import { SHIP_SPRITES } from '@/components/ships/shipSprites';
-import { AUTHOR_COLORS } from '@/data/demo';
 import { MorseFeed, Participant } from '@/types/chat';
 
 import styles from './SeaScene.module.less';
@@ -65,6 +65,7 @@ export default function SeaScene({ participants, viewerId, morseFeeds }: SeaScen
     return (
         <div className={styles.scene}>
             <img className={styles.sky} src={skyUrl} alt="" />
+            <img className={styles.moon} src={moonUrl} alt="" />
             <img className={styles.islandFar} src={islandFarUrl} alt="" />
             <img className={styles.islandMid} src={islandMidUrl} alt="" />
             <img className={styles.islandNear} src={islandNearUrl} alt="" />
@@ -87,10 +88,10 @@ export default function SeaScene({ participants, viewerId, morseFeeds }: SeaScen
                         <Ship
                             kind={item.participant.shipKind}
                             name={item.participant.name}
+                            hullNumber={item.participant.hullNumber}
                             facing={item.slot.facing}
                             active={item.participant.id === viewerId}
                             depth={item.slot.depth}
-                            nameColor={AUTHOR_COLORS[participants.indexOf(item.participant) % AUTHOR_COLORS.length]}
                             morseFeed={morseFeeds[item.participant.id] ?? null}
                         />
                     </div>

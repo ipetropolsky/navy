@@ -12,11 +12,10 @@ import { chromium } from 'playwright-core';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const outDir = path.resolve(here, '../../src/assets/scene');
 
-// sky и sea готовятся отдельно из src/assets/sources (tools/scene-assets/prepare-backgrounds.py).
+// sky, sea и moon готовятся отдельно из src/assets/sources (tools/scene-assets/prepare-backgrounds.py).
 const ASSETS = [
     'stars',
     'orion',
-    'moon',
     'cloud-1',
     'cloud-2',
     'island-far',

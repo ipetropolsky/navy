@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 
-import ShipAvatar from '@/components/ships/ShipAvatar';
+import HullBadge from '@/components/ships/HullBadge';
 import { AUTHOR_COLORS } from '@/data/demo';
 import { Message, Participant } from '@/types/chat';
 
@@ -50,7 +50,7 @@ export default function MessageList({ messages, participants, viewerId, onReply 
                             <div className={styles.avatarCell}>
                                 {lastOfGroup && author && (
                                     <div className={styles.avatar} title={author.name}>
-                                        <ShipAvatar kind={author.shipKind} />
+                                        <HullBadge number={author.hullNumber} />
                                     </div>
                                 )}
                             </div>

@@ -3,6 +3,8 @@ export type ShipKind = 'patrol' | 'missile' | 'minesweeper' | 'corvette' | 'torp
 export interface Participant {
     id: string;
     name: string;
+    /** Бортовой номер: белые цифры на борту и вместо аватарки в чате. */
+    hullNumber: string;
     shipKind: ShipKind;
     joinedAt: number;
 }

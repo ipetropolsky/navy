@@ -4,9 +4,12 @@
 Запуск: python3 tools/scene-assets/cutout-ships.py
 Зависимости: Pillow, numpy, scipy (ставятся ad hoc, в проект не входят).
 
-Метод: корабль обведён жёстким контуром, а фон и свечение вокруг него — гладкие градиенты.
-Ищем сильные градиенты (Собель), замыкаем контур, заливаем внутренность и берём крупнейшую
-область. Так свечение остаётся снаружи, а тонкие мачты и леера — внутри силуэта.
+Метод в два шага:
+1. Силуэт. Корабль обведён жёстким контуром, фон и свечение вокруг — гладкие градиенты.
+   Ищем сильные градиенты (Собель), замыкаем контур, заливаем внутренность, берём крупнейшую область.
+2. Чистка «карманов». Мачты, антенны и леера замыкают куски фона, которые попадают в заливку.
+   Восстанавливаем фон диффузией снаружи внутрь и убираем те места выше палубы,
+   где картинка совпадает с восстановленным фоном. Ниже палубы не трогаем — там тёмный борт.
 """
 
 import json
@@ -31,24 +34,25 @@ TARGET_WIDTH = 1100
 EDGE_LEVEL = 25
 # Насколько расширяем контур, чтобы замкнуть разрывы (и на столько же сжимаем обратно).
 EDGE_CLOSE = 4
+# Восстановление фона: во сколько раз уменьшаем картинку и сколько шагов диффузии делаем.
+BG_SCALE = 4
+BG_STEPS = 400
+# Совпадение с фоном и минимальный размер «кармана», который стоит вырезать.
+BG_MATCH = 20
+BG_MIN_AREA = 300
 
 
 def cutout(path: pathlib.Path) -> tuple[Image.Image, dict]:
     img = Image.open(path).convert('RGB')
-    grey = np.asarray(img).astype(np.float32).mean(axis=2)
+    arr = np.asarray(img).astype(np.float32)
+    grey = arr.mean(axis=2)
 
     edges = np.hypot(ndimage.sobel(grey, axis=0), ndimage.sobel(grey, axis=1)) > EDGE_LEVEL
     closed = ndimage.binary_dilation(edges, np.ones((3, 3)), iterations=EDGE_CLOSE)
     body = largest_blob(ndimage.binary_fill_holes(closed))
     body = ndimage.binary_erosion(body, np.ones((3, 3)), iterations=EDGE_CLOSE)
     body = largest_blob(ndimage.binary_fill_holes(body))
-
-    # Внутрь силуэта иногда попадают куски фона, замкнутые леерами: они серые и светлее контуров.
-    arr = np.asarray(img).astype(np.int16)
-    blueness = arr[..., 2] - (arr[..., 0] + arr[..., 1]) / 2
-    trapped = body & (blueness < 8) & (grey > 30)
-    trapped = ndimage.binary_opening(trapped, np.ones((5, 5)))
-    body = body & ~ndimage.binary_dilation(trapped, np.ones((3, 3)))
+    body = drop_background_pockets(arr, body)
 
     out = img.convert('RGBA')
     out.putalpha(Image.fromarray((body * 255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(0.7)))
@@ -58,6 +62,35 @@ def cutout(path: pathlib.Path) -> tuple[Image.Image, dict]:
     out = out.resize((TARGET_WIDTH, max(1, round(out.height * scale))), Image.LANCZOS)
 
     return out, measure(out)
+
+
+def drop_background_pockets(arr: np.ndarray, body: np.ndarray) -> np.ndarray:
+    """Убирает из силуэта куски фона, замкнутые рангоутом."""
+    known = ndimage.binary_dilation(body, np.ones((3, 3)), iterations=6)[::BG_SCALE, ::BG_SCALE]
+    background = arr[::BG_SCALE, ::BG_SCALE].copy()
+    for _ in range(BG_STEPS):
+        blurred = np.dstack([ndimage.gaussian_filter(background[..., c], 3) for c in range(3)])
+        background[known] = blurred[known]
+
+    full = np.dstack(
+        [np.kron(background[..., c], np.ones((BG_SCALE, BG_SCALE)))[: arr.shape[0], : arr.shape[1]] for c in range(3)]
+    )
+    like_background = np.abs(arr - full).max(axis=2) < BG_MATCH
+
+    # Ниже уровня палубы силуэт сплошной, там чистить нечего (и легко испортить борт).
+    widths = body.sum(axis=1)
+    deck = int(np.argmax(widths > 0.6 * widths.max()))
+    above_deck = np.zeros_like(body)
+    above_deck[: deck + 6] = True
+
+    pockets = ndimage.binary_opening(body & like_background & above_deck, np.ones((5, 5)))
+    labels, count = ndimage.label(pockets)
+    if count:
+        sizes = ndimage.sum(pockets, labels, range(1, count + 1))
+        big = [index + 1 for index, size in enumerate(sizes) if size > BG_MIN_AREA]
+        pockets = np.isin(labels, big)
+
+    return largest_blob(body & ~ndimage.binary_dilation(pockets, np.ones((3, 3))))
 
 
 def largest_blob(mask: np.ndarray) -> np.ndarray:
@@ -75,17 +108,16 @@ def measure(sprite: Image.Image) -> dict:
     top = int(np.where(alpha.any(axis=1))[0][0])
     mast_x = int(np.argmax(alpha[top : top + 4].any(axis=0)))
 
-    hull_row = int(h * 0.7)
+    hull_row = int(h * 0.85)
     hull = np.where(alpha[hull_row])[0]
     bow = int(hull[0]) if hull.size else 0
     stern = int(hull[-1]) if hull.size else w - 1
 
     return {
-        'width': w,
-        'height': h,
-        'lamp': [round(mast_x / w * 100, 2), round((top + 2) / h * 100, 2)],
-        'bow': [round(bow / w * 100, 2), round(hull_row / h * 100, 2)],
-        'stern': [round(stern / w * 100, 2), round(hull_row / h * 100, 2)],
+        'ratio': round(w / h, 3),
+        'lamp': [round(mast_x / w * 100, 1), round((top + 2) / h * 100, 1)],
+        'bow': [round(bow / w * 100, 1), round(hull_row / h * 100, 1)],
+        'stern': [round(stern / w * 100, 1), round(hull_row / h * 100, 1)],
     }
 
 
