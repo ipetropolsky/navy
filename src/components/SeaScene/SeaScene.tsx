@@ -19,21 +19,42 @@ interface SceneSlot {
     /** Глубина: 1 — ближний план, 0 — у горизонта. */
     depth: number;
     facing: 'left' | 'right';
-    /** Период качки, с. У всех разный, чтобы корабли не сходились в такт. */
-    bob: number;
 }
 
-const VIEWER_SLOT: SceneSlot = { left: 56, depth: 1, facing: 'left', bob: 7.3 };
+const VIEWER_SLOT: SceneSlot = { left: 56, depth: 1, facing: 'left' };
 
 const OTHER_SLOTS: SceneSlot[] = [
-    { left: 18, depth: 0.48, facing: 'left', bob: 6.1 },
-    { left: 86, depth: 0.56, facing: 'right', bob: 8.7 },
-    { left: 40, depth: 0.28, facing: 'right', bob: 5.4 },
-    { left: 66, depth: 0.13, facing: 'left', bob: 9.8 },
+    { left: 18, depth: 0.48, facing: 'left' },
+    { left: 86, depth: 0.56, facing: 'right' },
+    { left: 40, depth: 0.28, facing: 'right' },
+    { left: 66, depth: 0.13, facing: 'left' },
 ];
 
-// Стартовые сдвиги фаз качки: даже при близких периодах корабли расходятся сразу.
-const BOB_PHASE_STEP = 1.7;
+// Качка живёт тем же циклом, что и вода: 10 секунд на полный круг. Одно число на всю сцену —
+// корабли качаются той же волной, которая проходит по воде, а не каждый сам по себе.
+const WAVE_SECONDS = 10;
+
+// Моменты, с которых корабли начинают качку, — секунды внутри цикла. Все они уходят в анимацию
+// отрицательной задержкой, то есть отсчитаны в прошлом: корабль появляется уже качающимся,
+// а не ждёт начала цикла. Числа выбраны произвольно, но с оглядкой на два условия:
+// соседние по времени старты разведены не меньше чем на 1.5с (минимум здесь 1.75с), и это
+// расстояние считается по кругу — между последним и первым тоже, иначе на стыке цикла
+// два корабля пошли бы в такт. Слотов пять, больше кораблей в сцене не бывает.
+const WAVE_STARTS = [6.15, 0.25, 8.05, 3.85, 2.1];
+
+// Размах вертикальной качки, px, от дальнего корабля к ближнему. У горизонта перспектива
+// сжимает вертикаль, поэтому дальний корабль ходит заметно меньше — иначе он «прыгал» бы
+// сильнее ближнего при своих мелких размерах.
+const HEAVE_FAR = 0.35;
+const HEAVE_NEAR = 1.9;
+
+// Градусов наклона на каждый пиксель размаха. Угол и размах — не два независимых числа:
+// корабль повторяет уклон воды, а у волны высота и крутизна связаны. Коэффициент отвечает
+// длине волны примерно в полтора кадра, то есть пологой зыби, а не короткой толчее.
+const PITCH_PER_PX = 0.32;
+
+/** Размах вертикальной качки корабля, px: линейно растёт от горизонта к переднему плану. */
+const heaveAmplitude = (slot: SceneSlot) => HEAVE_FAR + slot.depth * (HEAVE_NEAR - HEAVE_FAR);
 
 // Снимки воды: одно и то же море с разной рябью. Показываются по кругу в этом порядке.
 const SEA_FRAMES = [seaFrameOneUrl, seaFrameTwoUrl];
@@ -93,7 +114,9 @@ export default function SeaScene({ participants, viewerId, morseFeeds }: SeaScen
             '--slot-left': `${slot.left}%`,
             '--slot-width': `${width}%`,
             '--slot-half': `${width / 2 + 1}%`,
-            bottom: `${4 + (1 - slot.depth) * 36}%`,
+            // Чем дальше корабль, тем выше он стоит в кадре — это и создаёт перспективу.
+            // Ближний не прижимаем к самому низу: под ним нужна вода, иначе он «висит» на краю сцены.
+            bottom: `${8 + (1 - slot.depth) * 32}%`,
             maxWidth: (150 + slot.depth * 200) * shipScale,
         } as CSSProperties;
     };
@@ -132,10 +155,9 @@ export default function SeaScene({ participants, viewerId, morseFeeds }: SeaScen
                         className={styles.shipFloat}
                         style={
                             {
-                                animationDuration: `${item.slot.bob}s`,
-                                animationDelay: `-${(index * BOB_PHASE_STEP).toFixed(2)}s`,
-                                // Амплитуда падает с расстоянием: дальний корабль качается еле заметно.
-                                '--bob-amplitude': `${(0.3 + item.slot.depth * 1.9).toFixed(2)}px`,
+                                // Минус — момент старта в прошлом: корабль появляется уже качающимся.
+                                animationDelay: `-${WAVE_STARTS[index].toFixed(2)}s`,
+                                '--bob-amplitude': `${heaveAmplitude(item.slot).toFixed(2)}px`,
                             } as CSSProperties
                         }
                     >
@@ -146,14 +168,16 @@ export default function SeaScene({ participants, viewerId, morseFeeds }: SeaScen
                             className={styles.shipPitch}
                             style={
                                 {
-                                    animationDuration: `${item.slot.bob}s`,
-                                    // Четверть волны отставания от вертикальной качки.
-                                    animationDelay: `-${(index * BOB_PHASE_STEP + item.slot.bob / 2).toFixed(2)}s`,
-                                    // Нос смотрит в сторону facing, центр вращения — 2/3 длины от него.
-                                    '--pitch-origin': item.slot.facing === 'left' ? '66.7%' : '33.3%',
-                                    // Наклон едва заметный: корабль тяжёлый, волна его почти не кренит.
-                                    // У ближнего это ~2px хода на носу, у дальних ещё меньше.
-                                    '--pitch-angle': `${(0.1 + item.slot.depth * 0.38).toFixed(2)}deg`,
+                                    // Четверть цикла впереди вертикальной качки — отсюда и берётся
+                                    // «переваливание»: корабль сначала клюёт носом, а потом уже
+                                    // проваливается или всплывает целиком. Остаток по модулю цикла
+                                    // нужен только чтобы число не убегало за его пределы.
+                                    animationDelay: `-${(
+                                        (WAVE_STARTS[index] + WAVE_SECONDS / 4) %
+                                        WAVE_SECONDS
+                                    ).toFixed(2)}s`,
+                                    // Крутизна волны идёт от её высоты, поэтому угол считаем из размаха.
+                                    '--pitch-angle': `${(heaveAmplitude(item.slot) * PITCH_PER_PX).toFixed(2)}deg`,
                                 } as CSSProperties
                             }
                         >
