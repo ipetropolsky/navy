@@ -1,20 +1,26 @@
 import { useEffect, useRef } from 'react';
 
 import HullBadge from '@/components/ships/HullBadge';
-import { AUTHOR_COLORS } from '@/data/demo';
-import { Message, Participant } from '@/types/chat';
+import { Member, Message } from '@/types/channel';
 
 import styles from './MessageList.module.less';
 
+// Хранилище держит время числом, а как его показать — дело интерфейса.
+const formatTime = (at: number): string =>
+    new Date(at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+
+const formatDate = (at: number): string => new Date(at).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
+
 interface MessageListProps {
     messages: Message[];
-    participants: Participant[];
-    viewerId: string;
+    members: Member[];
+    /** Чьи сообщения показывать своими — справа и без подписи. */
+    myId: string;
     onReply: (message: Message) => void;
 }
 
 /** Лента сообщений в стиле Telegram: группировка по автору, ответы, тап по сообщению — ответить. */
-export default function MessageList({ messages, participants, viewerId, onReply }: MessageListProps) {
+export default function MessageList({ messages, members, myId, onReply }: MessageListProps) {
     const listRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
@@ -24,24 +30,22 @@ export default function MessageList({ messages, participants, viewerId, onReply 
         }
     }, [messages.length]);
 
-    const byId = new Map(participants.map((participant) => [participant.id, participant]));
-    const colorOf = (authorId: string) => {
-        const index = participants.findIndex((participant) => participant.id === authorId);
-        return AUTHOR_COLORS[Math.max(index, 0) % AUTHOR_COLORS.length];
-    };
+    const byId = new Map(members.map((member) => [member.id, member]));
+    // Цвет позывного выбирает сам участник, поэтому он лежит в его данных, а не считается здесь.
+    const colorOf = (memberId: string): string => byId.get(memberId)?.color ?? 'var(--color-text-muted)';
 
     return (
         <div ref={listRef} className={styles.list}>
-            <div className={styles.dateChip}>8 августа</div>
+            {messages.length > 0 && <div className={styles.dateChip}>{formatDate(messages[0].sentAt)}</div>}
             {messages.map((message, index) => {
-                const own = message.authorId === viewerId;
-                const author = byId.get(message.authorId);
+                const own = message.memberId === myId;
+                const author = byId.get(message.memberId);
                 const prev = messages[index - 1];
                 const next = messages[index + 1];
-                const firstOfGroup = prev?.authorId !== message.authorId;
-                const lastOfGroup = next?.authorId !== message.authorId;
-                const replyTo = message.replyToId
-                    ? messages.find((candidate) => candidate.id === message.replyToId)
+                const firstOfGroup = prev?.memberId !== message.memberId;
+                const lastOfGroup = next?.memberId !== message.memberId;
+                const replyTo = message.threadId
+                    ? messages.find((candidate) => candidate.id === message.threadId)
                     : undefined;
 
                 return (
@@ -67,16 +71,16 @@ export default function MessageList({ messages, participants, viewerId, onReply 
                                 </span>
                             )}
                             {replyTo && (
-                                <span className={styles.replyQuote} style={{ borderColor: colorOf(replyTo.authorId) }}>
-                                    <span className={styles.replyAuthor} style={{ color: colorOf(replyTo.authorId) }}>
-                                        {byId.get(replyTo.authorId)?.name}
+                                <span className={styles.replyQuote} style={{ borderColor: colorOf(replyTo.memberId) }}>
+                                    <span className={styles.replyAuthor} style={{ color: colorOf(replyTo.memberId) }}>
+                                        {byId.get(replyTo.memberId)?.name}
                                     </span>
                                     <span className={styles.replyText}>{replyTo.text}</span>
                                 </span>
                             )}
                             <span className={styles.text}>
                                 {message.text}
-                                <span className={styles.time}>{message.sentAt}</span>
+                                <span className={styles.time}>{formatTime(message.sentAt)}</span>
                             </span>
                         </button>
                     </div>

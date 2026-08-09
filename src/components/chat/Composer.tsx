@@ -1,12 +1,12 @@
 import { SyntheticEvent, useRef, useState } from 'react';
 
-import { Message, Participant } from '@/types/chat';
+import { Member, Message } from '@/types/channel';
 
 import styles from './Composer.module.less';
 
 interface ComposerProps {
     replyTo: Message | null;
-    replyToAuthor: Participant | null;
+    replyToAuthor: Member | null;
     onCancelReply: () => void;
     onSend: (text: string) => void;
     /** Вызывается на каждое изменение текста: добавленные символы (или '\b' при удалении). */

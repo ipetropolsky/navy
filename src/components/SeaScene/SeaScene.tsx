@@ -1,4 +1,4 @@
-import { CSSProperties } from 'react';
+import { CSSProperties, useRef } from 'react';
 
 import cloudFarUrl from '@/assets/scene/cloud-1.png';
 import cloudNearUrl from '@/assets/scene/cloud-2.png';
@@ -9,7 +9,7 @@ import seaFrameTwoUrl from '@/assets/scene/sea-2.png';
 import skyUrl from '@/assets/scene/sky.png';
 import Ship from '@/components/ships/Ship';
 import { SHIP_SPRITES } from '@/components/ships/shipSprites';
-import { MorseFeed, Participant } from '@/types/chat';
+import { Member, MorseFeed } from '@/types/channel';
 
 import styles from './SeaScene.module.less';
 
@@ -93,31 +93,38 @@ function SeaTile({ mirrored = false }: { mirrored?: boolean }) {
 }
 
 interface SeaSceneProps {
-    participants: Participant[];
-    viewerId: string;
+    members: Member[];
+    myId: string;
     morseFeeds: Partial<Record<string, MorseFeed>>;
 }
 
 /** Ночное море: слои неба, месяца, облаков, острова и воды с кораблями-участниками. */
-export default function SeaScene({ participants, viewerId, morseFeeds }: SeaSceneProps) {
-    const viewer = participants.find((participant) => participant.id === viewerId);
-    const others = participants
-        .filter((participant) => participant.id !== viewerId)
-        .sort((a, b) => a.joinedAt - b.joinedAt);
-
-    const placed: { participant: Participant; slot: SceneSlot }[] = [];
-    if (viewer) {
-        placed.push({ participant: viewer, slot: VIEWER_SLOT });
+export default function SeaScene({ members, myId, morseFeeds }: SeaSceneProps) {
+    // Кто уже был в кадре к прошлой отрисовке. Новый корабль входит с краю сцены,
+    // а те, что стояли на рейде до нашего прихода, просто оказываются на месте:
+    // въезжать им неоткуда, мы к ним пришли, а не они к нам.
+    const seenIds = useRef<Set<string> | null>(null);
+    const firstRender = seenIds.current === null;
+    if (!seenIds.current) {
+        seenIds.current = new Set();
     }
-    others.forEach((participant, index) => {
+
+    const me = members.find((member) => member.id === myId);
+    const others = members.filter((member) => member.id !== myId).sort((a, b) => a.joinedAt - b.joinedAt);
+
+    const placed: { member: Member; slot: SceneSlot }[] = [];
+    if (me) {
+        placed.push({ member: me, slot: VIEWER_SLOT });
+    }
+    others.forEach((member, index) => {
         const slot = OTHER_SLOTS[index];
         if (slot) {
-            placed.push({ participant, slot });
+            placed.push({ member, slot });
         }
     });
 
-    const slotStyle = ({ participant, slot }: (typeof placed)[number]): CSSProperties => {
-        const shipScale = SHIP_SPRITES[participant.shipKind].scale;
+    const slotStyle = ({ member, slot }: (typeof placed)[number]): CSSProperties => {
+        const shipScale = SHIP_SPRITES[member.shipKind].scale;
         const width = (20 + slot.depth * 30) * shipScale;
         return {
             // Ширину и кламп «не выходить за кадр» досчитывает CSS: там же живёт масштаб для телефонов.
@@ -154,49 +161,60 @@ export default function SeaScene({ participants, viewerId, morseFeeds }: SeaScen
             </div>
             {/* Остров стоит на воде ниже горизонта, за ним видно море. Отражение уже есть в картинке. */}
             <img className={styles.island} src={islandUrl} alt="" />
-            {placed.map((item, index) => (
-                <div
-                    key={item.participant.id}
-                    className={styles.shipSlot}
-                    style={{ ...slotStyle(item), zIndex: Math.max(Math.round(item.slot.depth * 10), 1) }}
-                >
-                    {/* Корабль, номер, огни и тень на воде качаются как единое целое: обе анимации
-                        висят на одном блоке, потому что двигают разные свойства — translate и rotate. */}
+            {placed.map((item, index) => {
+                const entering = !firstRender && !seenIds.current?.has(item.member.id);
+                seenIds.current?.add(item.member.id);
+                return (
                     <div
-                        className={styles.shipRock}
+                        key={item.member.id}
+                        className={entering ? `${styles.shipSlot} ${styles.shipEntering}` : styles.shipSlot}
                         style={
                             {
-                                // Минус — момент старта в прошлом: корабль появляется уже качающимся.
-                                // Отсюда же CSS считает задержку тангажа, отняв четверть цикла.
-                                '--wave-start': `-${WAVE_STARTS[index].toFixed(2)}s`,
-                                '--heave': `${heaveAmplitude(item.slot).toFixed(2)}px`,
-                                // Крутизна волны идёт от её высоты, поэтому угол считаем из неё,
-                                // а не из хода корпуса: осадка корабля уклон воды не меняет.
-                                // Знак зависит от того, куда смотрит корабль: положительный
-                                // поворот поднимает левый край, отрицательный — правый, а вверх
-                                // вместе с корпусом должен идти нос, а не корма.
-                                '--pitch-angle': `${(
-                                    waveAmplitude(item.slot) *
-                                    PITCH_PER_PX *
-                                    (item.slot.facing === 'left' ? 1 : -1)
-                                ).toFixed(2)}deg`,
+                                ...slotStyle(item),
+                                zIndex: Math.max(Math.round(item.slot.depth * 10), 1),
+                                // Заходит с той стороны, куда смотрит корма: корабль идёт носом вперёд.
+                                '--enter-from': item.slot.facing === 'left' ? '120vw' : '-120vw',
                             } as CSSProperties
                         }
                     >
-                        {/* Тень идёт перед кораблём в разметке, поэтому корпус её перекрывает. */}
-                        <div className={styles.shipShadow} />
-                        <Ship
-                            kind={item.participant.shipKind}
-                            name={item.participant.name}
-                            hullNumber={item.participant.hullNumber}
-                            facing={item.slot.facing}
-                            active={item.participant.id === viewerId}
-                            depth={item.slot.depth}
-                            morseFeed={morseFeeds[item.participant.id] ?? null}
-                        />
+                        {/* Корабль, номер, огни и тень на воде качаются как единое целое: обе анимации
+                        висят на одном блоке, потому что двигают разные свойства — translate и rotate. */}
+                        <div
+                            className={styles.shipRock}
+                            style={
+                                {
+                                    // Минус — момент старта в прошлом: корабль появляется уже качающимся.
+                                    // Отсюда же CSS считает задержку тангажа, отняв четверть цикла.
+                                    '--wave-start': `-${WAVE_STARTS[index].toFixed(2)}s`,
+                                    '--heave': `${heaveAmplitude(item.slot).toFixed(2)}px`,
+                                    // Крутизна волны идёт от её высоты, поэтому угол считаем из неё,
+                                    // а не из хода корпуса: осадка корабля уклон воды не меняет.
+                                    // Знак зависит от того, куда смотрит корабль: положительный
+                                    // поворот поднимает левый край, отрицательный — правый, а вверх
+                                    // вместе с корпусом должен идти нос, а не корма.
+                                    '--pitch-angle': `${(
+                                        waveAmplitude(item.slot) *
+                                        PITCH_PER_PX *
+                                        (item.slot.facing === 'left' ? 1 : -1)
+                                    ).toFixed(2)}deg`,
+                                } as CSSProperties
+                            }
+                        >
+                            {/* Тень идёт перед кораблём в разметке, поэтому корпус её перекрывает. */}
+                            <div className={styles.shipShadow} />
+                            <Ship
+                                kind={item.member.shipKind}
+                                name={item.member.name}
+                                hullNumber={item.member.hullNumber}
+                                facing={item.slot.facing}
+                                active={item.member.id === myId}
+                                depth={item.slot.depth}
+                                morseFeed={morseFeeds[item.member.id] ?? null}
+                            />
+                        </div>
                     </div>
-                </div>
-            ))}
+                );
+            })}
             <div className={styles.bottomFade} />
         </div>
     );

@@ -1,7 +1,7 @@
 import corvetteUrl from '@/assets/scene/ship-corvette.png';
 import frigateUrl from '@/assets/scene/ship-frigate.png';
 import patrolUrl from '@/assets/scene/ship-patrol.png';
-import { ShipKind } from '@/types/chat';
+import { ShipKind } from '@/types/channel';
 
 export interface ShipSprite {
     url: string;

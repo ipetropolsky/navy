@@ -64,22 +64,16 @@
     font-size: 13px;
 }
 
+// Строки больше не нажимаются: выбирать, за кого говорить, нельзя — за свой корабль
+// говорит своя вкладка. Поэтому ни курсора, ни подсветки под указателем.
 .row {
     display: flex;
     align-items: center;
     gap: 12px;
     padding: 8px;
-    border: 0;
     border-radius: 10px;
-    background: transparent;
     color: var(--color-text);
-    font: inherit;
     text-align: left;
-    cursor: pointer;
-
-    &:hover {
-        background: rgba(98, 174, 230, 0.07);
-    }
 }
 
 .rowActive {
@@ -87,10 +81,37 @@
 
     background: rgba(98, 174, 230, 0.14);
     box-shadow: inset 2px 0 0 var(--color-accent);
+}
 
-    &:hover {
-        background: rgba(98, 174, 230, 0.14);
-    }
+.you {
+    color: var(--color-text-muted);
+    font-weight: 400;
+}
+
+// Свои действия внизу списка, отбиты чертой: они про тебя, а не про эскадру.
+.actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--color-border);
+}
+
+.action {
+    padding: 9px 14px;
+    border: 0;
+    border-radius: 10px;
+    background: var(--color-bubble-in);
+    color: var(--color-text);
+    font: inherit;
+    cursor: pointer;
+}
+
+.actionDanger {
+    .action();
+
+    color: #ffb4b4;
 }
 
 .avatar {
@@ -118,9 +139,4 @@
 .kind {
     color: var(--color-text-muted);
     font-size: 13px;
-}
-
-.check {
-    flex: none;
-    color: var(--color-accent);
 }

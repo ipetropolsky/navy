@@ -35,13 +35,7 @@
 
 .scene {
     height: 100%;
-    opacity: 1;
-    transition: opacity 0.18s ease-in;
     animation: scene-in 0.28s ease-out;
-}
-
-.sceneExiting {
-    opacity: 0;
 }
 
 @keyframes scene-in {
@@ -85,7 +79,7 @@
     text-shadow: 0 1px 6px rgba(0, 0, 0, 0.7);
 }
 
-.crewButton {
+.headerButton {
     flex: none;
     display: flex;
     padding: 8px;
@@ -101,9 +95,18 @@
     }
 }
 
-.chat {
+// Нижняя панель: под сценой живёт либо лента с полем ввода, либо форма — создание канала
+// или постановка корабля в строй. Раскладка от этого не меняется, поэтому море на месте.
+.panel {
     display: flex;
     flex-direction: column;
     flex: 1 1 auto;
     min-height: @chat-min-height;
+    overflow-y: auto;
+}
+
+.waiting {
+    padding: 24px 16px;
+    color: var(--color-text-muted);
+    text-align: center;
 }
