@@ -2,10 +2,11 @@ import styles from './Sea.module.less';
 
 /**
  * Как кадр возвращается к исходному масштабу в конце цикла:
- * wave — мягкой полосой сверху вниз, roll — быстрым затуханием целиком,
- * dissolve — перекрёстным затуханием на весь цикл.
+ * wave — мягкой полосой сверху вниз, ebb — ровным растворением за последние
+ * пару секунд, roll — быстрым затуханием целиком, dissolve — перекрёстным
+ * затуханием на весь цикл.
  */
-export type SeaMode = 'wave' | 'roll' | 'dissolve';
+export type SeaMode = 'wave' | 'ebb' | 'roll' | 'dissolve';
 
 interface SeaProps {
     mode?: SeaMode;
