@@ -160,50 +160,40 @@ export default function SeaScene({ participants, viewerId, morseFeeds }: SeaScen
                     className={styles.shipSlot}
                     style={{ ...slotStyle(item), zIndex: Math.max(Math.round(item.slot.depth * 10), 1) }}
                 >
-                    {/* Корабль, номер, огни и тень на воде качаются как единое целое. */}
+                    {/* Корабль, номер, огни и тень на воде качаются как единое целое: обе анимации
+                        висят на одном блоке, потому что двигают разные свойства — translate и rotate. */}
                     <div
-                        className={styles.shipFloat}
+                        className={styles.shipRock}
                         style={
                             {
                                 // Минус — момент старта в прошлом: корабль появляется уже качающимся.
-                                animationDelay: `-${WAVE_STARTS[index].toFixed(2)}s`,
-                                '--bob-amplitude': `${heaveAmplitude(item.slot).toFixed(2)}px`,
+                                // Отсюда же CSS считает задержку тангажа, отняв четверть цикла.
+                                '--wave-start': `-${WAVE_STARTS[index].toFixed(2)}s`,
+                                '--heave': `${heaveAmplitude(item.slot).toFixed(2)}px`,
+                                // Крутизна волны идёт от её высоты, поэтому угол считаем из неё,
+                                // а не из хода корпуса: осадка корабля уклон воды не меняет.
+                                // Знак зависит от того, куда смотрит корабль: положительный
+                                // поворот поднимает левый край, отрицательный — правый, а вверх
+                                // вместе с корпусом должен идти нос, а не корма.
+                                '--pitch-angle': `${(
+                                    waveAmplitude(item.slot) *
+                                    PITCH_PER_PX *
+                                    (item.slot.facing === 'left' ? 1 : -1)
+                                ).toFixed(2)}deg`,
                             } as CSSProperties
                         }
                     >
                         {/* Тень идёт перед кораблём в разметке, поэтому корпус её перекрывает. */}
                         <div className={styles.shipShadow} />
-                        {/* Тангаж лежит внутри вертикальной качки: движения складываются. */}
-                        <div
-                            className={styles.shipPitch}
-                            style={
-                                {
-                                    // Тот же момент старта, что и у вертикальной качки: сдвиг на
-                                    // четверть волны зашит в сами кадры, а не в задержку.
-                                    animationDelay: `-${WAVE_STARTS[index].toFixed(2)}s`,
-                                    // Крутизна волны идёт от её высоты, поэтому угол считаем из неё,
-                                    // а не из хода корпуса: осадка корабля уклон воды не меняет.
-                                    // Знак зависит от того, куда смотрит корабль: положительный
-                                    // поворот поднимает левый край, отрицательный — правый, а вверх
-                                    // вместе с корпусом должен идти нос, а не корма.
-                                    '--pitch-angle': `${(
-                                        waveAmplitude(item.slot) *
-                                        PITCH_PER_PX *
-                                        (item.slot.facing === 'left' ? 1 : -1)
-                                    ).toFixed(2)}deg`,
-                                } as CSSProperties
-                            }
-                        >
-                            <Ship
-                                kind={item.participant.shipKind}
-                                name={item.participant.name}
-                                hullNumber={item.participant.hullNumber}
-                                facing={item.slot.facing}
-                                active={item.participant.id === viewerId}
-                                depth={item.slot.depth}
-                                morseFeed={morseFeeds[item.participant.id] ?? null}
-                            />
-                        </div>
+                        <Ship
+                            kind={item.participant.shipKind}
+                            name={item.participant.name}
+                            hullNumber={item.participant.hullNumber}
+                            facing={item.slot.facing}
+                            active={item.participant.id === viewerId}
+                            depth={item.slot.depth}
+                            morseFeed={morseFeeds[item.participant.id] ?? null}
+                        />
                     </div>
                 </div>
             ))}
