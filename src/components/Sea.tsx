@@ -17,17 +17,8 @@ export type SeaMode = 'wave' | 'ebb' | 'roll' | 'dissolve' | 'glints' | 'mirror'
 
 interface SeaProps {
     mode?: SeaMode;
-    /**
-     * Ключи снимков для режима frames: показываются по кругу в этом порядке.
-     * Соответствуют src/assets/sources/sea_<ключ>.png, поэтому строки — среди
-     * них есть sea_2a.
-     */
-    frames?: string[];
-    /**
-     * Насколько раньше начинается проявление следующего снимка, в долях слота.
-     * Ноль — строго по очереди. Разумный предел — меньше единицы.
-     */
-    overlap?: number;
+    /** Номера снимков для режима frames: показываются по кругу в этом порядке. */
+    frames?: number[];
 }
 
 interface Glint {
@@ -76,24 +67,18 @@ const GLINTS: Glint[] = (() => {
     });
 })();
 
-export default function Sea({ mode = 'wave', frames = ['1', '2', '2a', '3', '4'], overlap = 0 }: SeaProps) {
+export default function Sea({ mode = 'wave', frames = [1, 2, 3, 4] }: SeaProps) {
     return (
-        <div
-            className={`${styles.sea} ${styles[mode]}`}
-            style={{ '--overlap': overlap } as CSSProperties}
-            role="img"
-            aria-label="Спокойное ночное море"
-        >
+        <div className={`${styles.sea} ${styles[mode]}`} role="img" aria-label="Спокойное ночное море">
             <div className={`${styles.layer} ${styles.back}`} />
             <div className={styles.curtain}>
                 <div className={`${styles.layer} ${styles.front}`} />
             </div>
             {mode === 'frames' && frames.length > 0 && (
                 <div className={styles.stack} style={{ '--n': frames.length } as CSSProperties}>
-                    {/* Хвостовых кадров два: они повторяют первый и второй, поэтому
-                        к концу цикла сверху лежит ровно то же, что в его начале, и
-                        общий сброс на стыке не виден. */}
-                    {[...frames, frames[0], frames[1 % frames.length]].map((frame, index) => (
+                    {/* Кадром больше: последний повторяет первый, поэтому к концу
+                        цикла видно его же и общий сброс на стыке не виден. */}
+                    {[...frames, frames[0]].map((frame, index) => (
                         <div
                             key={`${frame}-${index}`}
                             className={`${styles.frame} ${styles[`f${frame}`]}`}
