@@ -14,32 +14,36 @@
 
 // Небо — текстура из повторяющейся картинки: соседние плитки зеркальны, поэтому стыков не видно.
 // Ряд сдвинут вправо на треть плитки. Месяц и облака лежат отдельными слоями и не двигаются.
+// Фон = цвет верхней кромки картинки: если по высоте её не хватает, шов не заметен.
 .sky {
     position: absolute;
     inset: 0 0 auto;
     height: @horizon;
     overflow: hidden;
+    background: #000117;
 }
 
 // Полоса из трёх плиток, каждая шириной с кадр: в кадре всегда видна одна картинка,
 // поэтому узнаваемые узоры звёзд не задваиваются. Центр полосы совмещён с центром сцены,
 // слагаемое в translateX двигает небо влево-вправо (11.111% полосы = треть кадра).
+// Плитки масштабируются строго по ширине и прижаты к горизонту: тогда видимый кусок неба
+// не зависит от высоты слоя, и при изменении ширины окна картинка не «едет».
 .skyStrip {
     position: absolute;
-    top: 0;
+    bottom: 0;
     left: 50%;
-    height: 100%;
     width: 300%;
     display: flex;
+    align-items: flex-end;
     transform: translateX(calc(-50% + 11.111%));
 }
 
 .skyTile {
     display: block;
+    // min-width: 0 обязателен: иначе flex-элемент не сжимается уже натуральной ширины картинки.
     flex: 0 0 33.34%;
-    height: 100%;
-    object-fit: cover;
-    object-position: center bottom;
+    min-width: 0;
+    height: auto;
 }
 
 .skyTileMirrored {
@@ -54,6 +58,7 @@
     position: absolute;
     inset: @horizon 0 0;
     overflow: hidden;
+    background: #01061a;
 }
 
 // Так же, как небо: каждая плитка шириной с кадр, лунная дорожка попадает под месяц.
@@ -62,18 +67,17 @@
     position: absolute;
     top: 0;
     left: 50%;
-    height: 100%;
     width: 300%;
     display: flex;
+    align-items: flex-start;
     transform: translateX(-50%);
 }
 
 .seaTile {
     display: block;
     flex: 0 0 33.34%;
-    height: 100%;
-    object-fit: cover;
-    object-position: center top;
+    min-width: 0;
+    height: auto;
 }
 
 .seaTileMirrored {

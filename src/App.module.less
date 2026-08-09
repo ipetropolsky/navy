@@ -1,8 +1,15 @@
+// Минимальная высота сцены: от неба остаётся полоска высотой с шапку чата
+// (небо занимает 56% сцены, шапка ~56px).
+@scene-min-height: 100px;
+// Лента сообщений не сжимается ниже этой высоты.
+@chat-min-height: 200px;
+
 .app {
     position: relative;
     display: flex;
     flex-direction: column;
-    height: 100%;
+    // dvh, чтобы выехавшая клавиатура уменьшала именно доступную высоту.
+    height: 100dvh;
     max-width: 760px;
     margin: 0 auto;
     overflow: hidden;
@@ -12,10 +19,18 @@
         0 0 60px rgba(0, 0, 0, 0.6);
 }
 
+// Сцена всегда на экране: при нехватке места сжимается вместе с лентой,
+// каждая — до своего минимума.
 .header {
     position: relative;
+    // Не сжимается флексом: высоту целиком задаёт clamp ниже, иначе сцена
+    // проваливалась бы в минимум раньше ленты.
     flex: none;
-    height: clamp(210px, 34dvh, 300px);
+    // Высота идёт за доступной высотой экрана: когда вылезает клавиатура,
+    // сцена и лента уменьшаются одновременно, каждая до своего минимума.
+    height: clamp(@scene-min-height, 34dvh, 300px);
+    min-height: @scene-min-height;
+    transition: height 0.25s ease;
 }
 
 .scene {
@@ -89,6 +104,6 @@
 .chat {
     display: flex;
     flex-direction: column;
-    flex: 1;
-    min-height: 0;
+    flex: 1 1 auto;
+    min-height: @chat-min-height;
 }
