@@ -74,11 +74,13 @@ export default function Sea({ mode = 'wave', frames = [1, 2, 3, 4] }: SeaProps) 
             <div className={styles.curtain}>
                 <div className={`${styles.layer} ${styles.front}`} />
             </div>
-            {mode === 'frames' && (
+            {mode === 'frames' && frames.length > 0 && (
                 <div className={styles.stack} style={{ '--n': frames.length } as CSSProperties}>
-                    {frames.map((frame, index) => (
+                    {/* Кадров на один больше: последний повторяет первый, поэтому
+                        к концу цикла сверху лежит он же и сброс на стыке не виден. */}
+                    {[...frames, frames[0]].map((frame, index) => (
                         <div
-                            key={frame}
+                            key={`${frame}-${index}`}
                             className={`${styles.frame} ${styles[`f${frame}`]}`}
                             style={{ '--i': index } as CSSProperties}
                         />
