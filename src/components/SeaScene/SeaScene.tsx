@@ -112,6 +112,8 @@ export default function SeaScene({ participants, viewerId, morseFeeds }: SeaScen
                             } as CSSProperties
                         }
                     >
+                        {/* Тень идёт перед кораблём в разметке, поэтому корпус её перекрывает. */}
+                        <div className={styles.shipShadow} />
                         <Ship
                             kind={item.participant.shipKind}
                             name={item.participant.name}
@@ -121,7 +123,6 @@ export default function SeaScene({ participants, viewerId, morseFeeds }: SeaScen
                             depth={item.slot.depth}
                             morseFeed={morseFeeds[item.participant.id] ?? null}
                         />
-                        <div className={styles.shipShadow} />
                     </div>
                 </div>
             ))}
