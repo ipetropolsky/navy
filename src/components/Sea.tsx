@@ -8,14 +8,17 @@ import styles from './Sea.module.less';
  * пару секунд, roll — быстрым затуханием целиком, dissolve — перекрёстным
  * затуханием на весь цикл.
  *
- * Два варианта обходятся без возврата вовсе: glints двигает по усреднённому
- * фону только волны-блики, mirror перетекает между картинкой и её зеркальным
- * отражением — гребни двух кадров не совпадают, и двоиться нечему.
+ * Три варианта обходятся без возврата вовсе: frames перебирает по кругу снимки
+ * sea_1…4.png, glints двигает по усреднённому фону только волны-блики, mirror
+ * перетекает между картинкой и её зеркальным отражением — гребни двух кадров
+ * не совпадают, и двоиться нечему.
  */
-export type SeaMode = 'wave' | 'ebb' | 'roll' | 'dissolve' | 'glints' | 'mirror';
+export type SeaMode = 'wave' | 'ebb' | 'roll' | 'dissolve' | 'glints' | 'mirror' | 'frames';
 
 interface SeaProps {
     mode?: SeaMode;
+    /** Номера снимков для режима frames: показываются по кругу в этом порядке. */
+    frames?: number[];
 }
 
 interface Glint {
@@ -64,13 +67,24 @@ const GLINTS: Glint[] = (() => {
     });
 })();
 
-export default function Sea({ mode = 'wave' }: SeaProps) {
+export default function Sea({ mode = 'wave', frames = [1, 2, 3, 4] }: SeaProps) {
     return (
         <div className={`${styles.sea} ${styles[mode]}`} role="img" aria-label="Спокойное ночное море">
             <div className={`${styles.layer} ${styles.back}`} />
             <div className={styles.curtain}>
                 <div className={`${styles.layer} ${styles.front}`} />
             </div>
+            {mode === 'frames' && (
+                <div className={styles.stack} style={{ '--n': frames.length } as CSSProperties}>
+                    {frames.map((frame, index) => (
+                        <div
+                            key={frame}
+                            className={`${styles.frame} ${styles[`f${frame}`]}`}
+                            style={{ '--i': index } as CSSProperties}
+                        />
+                    ))}
+                </div>
+            )}
             {mode === 'glints' && (
                 <div className={styles.field}>
                     <div className={styles.grain} />

@@ -27,6 +27,15 @@
 // «Растворение»: нижний слой проявляется к четверти цикла.
 @sea-dissolve-handover: 25%;
 
+// «Смена»: снимки sea_1…4.png. У них своя пропорция, отличная от sea.png.
+@frames-image-width: 2170;
+@frames-image-height: 725;
+
+// Скаты трапеции прозрачности. Экранированы, потому что max() у Less свой и
+// на var() он спотыкается: без ~'' сборка падает на «Operation on an invalid type».
+@frame-ramp-down: ~'(var(--slot) - var(--progress)) / var(--ramp)';
+@frame-ramp-up: ~'(var(--progress) - 1 + var(--ramp)) / var(--ramp)';
+
 // «Блики»: спрайты волн 600×48 из src/assets/scene идут по перспективному лучу.
 // Отношение сдвига к масштабу одинаково на краях (7.7/0.08 = 96/1), поэтому
 // блик всё время остаётся на луче — какую кривую хода ни возьми.
@@ -129,6 +138,58 @@
         animation-name: sea-mirror;
     }
 }
+
+// «Смена»: снимки идут по кругу в том порядке, в каком их перечислили.
+// Ничего не зеркалим и не двигаем — меняется только рисунок ряби.
+.frames {
+    aspect-ratio: ~'@{frames-image-width} / @{frames-image-height}';
+
+    .layer,
+    .curtain {
+        display: none;
+    }
+}
+
+.stack {
+    position: absolute;
+    inset: 0;
+    // Без изоляции plus-lighter прибавил бы к кадрам ещё и фон сцены.
+    isolation: isolate;
+}
+
+// Кадры складываются, а не перекрываются: при обычном наложении на середине
+// перехода сквозь оба полупрозрачных кадра просвечивает фон и яркость
+// проваливается на четверть. При сложении сумма прозрачностей всё время равна
+// единице, и переход точен при любом числе картинок.
+.frame {
+    position: absolute;
+    inset: 0;
+    background-position: top center;
+    background-size: cover;
+    mix-blend-mode: plus-lighter;
+
+    // Доля цикла на одну картинку и доля, которую занимает переход.
+    --slot: calc(1 / var(--n));
+    --ramp: calc(var(--sea-fade) / (var(--n) * var(--sea-seconds)));
+
+    animation-name: sea-progress;
+    animation-duration: calc(var(--n) * var(--sea-seconds) * 1s);
+    // Все кадры делят одни ключевые кадры и разъезжаются задержкой: так не
+    // нужно считать остаток от деления на длину цикла.
+    animation-delay: calc(var(--i) * var(--sea-seconds) * -1s);
+    animation-timing-function: linear;
+    animation-iteration-count: infinite;
+
+    // Трапеция: единица на своём слоте, линейные скаты по @sea-fade-seconds
+    // с обеих сторон. Всё лишнее браузер обрежет к [0, 1].
+    opacity: ~'max(@{frame-ramp-down}, @{frame-ramp-up})';
+}
+
+each(range(4), {
+    .f@{value} {
+        background-image: url('@/assets/sources/sea_@{value}.png');
+    }
+});
 
 // «Блики»: саму картинку не двигаем вовсе. Под бликами — усреднённый фон,
 // собранный из sea.png скриптом tools/make-sea-background.cjs.
@@ -349,7 +410,8 @@ each(range(8), {
     .layer,
     .curtain,
     .track,
-    .spot {
+    .spot,
+    .frame {
         animation: none;
     }
 
