@@ -27,6 +27,16 @@
 // «Растворение»: нижний слой проявляется к четверти цикла.
 @sea-dissolve-handover: 25%;
 
+// «Блики»: спрайты волн 600×48 из src/assets/scene идут по перспективному лучу.
+// Отношение сдвига к масштабу одинаково на краях (7.7/0.08 = 96/1), поэтому
+// блик всё время остаётся на луче — какую кривую хода ни возьми.
+@glint-sprite-width: 600;
+@glint-sprite-height: 48;
+@glint-from-y: 7.7%;
+@glint-to-y: 96%;
+@glint-from-scale: 0.08;
+@glint-ease: cubic-bezier(0.4, 0.05, 0.75, 0.5);
+
 // Положение мягкой полосы, которой сменяется кадр в «Волне», и доля пройденного
 // цикла для «Отлива». Без @property значения не интерполируются и идут скачком.
 @property --wipe {
@@ -110,6 +120,83 @@
     }
 }
 
+// «Зеркало»: вторая копия отражена по горизонтали, поэтому гребни двух кадров
+// не совпадают — при перетекании нечему двоиться. Лунная дорожка смещена от
+// центра всего на 0.3% ширины, так что при отражении не едет.
+.mirror {
+    .front {
+        transform: scaleX(-1);
+        animation-name: sea-mirror;
+    }
+}
+
+// «Блики»: саму картинку не двигаем вовсе. Под бликами — усреднённый фон,
+// собранный из sea.png скриптом tools/make-sea-background.cjs.
+.glints {
+    background-image: url('@/assets/scene/sea-blur.png');
+    background-position: top center;
+    background-size: cover;
+
+    .layer,
+    .curtain {
+        display: none;
+    }
+}
+
+.field {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+}
+
+// Лёгкий шум поверх фона: ровный тёмный градиент иначе идёт полосами.
+.grain {
+    position: absolute;
+    inset: 0;
+    background-image: url('@/assets/scene/sea-noise.png');
+    background-repeat: repeat;
+    background-size: 64px 64px;
+}
+
+// Ход и рост разведены по двум элементам. Дорожка занимает весь слой моря,
+// поэтому её translateY в процентах считается от высоты моря. Точка растёт
+// вокруг своего центра и не уезжает вбок — при общем масштабе все блики у
+// горизонта сходились бы к центру и края оставались бы пустыми.
+.track,
+.spot {
+    animation-duration: var(--dur);
+    animation-delay: var(--delay);
+    animation-timing-function: @glint-ease;
+    animation-iteration-count: infinite;
+}
+
+.track {
+    position: absolute;
+    inset: 0;
+    animation-name: glint-fall;
+}
+
+.spot {
+    position: absolute;
+    top: 0;
+    left: var(--x);
+    width: var(--w);
+    aspect-ratio: ~'@{glint-sprite-width} / @{glint-sprite-height}';
+    margin-left: calc(var(--w) / -2);
+    background-position: center;
+    background-size: 100% 100%;
+    background-repeat: no-repeat;
+    transform-origin: 50% 0;
+    animation-name: glint-grow;
+    will-change: transform, opacity;
+}
+
+each(range(8), {
+    .v@{value} {
+        background-image: url('@/assets/scene/wave-@{value}.png');
+    }
+});
+
 // «Перекат»: чистое расхождение, а в конце кадр целиком уступает место исходному.
 .roll {
     .front {
@@ -159,6 +246,52 @@
         // Значения кастомных свойств Less отдаёт как есть, поэтому арифметику
         // вычисляем интерполяцией — иначе в CSS уедет «100% + 28%».
         --wipe: ~'@{sea-wipe-end}';
+    }
+}
+
+@keyframes glint-fall {
+    from {
+        transform: translateY(@glint-from-y);
+    }
+
+    to {
+        transform: translateY(@glint-to-y);
+    }
+}
+
+@keyframes glint-grow {
+    0% {
+        opacity: 0;
+        transform: scaleX(var(--flip)) scale(@glint-from-scale);
+    }
+
+    14% {
+        opacity: var(--o);
+    }
+
+    72% {
+        opacity: var(--o);
+    }
+
+    100% {
+        opacity: 0;
+        transform: scaleX(var(--flip)) scale(1);
+    }
+}
+
+@keyframes sea-mirror {
+    0% {
+        opacity: 0;
+        animation-timing-function: ease-in-out;
+    }
+
+    50% {
+        opacity: 1;
+        animation-timing-function: ease-in-out;
+    }
+
+    100% {
+        opacity: 0;
     }
 }
 
@@ -216,7 +349,9 @@
     // Без анимации верхний слой остаётся в исходном состоянии (opacity: 1,
     // scale: 1) и полностью закрывает нижний — получается статичная картинка.
     .layer,
-    .curtain {
+    .curtain,
+    .track,
+    .spot {
         animation: none;
     }
 
