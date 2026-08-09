@@ -13,7 +13,8 @@ import { ChannelSnapshot } from '@/backend/types';
  * иначе демо-переписка со временем уезжала бы всё дальше в прошлое.
  *
  * Места на рейде заданы руками, по одному кораблю в каждом коридоре и на разной дальности:
- * так сразу видно и перспективу, и то, что корабли не толпятся.
+ * так сразу видно и перспективу, и то, что корабли не толпятся. Левый коридор занят только
+ * с четвёртого слота — ближе к горизонту там остров.
  */
 
 export const DEMO_CHANNEL_ID = 'ch-demo';
@@ -55,7 +56,7 @@ export const createDemoChannel = (): ChannelSnapshot => ({
             hullNumber: '208',
             shipKind: 'torpedo',
             color: '#95d5b2',
-            place: { slot: 3, corridor: 0, left: 21, facing: 'left', enterFrom: 'right' },
+            place: { slot: 4, corridor: 0, left: 21, facing: 'left', enterFrom: 'right' },
             joinedAt: minutesAfterMidnight(21, 34),
         },
     ],

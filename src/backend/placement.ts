@@ -28,6 +28,19 @@ const CORRIDOR_WIDTH = 100 / 6;
 /** Ближе этого числа слотов друг к другу два корабля в одном коридоре не встают. */
 const MIN_SLOT_GAP = 3;
 
+/**
+ * Левый коридор упирается в остров: тот занимает левую часть кадра, а его берег стоит
+ * примерно на дальности слота 0.7. Корабль на дальних слотах там либо оказывается прямо
+ * на суше (замер: на слоте 0 под его ватерлинией земля), либо, будучи мелким и далёким,
+ * рисуется поверх более близкого острова и читается выброшенным на берег.
+ *
+ * Поэтому левый коридор закрыт для дальних слотов. Начиная с ISLAND_FREE_SLOT корабль
+ * заметно ближе острова и крупнее — перекрытие читается как «прошёл перед берегом»,
+ * а это как раз то, что нужно.
+ */
+const ISLAND_CORRIDOR = 0;
+const ISLAND_FREE_SLOT = 4;
+
 const pick = <T>(items: T[]): T => items[Math.floor(Math.random() * items.length)];
 
 const shuffled = <T>(items: T[]): T[] => {
@@ -49,13 +62,16 @@ export const placeShip = (taken: ShipPlacement[]): ShipPlacement | null => {
     const allSlots = [...new Array<number>(SLOT_COUNT)].map((_, index) => index);
     const freeSlots = shuffled(allSlots.filter((slot) => !taken.some((placement) => placement.slot === slot)));
 
-    /** Коридоры, свободные для этого слота: занятые соседями по дальности — мимо. */
+    /** Коридоры, свободные для этого слота: занятые соседями по дальности и остров — мимо. */
     const corridorsFor = (slot: number): number[] => {
         const blocked = new Set(
             taken
                 .filter((placement) => Math.abs(placement.slot - slot) < MIN_SLOT_GAP)
                 .map((placement) => placement.corridor)
         );
+        if (slot < ISLAND_FREE_SLOT) {
+            blocked.add(ISLAND_CORRIDOR);
+        }
         return shuffled(CORRIDOR_CENTERS.map((_, index) => index)).filter((corridor) => !blocked.has(corridor));
     };
 
