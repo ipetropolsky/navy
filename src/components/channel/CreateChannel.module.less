@@ -27,34 +27,29 @@
     text-align: left;
 }
 
-// Готовая ссылка под полем адреса: её видно целиком, и рядом кнопка «скопировать» —
-// пересылать её придётся часто, а выделять мышью длинный адрес неудобно.
-.linkRow {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin: -6px 0 16px;
-    padding: 8px 8px 8px 12px;
-    border-radius: 11px;
-    background: var(--color-bubble-in);
-    text-align: left;
-}
+// Кнопка копирования прилеплена к правому краю поля: сам адрес длинный, показывать его
+// негде, а в буфер он нужен целиком.
+.inputRow {
+    position: relative;
+    display: block;
 
-.link {
-    flex: 1;
-    min-width: 0;
-    overflow-wrap: anywhere;
-    color: var(--color-text-muted);
-    font-size: 13px;
+    // Место под кнопку, чтобы текст под неё не заезжал.
+    .input,
+    .inputBad {
+        padding-right: 44px;
+    }
 }
 
 .copy {
-    flex: none;
+    position: absolute;
+    top: 50%;
+    right: 5px;
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 32px;
-    height: 32px;
+    width: 34px;
+    height: 34px;
+    transform: translateY(-50%);
     border: 0;
     border-radius: 9px;
     background: transparent;
@@ -64,6 +59,19 @@
     &:hover {
         background: rgba(98, 174, 230, 0.14);
     }
+
+    &:disabled {
+        opacity: 0.35;
+        cursor: default;
+        background: transparent;
+    }
+}
+
+.copied {
+    display: block;
+    margin-top: 5px;
+    color: var(--color-accent);
+    font-size: 12px;
 }
 
 .label {

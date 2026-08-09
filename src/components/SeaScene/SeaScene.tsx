@@ -9,9 +9,7 @@ import seaFrameTwoUrl from '@/assets/scene/sea-2.png';
 import skyUrl from '@/assets/scene/sky.png';
 import Ship from '@/components/ships/Ship';
 import { SHIP_SPRITES } from '@/components/ships/shipSprites';
-import { Member, MorseFeed } from '@/types/channel';
-
-import { ShipPlacement, VIEWER_SLOT, placeShip, placeViewer, slotDepth } from '@/components/SeaScene/shipPlacement';
+import { Member, MorseFeed, slotDepth } from '@/types/channel';
 
 import styles from './SeaScene.module.less';
 
@@ -81,63 +79,40 @@ interface SeaSceneProps {
     members: Member[];
     myId: string;
     morseFeeds: Partial<Record<string, MorseFeed>>;
+    /**
+     * Канал загружен и список кораблей окончательный. Нужен, чтобы отличить «пока пусто,
+     * потому что ещё грузимся» от «пусто, потому что на рейде никого»: от этого зависит,
+     * заплывёт ли следующий корабль в кадр или просто окажется на месте.
+     */
+    ready: boolean;
 }
 
 /** Ночное море: слои неба, месяца, облаков, острова и воды с кораблями-участниками. */
-export default function SeaScene({ members, myId, morseFeeds }: SeaSceneProps) {
-    // Расстановка живёт в памяти вкладки: раз выбранное место корабль не меняет, пока
-    // не выйдет из канала. Иначе он переезжал бы при каждой отрисовке — например, когда
-    // кто-то просто отправил сообщение.
-    const placements = useRef(new Map<string, ShipPlacement>());
+export default function SeaScene({ members, myId, morseFeeds, ready }: SeaSceneProps) {
     // Кто уже был в кадре. Заплывает только тот, кто вошёл при нас; те, что стояли на рейде
     // до нашего прихода, просто оказываются на месте — въезжать им неоткуда, мы пришли к ним.
     //
-    // Отсчёт ведём не от первой отрисовки, а от первой, где корабли вообще появились: пока
-    // канал грузится, их нет, и «первым кадром» оказался бы пустой экран — тогда заплывала бы
-    // вся эскадра разом при каждом открытии страницы.
+    // Отсчёт ведём от первой отрисовки с загруженным каналом, а не от самой первой: пока канал
+    // грузится, кораблей нет, и «первым кадром» оказался бы пустой экран. По списку кораблей
+    // судить тоже нельзя — в только что созданном канале их ноль, и тогда свой собственный
+    // корабль стал бы «стоявшим тут всегда» и не заплыл бы.
     const seenIds = useRef<Set<string> | null>(null);
-    const baseline = seenIds.current === null && members.length > 0;
+    const baseline = ready && seenIds.current === null;
     if (baseline) {
         seenIds.current = new Set(members.map((member) => member.id));
     }
 
-    const me = members.find((member) => member.id === myId);
-    const others = members.filter((member) => member.id !== myId).sort((a, b) => a.joinedAt - b.joinedAt);
+    // Порядок отрисовки — от дальнего к ближнему: ближний перекрывает дальнего.
+    const placed = [...members].sort((a, b) => a.place.slot - b.place.slot);
 
-    // Ушедшие освобождают свои места: слот и коридор снова можно занять.
-    const aboard = new Set(members.map((member) => member.id));
-    placements.current.forEach((_, id) => {
-        if (!aboard.has(id)) {
-            placements.current.delete(id);
-        }
-    });
-
-    if (me && !placements.current.has(me.id)) {
-        placements.current.set(me.id, placeViewer());
-    }
-    others.forEach((member) => {
-        if (placements.current.has(member.id)) {
-            return;
-        }
-        const placement = placeShip([...placements.current.values()].filter((item) => item.slot < VIEWER_SLOT));
-        if (placement) {
-            placements.current.set(member.id, placement);
-        }
-    });
-
-    const placed = [me, ...others]
-        .filter((member): member is Member => Boolean(member))
-        .map((member) => ({ member, place: placements.current.get(member.id) }))
-        .filter((item): item is { member: Member; place: ShipPlacement } => Boolean(item.place));
-
-    const slotStyle = ({ member, place }: (typeof placed)[number]): CSSProperties => {
+    const slotStyle = (member: Member): CSSProperties => {
         const shipScale = SHIP_SPRITES[member.shipKind].scale;
-        const depth = slotDepth(place.slot);
+        const depth = slotDepth(member.place.slot);
         const width = (20 + depth * 30) * shipScale;
         return {
             // Ширину и кламп «не подходить к краям кадра» досчитывает CSS: там же живёт
             // масштаб для телефонов и отступ от краёв.
-            '--slot-left': `${place.left.toFixed(2)}%`,
+            '--slot-left': `${member.place.left.toFixed(2)}%`,
             '--slot-width': `${width}%`,
             '--slot-half': `${width / 2}%`,
             // Чем дальше корабль, тем выше он стоит в кадре — это и создаёт перспективу.
@@ -170,22 +145,22 @@ export default function SeaScene({ members, myId, morseFeeds }: SeaSceneProps) {
             </div>
             {/* Остров стоит на воде ниже горизонта, за ним видно море. Отражение уже есть в картинке. */}
             <img className={styles.island} src={islandUrl} alt="" />
-            {placed.map((item, index) => {
-                const depth = slotDepth(item.place.slot);
-                const entering = !baseline && seenIds.current !== null && !seenIds.current.has(item.member.id);
-                seenIds.current?.add(item.member.id);
+            {placed.map((member, index) => {
+                const depth = slotDepth(member.place.slot);
+                const entering = !baseline && seenIds.current !== null && !seenIds.current.has(member.id);
+                seenIds.current?.add(member.id);
                 return (
                     <div
-                        key={item.member.id}
+                        key={member.id}
                         className={entering ? `${styles.shipSlot} ${styles.shipEntering}` : styles.shipSlot}
                         style={
                             {
-                                ...slotStyle(item),
+                                ...slotStyle(member),
                                 // Ближний перекрывает дальнего: порядок наложения идёт от слота.
-                                zIndex: item.place.slot + 1,
+                                zIndex: member.place.slot + 1,
                                 // Из-за какого края кадра заплывает. Ход задан в долях ширины экрана,
                                 // поэтому старт всегда за кадром, какой бы ширины он ни был.
-                                '--enter-from': item.place.enterFrom === 'right' ? '130vw' : '-130vw',
+                                '--enter-from': member.place.enterFrom === 'right' ? '130vw' : '-130vw',
                             } as CSSProperties
                         }
                     >
@@ -207,7 +182,7 @@ export default function SeaScene({ members, myId, morseFeeds }: SeaSceneProps) {
                                     '--pitch-angle': `${(
                                         waveAmplitude(depth) *
                                         PITCH_PER_PX *
-                                        (item.place.facing === 'left' ? 1 : -1)
+                                        (member.place.facing === 'left' ? 1 : -1)
                                     ).toFixed(2)}deg`,
                                 } as CSSProperties
                             }
@@ -215,13 +190,13 @@ export default function SeaScene({ members, myId, morseFeeds }: SeaSceneProps) {
                             {/* Тень идёт перед кораблём в разметке, поэтому корпус её перекрывает. */}
                             <div className={styles.shipShadow} />
                             <Ship
-                                kind={item.member.shipKind}
-                                name={item.member.name}
-                                hullNumber={item.member.hullNumber}
-                                facing={item.place.facing}
-                                active={item.member.id === myId}
+                                kind={member.shipKind}
+                                name={member.name}
+                                hullNumber={member.hullNumber}
+                                facing={member.place.facing}
+                                active={member.id === myId}
                                 depth={depth}
-                                morseFeed={morseFeeds[item.member.id] ?? null}
+                                morseFeed={morseFeeds[member.id] ?? null}
                             />
                         </div>
                     </div>

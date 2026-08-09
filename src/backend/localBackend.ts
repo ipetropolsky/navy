@@ -1,6 +1,7 @@
 import { Member, Message } from '@/types/channel';
 import { isValidSlug } from '@/utils/slug';
 
+import { placeShip } from '@/backend/placement';
 import { DEMO_CHANNEL_ID, createDemoChannel } from '@/backend/seed';
 import { localStore } from '@/backend/storage';
 import {
@@ -39,7 +40,7 @@ const BROADCAST_NAME = 'kilvater';
  * переписывать вчерашние разговоры под новую схему дороже, чем начать с чистого рейда.
  * У настоящего сервера на этом месте была бы миграция.
  */
-const STORAGE_VERSION = 2;
+const STORAGE_VERSION = 3;
 
 /** Ключ, под которым состояние лежало до появления версии. Чистим, чтобы не мусорить. */
 const LEGACY_STORAGE_KEY = 'kilvater.v1';
@@ -211,12 +212,19 @@ export function createLocalBackend(): ChannelBackend {
                 throw new ChannelError('channel-full', 'В канале уже пять кораблей');
             }
             checkDraftIsFree(snapshot, draft);
+            // Место на рейде назначаем здесь, а не в сцене: тогда оно уедет вместе с участником
+            // во все вкладки, и корабль у всех окажется в одном и том же месте.
+            const place = placeShip(snapshot.members.map((item) => item.place));
+            if (!place) {
+                throw new ChannelError('channel-full', 'На рейде не осталось свободного места');
+            }
             const member: Member = {
                 id: randomId('m'),
                 name: draft.name.trim(),
                 hullNumber: draft.hullNumber.trim(),
                 shipKind: draft.shipKind,
                 color: draft.color,
+                place,
                 joinedAt: Date.now(),
             };
             mutate(channelId, (current) => current.members.push(member));

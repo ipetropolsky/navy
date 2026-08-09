@@ -45,8 +45,8 @@ export default function CreateChannel({ onCreate, demoHref }: CreateChannelProps
     const channelUrl = `${window.location.origin}${window.location.pathname}?channel=${slug}`;
 
     const handleCopy = () => {
-        // Буфер обмена доступен не везде — например, в iframe без разрешения. Отказ
-        // не должен ничего ломать: ссылка на экране, её можно выделить и скопировать руками.
+        // Буфер обмена доступен не везде — например, в iframe без разрешения. Тогда молчим:
+        // сообщение «скопирована» покажем только если копирование действительно вышло.
         void navigator.clipboard
             ?.writeText(channelUrl)
             .then(() => {
@@ -95,64 +95,39 @@ export default function CreateChannel({ onCreate, demoHref }: CreateChannelProps
 
             <label className={styles.field}>
                 <span className={styles.label}>Адрес канала — латинские буквы и дефис</span>
-                <input
-                    className={slug && !slugOk ? styles.inputBad : styles.input}
-                    value={slug}
-                    maxLength={SLUG_MAX_LENGTH}
-                    placeholder="eskadra-polnoch"
-                    autoComplete="off"
-                    spellCheck={false}
-                    onChange={(event) => handleSlugChange(event.target.value)}
-                />
-            </label>
-
-            {/* Ссылка целиком, а не хвост адреса: её и придётся пересылать остальным,
-                поэтому рядом кнопка — скопировать, не выделяя мышью. */}
-            {slugOk && (
-                <div className={styles.linkRow}>
-                    <span className={styles.link}>{channelUrl}</span>
+                {/* Кнопка прилеплена к полю: сам адрес показывать негде — ссылка длинная,
+                    а нужна она целиком и в буфере, а не на экране. */}
+                <span className={styles.inputRow}>
+                    <input
+                        className={slug && !slugOk ? styles.inputBad : styles.input}
+                        value={slug}
+                        maxLength={SLUG_MAX_LENGTH}
+                        placeholder="eskadra-polnoch"
+                        autoComplete="off"
+                        spellCheck={false}
+                        onChange={(event) => handleSlugChange(event.target.value)}
+                    />
                     <button
                         type="button"
                         className={styles.copy}
                         onClick={handleCopy}
-                        aria-label="Скопировать ссылку"
-                        title="Скопировать ссылку"
+                        disabled={!slugOk}
+                        aria-label="Скопировать ссылку на канал"
+                        title="Скопировать ссылку на канал"
                     >
-                        {copied ? (
-                            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-                                <path
-                                    d="M5 12.5 10 17.5 19 7"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="2.2"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                />
-                            </svg>
-                        ) : (
-                            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-                                <rect
-                                    x="9"
-                                    y="9"
-                                    width="11"
-                                    height="11"
-                                    rx="2.4"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="1.8"
-                                />
-                                <path
-                                    d="M15 6.2V5.4A1.4 1.4 0 0 0 13.6 4H5.4A1.4 1.4 0 0 0 4 5.4v8.2A1.4 1.4 0 0 0 5.4 15h.8"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="1.8"
-                                    strokeLinecap="round"
-                                />
-                            </svg>
-                        )}
+                        <svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true">
+                            <path
+                                d="M10.5 13.5a3.6 3.6 0 0 0 5.1 0l2.6-2.6a3.6 3.6 0 0 0-5.1-5.1l-1 1M13.5 10.5a3.6 3.6 0 0 0-5.1 0l-2.6 2.6a3.6 3.6 0 0 0 5.1 5.1l1-1"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="1.8"
+                                strokeLinecap="round"
+                            />
+                        </svg>
                     </button>
-                </div>
-            )}
+                </span>
+                {copied && <span className={styles.copied}>Ссылка скопирована</span>}
+            </label>
 
             {error && <div className={styles.error}>{error}</div>}
 

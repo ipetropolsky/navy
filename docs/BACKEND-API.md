@@ -74,7 +74,16 @@ interface Member {
     hullNumber: string; // ровно три цифры
     shipKind: ShipKind; // 'patrol' | 'missile' | 'minesweeper' | 'corvette' | 'torpedo'
     color: string; // цвет позывного в ленте
+    place: ShipPlacement; // место на рейде, назначает бэкенд
     joinedAt: number;
+}
+
+interface ShipPlacement {
+    slot: number; // 0 — у горизонта, 9 — первая линия
+    corridor: number; // 0 — левый, 2 — правый
+    left: number; // центр корабля, % ширины сцены
+    facing: 'left' | 'right'; // куда смотрит нос
+    enterFrom: 'left' | 'right'; // с какой стороны заплыл
 }
 
 interface Message {
@@ -126,6 +135,17 @@ const channel = await backend.createChannel({ slug: slugify(title), title });
 // channel.id — 'ch-…', channel.slug — 'eskadra-polnoch'
 // дальше открываем ?channel=<channel.slug> и встаём в строй
 ```
+
+### Место на рейде назначает бэкенд
+
+Участник выбирает позывной, номер, силуэт и цвет — но не место в сцене. Слот, коридор,
+точку внутри коридора и сторону входа выбирает бэкенд при `join` и кладёт в `member.place`.
+Поэтому сцена у всех одинаковая: чей-то корабль стоит там же и смотрит туда же во всех
+вкладках. Клиент только рисует то, что пришло, и ничего не досочиняет.
+
+Правило простое: десять слотов по дальности, слот занимает один корабль, кадр поделён
+на три вертикальных коридора, и два корабля в одном коридоре не встают ближе чем через
+два слота друг от друга. Алгоритм — `src/backend/placement.ts`.
 
 ### Встать в строй
 

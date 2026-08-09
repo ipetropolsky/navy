@@ -85,7 +85,12 @@ export default function App() {
         <div className={styles.app}>
             <header className={styles.header}>
                 <div className={styles.scene}>
-                    <SeaScene members={members} myId={myId ?? ''} morseFeeds={morseFeeds} />
+                    <SeaScene
+                        members={members}
+                        myId={myId ?? ''}
+                        morseFeeds={morseFeeds}
+                        ready={!loading && Boolean(channel)}
+                    />
                 </div>
                 <div className={styles.headerBar}>
                     <div className={styles.headerInfo}>

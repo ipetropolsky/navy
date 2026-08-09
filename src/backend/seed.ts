@@ -11,6 +11,9 @@ import { ChannelSnapshot } from '@/backend/types';
  *
  * Время у сообщений считается от полуночи сегодняшнего дня, а не хранится числом:
  * иначе демо-переписка со временем уезжала бы всё дальше в прошлое.
+ *
+ * Места на рейде заданы руками, по одному кораблю в каждом коридоре и на разной дальности:
+ * так сразу видно и перспективу, и то, что корабли не толпятся.
  */
 
 export const DEMO_CHANNEL_ID = 'ch-demo';
@@ -34,6 +37,7 @@ export const createDemoChannel = (): ChannelSnapshot => ({
             hullNumber: '317',
             shipKind: 'patrol',
             color: '#8ecae6',
+            place: { slot: 9, corridor: 1, left: 52, facing: 'left', enterFrom: 'right' },
             joinedAt: minutesAfterMidnight(21, 30),
         },
         {
@@ -42,6 +46,7 @@ export const createDemoChannel = (): ChannelSnapshot => ({
             hullNumber: '561',
             shipKind: 'missile',
             color: '#f2cc8f',
+            place: { slot: 6, corridor: 2, left: 79, facing: 'right', enterFrom: 'left' },
             joinedAt: minutesAfterMidnight(21, 32),
         },
         {
@@ -50,6 +55,7 @@ export const createDemoChannel = (): ChannelSnapshot => ({
             hullNumber: '208',
             shipKind: 'torpedo',
             color: '#95d5b2',
+            place: { slot: 3, corridor: 0, left: 21, facing: 'left', enterFrom: 'right' },
             joinedAt: minutesAfterMidnight(21, 34),
         },
     ],
