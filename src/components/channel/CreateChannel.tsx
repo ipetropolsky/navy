@@ -23,6 +23,7 @@ export default function CreateChannel({ onCreate, demoHref }: CreateChannelProps
     const [slugEdited, setSlugEdited] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [busy, setBusy] = useState(false);
+    const [copied, setCopied] = useState(false);
 
     const handleTitleChange = (nextTitle: string) => {
         setTitle(nextTitle);
@@ -40,6 +41,20 @@ export default function CreateChannel({ onCreate, demoHref }: CreateChannelProps
 
     const slugOk = isValidSlug(slug);
     const canSubmit = Boolean(title.trim()) && slugOk;
+    // Адрес будущего канала целиком: страница та же, меняется только параметр.
+    const channelUrl = `${window.location.origin}${window.location.pathname}?channel=${slug}`;
+
+    const handleCopy = () => {
+        // Буфер обмена доступен не везде — например, в iframe без разрешения. Отказ
+        // не должен ничего ломать: ссылка на экране, её можно выделить и скопировать руками.
+        void navigator.clipboard
+            ?.writeText(channelUrl)
+            .then(() => {
+                setCopied(true);
+                window.setTimeout(() => setCopied(false), 1800);
+            })
+            .catch(() => undefined);
+    };
 
     const handleSubmit = async (event: SyntheticEvent) => {
         event.preventDefault();
@@ -89,9 +104,55 @@ export default function CreateChannel({ onCreate, demoHref }: CreateChannelProps
                     spellCheck={false}
                     onChange={(event) => handleSlugChange(event.target.value)}
                 />
-                {/* Сразу показываем, какой получится ссылка: её и придётся пересылать. */}
-                <span className={styles.preview}>{slugOk ? `?channel=${slug}` : 'по этому адресу канал и найдут'}</span>
             </label>
+
+            {/* Ссылка целиком, а не хвост адреса: её и придётся пересылать остальным,
+                поэтому рядом кнопка — скопировать, не выделяя мышью. */}
+            {slugOk && (
+                <div className={styles.linkRow}>
+                    <span className={styles.link}>{channelUrl}</span>
+                    <button
+                        type="button"
+                        className={styles.copy}
+                        onClick={handleCopy}
+                        aria-label="Скопировать ссылку"
+                        title="Скопировать ссылку"
+                    >
+                        {copied ? (
+                            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+                                <path
+                                    d="M5 12.5 10 17.5 19 7"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="2.2"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                />
+                            </svg>
+                        ) : (
+                            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+                                <rect
+                                    x="9"
+                                    y="9"
+                                    width="11"
+                                    height="11"
+                                    rx="2.4"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="1.8"
+                                />
+                                <path
+                                    d="M15 6.2V5.4A1.4 1.4 0 0 0 13.6 4H5.4A1.4 1.4 0 0 0 4 5.4v8.2A1.4 1.4 0 0 0 5.4 15h.8"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="1.8"
+                                    strokeLinecap="round"
+                                />
+                            </svg>
+                        )}
+                    </button>
+                </div>
+            )}
 
             {error && <div className={styles.error}>{error}</div>}
 

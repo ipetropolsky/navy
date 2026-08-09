@@ -117,7 +117,7 @@ export default function MemberForm({ mode, crew, takenColors, initial, onSubmit,
             </div>
 
             <div className={styles.field}>
-                <span className={styles.label}>Силуэт</span>
+                <span className={styles.label}>Корабль</span>
                 <div className={styles.kinds}>
                     {SHIP_KINDS.map((kind) => (
                         <button

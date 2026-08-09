@@ -90,24 +90,27 @@
     font-size: 13px;
 }
 
-// Силуэты в столбик: корабли вытянутые, в ряд они превратились бы в нечитаемые полоски.
+// Корабли в столбик: они вытянутые, в ряд превратились бы в нечитаемые полоски.
+// Зато в столбик каждому достаётся вся ширина панели — силуэт видно как следует.
 .kinds {
     display: flex;
     flex-direction: column;
     gap: 6px;
 }
 
+// Картинка сверху во всю ширину, подпись под ней: так силуэт не соперничает за место
+// с текстом и его видно целиком.
 .kind {
     display: flex;
+    flex-direction: column;
     align-items: center;
-    gap: 12px;
-    padding: 6px 10px;
+    gap: 2px;
+    padding: 8px 10px 6px;
     border-radius: 11px;
     border: 1px solid transparent;
     background: var(--color-bubble-in);
     color: var(--color-text);
     font: inherit;
-    text-align: left;
     cursor: pointer;
 }
 
@@ -118,16 +121,17 @@
     background: var(--color-bubble-out);
 }
 
-// Спрайты нарисованы на прозрачном фоне и очень широкие: держим по высоте.
+// Спрайты нарисованы на прозрачном фоне и очень широкие: держим по высоте,
+// ширину отдаём всю — корабль впишется сам.
 .kindImage {
-    width: 84px;
-    height: 26px;
+    width: 100%;
+    height: 54px;
     object-fit: contain;
-    flex: 0 0 auto;
 }
 
 .kindLabel {
-    font-size: 13px;
+    color: var(--color-text-muted);
+    font-size: 12px;
 }
 
 .error {
