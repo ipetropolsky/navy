@@ -6,15 +6,29 @@
 // Им залит фон под слоями, чтобы море продолжалось до низа экрана без стыка.
 @sea-deep-color: #010615;
 
-// Спокойные волны: один медленный вдох на цикл.
+// Спокойные волны: одно медленное расхождение за цикл.
 @sea-duration: 8s;
-@sea-scale: 1.1;
+@sea-scale: 1.06;
 
-// Доля цикла, за которую нижний слой успевает проявиться до непрозрачности.
-// Пока верхний слой полностью непрозрачен, нижний не виден, поэтому фон
-// ни в один момент не просвечивает между слоями — перекрёстное затухание
-// получается без провала яркости в середине цикла.
-@sea-handover: 25%;
+// «Волна»: последние 28% цикла кадр сменяется мягкой полосой сверху вниз.
+// К концу полоса должна целиком уйти за нижнюю грань, отсюда 100% + высота полосы.
+@sea-wipe-start: 72%;
+@sea-wipe-band: 28%;
+@sea-wipe-end: (100% + @sea-wipe-band);
+
+// «Перекат»: кадр гаснет целиком за последнюю восьмую цикла.
+@sea-fade-start: 88%;
+
+// «Растворение»: нижний слой проявляется к четверти цикла.
+@sea-dissolve-handover: 25%;
+
+// Положение мягкой полосы, которой сменяется кадр в «Волне».
+// Без @property значение не интерполируется и полоса дёргается скачком.
+@property --wipe {
+    syntax: '<percentage>';
+    inherits: false;
+    initial-value: 0%;
+}
 
 .sea {
     position: relative;
@@ -25,39 +39,116 @@
 }
 
 // Слои совмещены по верхней грани: обе картинки начинаются от линии горизонта.
-.layer {
+.layer,
+.curtain {
     position: absolute;
     top: 0;
     left: 0;
     width: 100%;
     height: 100%;
-    background-image: url('@/assets/sources/sea.png');
-    background-position: top center;
-    background-size: cover;
     animation-duration: @sea-duration;
     animation-timing-function: linear;
     animation-iteration-count: infinite;
+}
+
+.layer {
+    background-image: url('@/assets/sources/sea.png');
+    background-position: top center;
+    background-size: cover;
+}
+
+// Нижний слой (.back) в «Волне» и «Перекате» неподвижен: это кадр, к которому
+// возвращается верхний. До начала возврата он полностью закрыт верхним.
+.front {
+    transform-origin: 50% 0;
     will-change: opacity, transform;
 }
 
-// Нижний слой: только проявляется, масштаб не трогаем.
-.back {
-    animation-name: sea-fade-in;
+// «Волна»: картинка почти весь цикл просто расходится, а кадр сменяется мягкой
+// полосой, идущей от горизонта к зрителю. Задвоение гребней остаётся только
+// внутри полосы и само движется как проходящий вал.
+.wave {
+    .front {
+        animation-name: sea-scale;
+    }
+
+    // Маска висит на обёртке, а не на самом слое: маска на элементе с transform
+    // заставляет браузер растрировать его в отдельную текстуру и пересемплировать
+    // (высота слоя дробная) — блики теряют около 16% контраста.
+    .curtain {
+        mask-image: linear-gradient(to bottom, transparent calc(var(--wipe) - @sea-wipe-band), #000 var(--wipe));
+        animation-name: sea-wipe;
+    }
 }
 
-// Верхний слой: расходится от центра верхней грани и растворяется.
-.front {
-    transform-origin: 50% 0;
-    animation-name: sea-fade-out;
+// «Перекат»: чистое расхождение, а в конце кадр целиком уступает место исходному.
+.roll {
+    .front {
+        animation-name: sea-roll;
+    }
 }
 
-@keyframes sea-fade-out {
+// «Растворение»: равномерное перекрёстное затухание на весь цикл. Гребни двоятся
+// дольше всего, вариант оставлен для сравнения.
+.dissolve {
+    .front {
+        animation-name: sea-dissolve-out;
+    }
+
+    .back {
+        animation-name: sea-dissolve-in;
+    }
+}
+
+@keyframes sea-scale {
+    from {
+        transform: scale(1);
+    }
+
+    to {
+        transform: scale(@sea-scale);
+    }
+}
+
+@keyframes sea-wipe {
+    0%,
+    @{sea-wipe-start} {
+        --wipe: 0%;
+    }
+
+    100% {
+        // Значения кастомных свойств Less отдаёт как есть, поэтому арифметику
+        // вычисляем интерполяцией — иначе в CSS уедет «100% + 28%».
+        --wipe: ~'@{sea-wipe-end}';
+    }
+}
+
+@keyframes sea-roll {
     0% {
         opacity: 1;
         transform: scale(1);
     }
 
-    @{sea-handover} {
+    // ease-in-out на последнем отрезке: середина перехода, где оба кадра видно
+    // поровну, проскакивает быстрее всего.
+    @{sea-fade-start} {
+        opacity: 1;
+        animation-timing-function: ease-in-out;
+    }
+
+    100% {
+        opacity: 0;
+        transform: scale(@sea-scale);
+    }
+}
+
+@keyframes sea-dissolve-out {
+    0% {
+        opacity: 1;
+        transform: scale(1);
+    }
+
+    @{sea-dissolve-handover} {
         opacity: 1;
     }
 
@@ -67,12 +158,12 @@
     }
 }
 
-@keyframes sea-fade-in {
+@keyframes sea-dissolve-in {
     0% {
         opacity: 0;
     }
 
-    @{sea-handover} {
+    @{sea-dissolve-handover} {
         opacity: 1;
     }
 
@@ -82,9 +173,10 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-    // Без анимации оба слоя остаются в исходном состоянии
-    // (opacity: 1, scale: 1) и выглядят как одна статичная картинка.
-    .layer {
+    // Без анимации верхний слой остаётся в исходном состоянии (opacity: 1,
+    // scale: 1) и полностью закрывает нижний — получается статичная картинка.
+    .layer,
+    .curtain {
         animation: none;
     }
 }

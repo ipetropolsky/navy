@@ -1,10 +1,23 @@
 import styles from './Sea.module.less';
 
-export default function Sea() {
+/**
+ * Как кадр возвращается к исходному масштабу в конце цикла:
+ * wave — мягкой полосой сверху вниз, roll — быстрым затуханием целиком,
+ * dissolve — перекрёстным затуханием на весь цикл.
+ */
+export type SeaMode = 'wave' | 'roll' | 'dissolve';
+
+interface SeaProps {
+    mode?: SeaMode;
+}
+
+export default function Sea({ mode = 'wave' }: SeaProps) {
     return (
-        <div className={styles.sea} role="img" aria-label="Спокойное ночное море">
+        <div className={`${styles.sea} ${styles[mode]}`} role="img" aria-label="Спокойное ночное море">
             <div className={`${styles.layer} ${styles.back}`} />
-            <div className={`${styles.layer} ${styles.front}`} />
+            <div className={styles.curtain}>
+                <div className={`${styles.layer} ${styles.front}`} />
+            </div>
         </div>
     );
 }
