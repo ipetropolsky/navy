@@ -19,9 +19,10 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 SOURCES = ROOT / 'src/assets/sources'
 OUT = ROOT / 'src/assets/scene'
 
-# Исходник -> (имя ассета, ширина рабочей копии).
+# Исходник -> (имя ассета, ширина рабочей копии). None — брать как есть, без уменьшения:
+# у неба уменьшение съедает яркость мелких звёзд, поэтому масштабирует уже браузер.
 BACKGROUNDS = {
-    'sky.png': ('sky', 1800),
+    'sky.png': ('sky', None),
     'sea.png': ('sea', 1800),
 }
 
@@ -103,9 +104,10 @@ def largest_blob(mask: np.ndarray) -> np.ndarray:
 def main() -> None:
     for source, (name, width) in BACKGROUNDS.items():
         img = Image.open(SOURCES / source).convert('RGB')
-        height = round(img.height * width / img.width)
-        img.resize((width, height), Image.LANCZOS).save(OUT / f'{name}.png', optimize=True)
-        print(name, (width, height))
+        if width:
+            img = img.resize((width, round(img.height * width / img.width)), Image.LANCZOS)
+        img.save(OUT / f'{name}.png', optimize=True)
+        print(name, img.size)
     prepare_island()
     prepare_moon()
 
