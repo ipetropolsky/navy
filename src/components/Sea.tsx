@@ -19,6 +19,12 @@ interface SeaProps {
     mode?: SeaMode;
     /** Номера снимков для режима frames: показываются по кругу в этом порядке. */
     frames?: number[];
+    /**
+     * Насколько раньше начинается проявление следующего снимка, в долях слота.
+     * Ноль — строго по очереди; чем больше, тем мягче поворот скорости на
+     * границе слотов. Разумный предел — меньше единицы.
+     */
+    overlap?: number;
 }
 
 interface Glint {
@@ -67,18 +73,24 @@ const GLINTS: Glint[] = (() => {
     });
 })();
 
-export default function Sea({ mode = 'wave', frames = [1, 2, 3, 4] }: SeaProps) {
+export default function Sea({ mode = 'wave', frames = [1, 2, 3, 4], overlap = 0.3 }: SeaProps) {
     return (
-        <div className={`${styles.sea} ${styles[mode]}`} role="img" aria-label="Спокойное ночное море">
+        <div
+            className={`${styles.sea} ${styles[mode]}`}
+            style={{ '--overlap': overlap } as CSSProperties}
+            role="img"
+            aria-label="Спокойное ночное море"
+        >
             <div className={`${styles.layer} ${styles.back}`} />
             <div className={styles.curtain}>
                 <div className={`${styles.layer} ${styles.front}`} />
             </div>
             {mode === 'frames' && frames.length > 0 && (
                 <div className={styles.stack} style={{ '--n': frames.length } as CSSProperties}>
-                    {/* Кадров на один больше: последний повторяет первый, поэтому
-                        к концу цикла сверху лежит он же и сброс на стыке не виден. */}
-                    {[...frames, frames[0]].map((frame, index) => (
+                    {/* Хвостовых кадров два: они повторяют первый и второй, поэтому
+                        к концу цикла сверху лежит ровно то же, что в его начале, и
+                        общий сброс на стыке не виден. */}
+                    {[...frames, frames[0], frames[1 % frames.length]].map((frame, index) => (
                         <div
                             key={`${frame}-${index}`}
                             className={`${styles.frame} ${styles[`f${frame}`]}`}
