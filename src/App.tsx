@@ -1,7 +1,7 @@
 import { useState } from 'react';
 
-import { MemberDraft, backend } from '@/backend';
-import { DEMO_CHANNEL_ID } from '@/backend/seed';
+import { ChannelDraft, MemberDraft, backend } from '@/backend';
+import { DEMO_CHANNEL_SLUG } from '@/backend/seed';
 import SeaScene from '@/components/SeaScene/SeaScene';
 import CreateChannel from '@/components/channel/CreateChannel';
 import MemberForm from '@/components/channel/MemberForm';
@@ -28,7 +28,7 @@ import styles from './App.module.less';
  */
 export default function App() {
     const route = useRoute();
-    const channelState = useChannel(route.channelId, route.memberId);
+    const channelState = useChannel(route.channel, route.memberId);
     const { channel, myId, typing, loading } = channelState;
     const [replyTo, setReplyTo] = useState<Message | null>(null);
     const [sheetOpen, setSheetOpen] = useState(false);
@@ -38,9 +38,9 @@ export default function App() {
     const me = members.find((member) => member.id === myId) ?? null;
     const inChat = Boolean(channel && me && !editing);
 
-    const handleCreate = async (title: string) => {
-        const created = await backend.createChannel(title);
-        route.openChannel(created.id);
+    const handleCreate = async (draft: ChannelDraft) => {
+        const created = await backend.createChannel(draft);
+        route.openChannel(created.slug);
     };
 
     const handleMemberSubmit = async (draft: MemberDraft) => {
@@ -70,7 +70,7 @@ export default function App() {
 
     const status = (): string => {
         if (!channel) {
-            return 'канал не выбран';
+            return route.channel ? 'канал не найден' : 'канал не выбран';
         }
         if (typingMember) {
             return `«${typingMember.name}» передаёт…`;
@@ -129,8 +129,18 @@ export default function App() {
             </header>
             <main className={styles.panel}>
                 {loading && <div className={styles.waiting}>Выходим на связь…</div>}
-                {!loading && !channel && (
-                    <CreateChannel onCreate={handleCreate} demoHref={`?channelId=${DEMO_CHANNEL_ID}`} />
+                {/* Адрес в ссылке есть, а канала по нему нет: ссылка устарела или в ней опечатка.
+                    Показывать здесь форму создания нельзя — человек шёл не создавать, а войти. */}
+                {!loading && route.channel && !channel && (
+                    <div className={styles.notFound}>
+                        <p>Канала по адресу «{route.channel}» нет.</p>
+                        <button type="button" className={styles.notFoundAction} onClick={route.openHome}>
+                            Создать свой канал
+                        </button>
+                    </div>
+                )}
+                {!loading && !route.channel && (
+                    <CreateChannel onCreate={handleCreate} demoHref={`?channel=${DEMO_CHANNEL_SLUG}`} />
                 )}
                 {!loading && channel && !inChat && (
                     <MemberForm

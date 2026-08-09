@@ -21,11 +21,47 @@ import { backend } from '@/backend';
   состояние приложение обновляет по подписке. Событие приходит одинаково и на своё действие,
   и на чужое, поэтому в UI нет ветки «это сделал я».
 
+## `channelId` и `slug` — это разные вещи
+
+У канала два имени, и путать их не нужно.
+
+|                 | `channelId`            | `slug`                              |
+| --------------- | ---------------------- | ----------------------------------- |
+| Зачем           | основной идентификатор | адрес в ссылке                      |
+| Кто видит       | код                    | люди                                |
+| Пример          | `ch-msm932km-f22usl`   | `nord-ost`                          |
+| Меняется        | никогда                | да, `updateChannel`                 |
+| Где встречается | все методы и события   | только в ссылке `?channel=nord-ost` |
+
+Ссылка на канал выглядит как `?channel=nord-ost`. Приложение разбирает адрес один раз —
+`getChannelBySlug(slug)` — и дальше работает с `channel.id`. Всё остальное — подписка,
+отправка, вход, выход — адресуется только идентификатором, поэтому смена адреса ничего
+не ломает: ни привязка участника к каналу, ни доставка событий на неё не завязаны.
+
+```ts
+// Ссылка → канал: один раз, при открытии.
+const channel = await backend.getChannelBySlug('nord-ost');
+
+// Дальше только id.
+backend.subscribe(channel.id, handle);
+await backend.sendMessage(channel.id, { memberId, text: 'Курс норд' });
+
+// Адрес можно переназначить — id останется прежним, разговор не прервётся.
+await backend.updateChannel(channel.id, { slug: 'nord-ost-2', title: channel.title });
+```
+
+Требования к `slug`: только строчные латинские буквы и дефис между словами
+(`/^[a-z]+(-[a-z]+)*$/`), не длиннее 40 символов, уникален среди каналов. Проверяет бэкенд:
+`slug-invalid` — не та форма, `slug-taken` — занят. Для подсказки в интерфейсе есть
+`slugify()` из `@/utils/slug`: он транслитерирует русское название, «Эскадра «Полночь»»
+превращается в `eskadra-polnoch`.
+
 ## Сущности
 
 ```ts
 interface ChannelSnapshot {
-    id: string;
+    id: string; // channelId: основной идентификатор, неизменный
+    slug: string; // адрес в ссылке, меняется через updateChannel
     title: string;
     createdAt: number; // мс эпохи
     members: Member[];
@@ -55,8 +91,9 @@ interface Message {
 | Метод                                      | Что делает                           | Возвращает                |
 | ------------------------------------------ | ------------------------------------ | ------------------------- |
 | `getChannel(channelId)`                    | Состояние канала целиком             | `ChannelSnapshot \| null` |
-| `createChannel(title)`                     | Заводит канал без участников         | `ChannelSnapshot`         |
-| `renameChannel(channelId, title)`          | Переименовывает канал                | `void`                    |
+| `getChannelBySlug(slug)`                   | Разбор адреса из ссылки              | `ChannelSnapshot \| null` |
+| `createChannel({ slug, title })`           | Заводит канал без участников         | `ChannelSnapshot`         |
+| `updateChannel(channelId, draft)`          | Меняет адрес и название канала       | `ChannelSnapshot`         |
 | `join(channelId, draft)`                   | Ставит корабль в строй               | `Member`                  |
 | `updateMember(channelId, memberId, draft)` | Меняет позывной, номер, силуэт, цвет | `Member`                  |
 | `leave(channelId, memberId)`               | Выводит корабль из канала            | `void`                    |
@@ -82,8 +119,12 @@ unsubscribe();
 ### Создать канал
 
 ```ts
-const channel = await backend.createChannel('Эскадра «Полночь»');
-// дальше открываем ?channelId=<channel.id> и встаём в строй
+import { slugify } from '@/utils/slug';
+
+const title = 'Эскадра «Полночь»';
+const channel = await backend.createChannel({ slug: slugify(title), title });
+// channel.id — 'ch-…', channel.slug — 'eskadra-polnoch'
+// дальше открываем ?channel=<channel.slug> и встаём в строй
 ```
 
 ### Встать в строй
@@ -139,8 +180,8 @@ void backend.setTyping(channelId, myId, chars);
 
 ```ts
 type ChannelEvent = { id: string; channelId: string; at: number } & (
-    | { type: 'channel-created'; title: string }
-    | { type: 'channel-renamed'; title: string }
+    | { type: 'channel-created'; channel: ChannelSnapshot }
+    | { type: 'channel-updated'; slug: string; title: string }
     | { type: 'member-joined'; member: Member }
     | { type: 'member-updated'; member: Member }
     | { type: 'member-left'; memberId: string }
@@ -168,13 +209,15 @@ switch (event.type) {
 Отказ приходит отклонённым промисом с `ChannelError`. У него есть `code` для логики
 и `message` — готовый текст для человека.
 
-| `code`              | Когда                           |
-| ------------------- | ------------------------------- |
-| `channel-not-found` | Канала с таким id нет           |
-| `channel-full`      | В канале уже пять кораблей      |
-| `name-taken`        | Позывной занят другим кораблём  |
-| `hull-taken`        | Бортовой номер занят            |
-| `member-not-found`  | Корабля с таким id в канале нет |
+| `code`              | Когда                                      |
+| ------------------- | ------------------------------------------ |
+| `channel-not-found` | Канала с таким id нет                      |
+| `channel-full`      | В канале уже пять кораблей                 |
+| `slug-invalid`      | В адресе не только латинские буквы и дефис |
+| `slug-taken`        | Адрес занят другим каналом                 |
+| `name-taken`        | Позывной занят другим кораблём             |
+| `hull-taken`        | Бортовой номер занят                       |
+| `member-not-found`  | Корабля с таким id в канале нет            |
 
 ## Что делает эмулятор
 
@@ -182,16 +225,23 @@ switch (event.type) {
 под ключом `kilvater.v1`:
 
 ```json
-{ "channels": { "demo": { "id": "demo", "title": "…", "members": [], "messages": [] } } }
+{
+    "channels": {
+        "ch-demo": { "id": "ch-demo", "slug": "demo", "title": "…", "members": [], "messages": [] }
+    }
+}
 ```
+
+Ключ в `channels` — это `channelId`. Поиск по адресу перебирает каналы и сравнивает `slug`;
+у настоящего сервера тут был бы индекс.
 
 - **Хранилище и провод разделены.** `localStorage` — память: пережил перезагрузку и отдал
   состояние тому, кто пришёл позже. `BroadcastChannel` — провод: доставил новость тем,
   кто уже здесь. Печать идёт только по проводу.
 - **Задержка ответа 40 мс** стоит нарочно: у настоящего сервера мгновенных ответов не бывает,
   и интерфейс не должен рассчитывать, что состояние обновится к следующей строке кода.
-- **Демо-канал** (`src/backend/seed.ts`, id `demo`) записывается при первом запуске, если
-  хранилище пустое. Существующее состояние он не трогает.
+- **Демо-канал** (`src/backend/seed.ts`, id `ch-demo`, адрес `demo`) записывается при первом
+  запуске, если хранилище пустое. Существующее состояние он не трогает.
 - **Кто ты в канале — не дело бэкенда.** `memberId` лежит отдельно, в `localStorage`
   по ключу `kilvater.member.<channelId>` (`src/backend/identity.ts`). В настоящей системе
   на этом месте был бы токен входа.
@@ -201,7 +251,7 @@ switch (event.type) {
 Данные каналов общие для всех вкладок браузера, а `memberId` — тоже общий, поэтому вторая
 вкладка по умолчанию окажется тем же кораблём. Чтобы говорить за другой, есть два пути:
 
-- открыть канал с явным участником: `?channelId=demo&memberId=m-albatros` — адрес перебивает
+- открыть канал с явным участником: `?channel=demo&memberId=m-albatros` — параметр перебивает
   сохранённый id, но сам не сохраняется, поэтому первая вкладка остаётся собой;
 - либо открыть вторую вкладку в другом профиле браузера или в приватном окне — там своё
   хранилище, и канал придётся создать заново.

@@ -36,33 +36,39 @@ export interface ChannelController {
     reportTyping: (chars: string) => void;
 }
 
-export function useChannel(channelId: string | null, memberIdFromUrl: string | null): ChannelController {
+export function useChannel(slug: string | null, memberIdFromUrl: string | null): ChannelController {
     const [loading, setLoading] = useState(true);
     const [channel, setChannel] = useState<ChannelSnapshot | null>(null);
     const [myId, setMyId] = useState<string | null>(null);
     const [typing, setTyping] = useState<TypingState | null>(null);
     const typingTimerRef = useRef<number | undefined>(undefined);
 
-    // Открыли канал: спрашиваем состояние и решаем, кто мы в нём. Ответ может прийти,
-    // когда вкладка уже ушла на другой канал, — тогда его надо выбросить, отсюда флаг.
+    // Открыли канал: разбираем адрес из ссылки, спрашиваем состояние и решаем, кто мы в нём.
+    // Ответ может прийти, когда вкладка уже ушла на другой канал, — тогда его надо выбросить,
+    // отсюда флаг.
     useEffect(() => {
         let alive = true;
-        if (!channelId) {
+        if (!slug) {
             setChannel(null);
             setMyId(null);
             setLoading(false);
         } else {
             setLoading(true);
             void backend
-                .getChannel(channelId)
+                .getChannelBySlug(slug)
                 .then((snapshot) => {
                     if (!alive) {
                         return;
                     }
                     setChannel(snapshot);
+                    if (!snapshot) {
+                        setMyId(null);
+                        return;
+                    }
                     // Адрес важнее сохранённого: так соседняя вкладка говорит за другой корабль.
-                    const candidate = memberIdFromUrl ?? readMemberId(channelId);
-                    const aboard = snapshot?.members.some((member) => member.id === candidate);
+                    // Личность привязана к channelId, а не к slug: адрес канала может смениться.
+                    const candidate = memberIdFromUrl ?? readMemberId(snapshot.id);
+                    const aboard = snapshot.members.some((member) => member.id === candidate);
                     // Корабль мог выйти из другой вкладки, пока эта была закрыта.
                     setMyId(aboard ? candidate : null);
                 })
@@ -75,7 +81,10 @@ export function useChannel(channelId: string | null, memberIdFromUrl: string | n
         return () => {
             alive = false;
         };
-    }, [channelId, memberIdFromUrl]);
+    }, [slug, memberIdFromUrl]);
+
+    // Дальше всё адресуется основным идентификатором канала, а не адресом из ссылки.
+    const channelId = channel?.id ?? null;
 
     // Подписка живёт, пока открыт канал. Незнакомые события молча пропускаем —
     // так добавление новых типов не потребует правок здесь.
@@ -95,8 +104,8 @@ export function useChannel(channelId: string | null, memberIdFromUrl: string | n
                     return current;
                 }
                 switch (event.type) {
-                    case 'channel-renamed':
-                        return { ...current, title: event.title };
+                    case 'channel-updated':
+                        return { ...current, slug: event.slug, title: event.title };
                     case 'member-joined':
                         return { ...current, members: [...current.members, event.member] };
                     case 'member-updated':

@@ -8,11 +8,18 @@ import { Member, Message, ShipKind } from '@/types/channel';
  *
  * Всё общение адресное: канал называется channelId, участник — memberId, сообщение —
  * его собственным id, а ответ ссылается на threadId — id сообщения, к которому он привязан.
+ *
+ * У канала два имени, и путать их нельзя. channelId — основной идентификатор: неизменный,
+ * машинный, по нему адресуются все действия и события. Slug — читаемый адрес для ссылки
+ * (`?channel=eskadra-polnoch`), его можно переназначить, и внутри системы на него никто
+ * не ссылается. Отсюда и отдельный метод разбора адреса: getChannelBySlug.
  */
 
 /** Канал связи со всем, что в нём есть, на один момент времени. */
 export interface ChannelSnapshot {
     id: string;
+    /** Читаемый адрес канала для ссылки. Меняется, в отличие от id. */
+    slug: string;
     title: string;
     createdAt: number;
     members: Member[];
@@ -25,6 +32,13 @@ export interface MemberDraft {
     hullNumber: string;
     shipKind: ShipKind;
     color: string;
+}
+
+/** Что у канала можно задать и потом поменять: адрес и человеческое название. */
+export interface ChannelDraft {
+    /** Латинские буквы и дефис; в ссылке стоит именно он. */
+    slug: string;
+    title: string;
 }
 
 export interface MessageDraft {
@@ -49,8 +63,8 @@ interface ChannelEventBase {
 
 export type ChannelEvent = ChannelEventBase &
     (
-        | { type: 'channel-created'; title: string }
-        | { type: 'channel-renamed'; title: string }
+        | { type: 'channel-created'; channel: ChannelSnapshot }
+        | { type: 'channel-updated'; slug: string; title: string }
         | { type: 'member-joined'; member: Member }
         | { type: 'member-updated'; member: Member }
         | { type: 'member-left'; memberId: string }
@@ -66,7 +80,14 @@ export type ChannelEvent = ChannelEventBase &
 export type ChannelEventType = ChannelEvent['type'];
 
 /** Почему действие не вышло. Коды перечислены, чтобы UI мог показать внятный текст. */
-export type ChannelErrorCode = 'channel-not-found' | 'channel-full' | 'name-taken' | 'hull-taken' | 'member-not-found';
+export type ChannelErrorCode =
+    | 'channel-not-found'
+    | 'channel-full'
+    | 'slug-taken'
+    | 'slug-invalid'
+    | 'name-taken'
+    | 'hull-taken'
+    | 'member-not-found';
 
 export class ChannelError extends Error {
     constructor(
@@ -82,9 +103,11 @@ export type Unsubscribe = () => void;
 
 export interface ChannelBackend {
     getChannel(channelId: string): Promise<ChannelSnapshot | null>;
+    /** Разбор адреса из ссылки: по slug находим канал и дальше работаем с его id. */
+    getChannelBySlug(slug: string): Promise<ChannelSnapshot | null>;
 
-    createChannel(title: string): Promise<ChannelSnapshot>;
-    renameChannel(channelId: string, title: string): Promise<void>;
+    createChannel(draft: ChannelDraft): Promise<ChannelSnapshot>;
+    updateChannel(channelId: string, draft: ChannelDraft): Promise<ChannelSnapshot>;
 
     join(channelId: string, draft: MemberDraft): Promise<Member>;
     updateMember(channelId: string, memberId: string, draft: MemberDraft): Promise<Member>;

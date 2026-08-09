@@ -1,4 +1,5 @@
 import { Member, Message } from '@/types/channel';
+import { isValidSlug } from '@/utils/slug';
 
 import { DEMO_CHANNEL_ID, createDemoChannel } from '@/backend/seed';
 import { localStore } from '@/backend/storage';
@@ -74,6 +75,10 @@ const writeState = (state: ServerState): void => {
 const randomId = (prefix: string): string =>
     `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
+/** Адрес свободен, если его не занял другой канал. Сам себя канал не блокирует. */
+const isSlugFree = (state: ServerState, slug: string, exceptId?: string): boolean =>
+    !Object.values(state.channels).some((channel) => channel.slug === slug && channel.id !== exceptId);
+
 /** Прочитал — поменял — записал одним движением: между вкладками так теряется меньше. */
 const mutate = <T>(channelId: string, change: (channel: ChannelSnapshot) => T): T => {
     const state = readState();
@@ -136,27 +141,46 @@ export function createLocalBackend(): ChannelBackend {
     return {
         getChannel: (channelId) => delay(readState().channels[channelId] ?? null),
 
-        createChannel: async (title) => {
+        getChannelBySlug: (slug) =>
+            delay(Object.values(readState().channels).find((channel) => channel.slug === slug) ?? null),
+
+        createChannel: async ({ slug, title }) => {
+            const state = readState();
+            if (!isValidSlug(slug)) {
+                throw new ChannelError('slug-invalid', 'В адресе только латинские буквы и дефис');
+            }
+            if (!isSlugFree(state, slug)) {
+                throw new ChannelError('slug-taken', 'Канал с таким адресом уже есть');
+            }
             const snapshot: ChannelSnapshot = {
                 id: randomId('ch'),
+                slug,
                 title: title.trim(),
                 createdAt: Date.now(),
                 members: [],
                 messages: [],
             };
-            const state = readState();
             state.channels[snapshot.id] = snapshot;
             writeState(state);
-            emit(snapshot.id, { type: 'channel-created', title: snapshot.title });
+            emit(snapshot.id, { type: 'channel-created', channel: snapshot });
             return delay(snapshot);
         },
 
-        renameChannel: async (channelId, title) => {
-            mutate(channelId, (snapshot) => {
+        updateChannel: async (channelId, { slug, title }) => {
+            const state = readState();
+            if (!isValidSlug(slug)) {
+                throw new ChannelError('slug-invalid', 'В адресе только латинские буквы и дефис');
+            }
+            if (!isSlugFree(state, slug, channelId)) {
+                throw new ChannelError('slug-taken', 'Канал с таким адресом уже есть');
+            }
+            const updated = mutate(channelId, (snapshot) => {
+                snapshot.slug = slug;
                 snapshot.title = title.trim();
+                return { ...snapshot };
             });
-            emit(channelId, { type: 'channel-renamed', title: title.trim() });
-            return delay(undefined);
+            emit(channelId, { type: 'channel-updated', slug: updated.slug, title: updated.title });
+            return delay(updated);
         },
 
         join: async (channelId, draft) => {

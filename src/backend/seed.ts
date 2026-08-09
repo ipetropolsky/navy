@@ -13,7 +13,8 @@ import { ChannelSnapshot } from '@/backend/types';
  * иначе демо-переписка со временем уезжала бы всё дальше в прошлое.
  */
 
-export const DEMO_CHANNEL_ID = 'demo';
+export const DEMO_CHANNEL_ID = 'ch-demo';
+export const DEMO_CHANNEL_SLUG = 'demo';
 
 const minutesAfterMidnight = (hours: number, minutes: number): number => {
     const midnight = new Date();
@@ -23,6 +24,7 @@ const minutesAfterMidnight = (hours: number, minutes: number): number => {
 
 export const createDemoChannel = (): ChannelSnapshot => ({
     id: DEMO_CHANNEL_ID,
+    slug: DEMO_CHANNEL_SLUG,
     title: 'Эскадра «Полночь»',
     createdAt: minutesAfterMidnight(21, 30),
     members: [

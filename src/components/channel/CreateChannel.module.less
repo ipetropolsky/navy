@@ -15,16 +15,24 @@
     font-weight: 600;
 }
 
+// Размер как в полях ввода: это вводный текст экрана, а не мелкая сноска.
 .hint {
     margin: 0 0 20px;
     color: var(--color-text-muted);
-    font-size: 13px;
 }
 
 .field {
     display: block;
     margin-bottom: 16px;
     text-align: left;
+}
+
+// Адрес непривычен, поэтому под полем показываем, что из него получится.
+.preview {
+    display: block;
+    margin-top: 5px;
+    color: var(--color-text-muted);
+    font-size: 12px;
 }
 
 .label {
@@ -49,6 +57,23 @@
     }
 }
 
+// Неподходящий адрес подсвечиваем сразу: в ссылке буквам и дефису замены нет.
+.inputBad {
+    .input();
+
+    border-color: #d66060;
+}
+
+.error {
+    margin-bottom: 12px;
+    padding: 9px 12px;
+    border-radius: 11px;
+    background: rgba(214, 96, 96, 0.16);
+    color: #ffb4b4;
+    font-size: 13px;
+    text-align: left;
+}
+
 .primary {
     width: 100%;
     padding: 12px 20px;
@@ -69,12 +94,9 @@
 // Демо-канал лежит в хранилище с первого запуска: без ссылки на него до разговора
 // не добраться, а посмотреть на живую ленту хочется сразу. Адрес показан целиком —
 // его можно скопировать и открыть во второй вкладке.
-// Адрес показан целиком и отдельной строкой: его можно скопировать и открыть во второй
-// вкладке, а переносить его посреди слова некрасиво.
+// Демо-канал лежит в хранилище с первого запуска: без ссылки на него до разговора
+// не добраться, а посмотреть на живую ленту хочется сразу.
 .demo {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
     margin: 18px 0 0;
     color: var(--color-text-muted);
     font-size: 13px;
