@@ -11,24 +11,9 @@ import Ship from '@/components/ships/Ship';
 import { SHIP_SPRITES } from '@/components/ships/shipSprites';
 import { Member, MorseFeed } from '@/types/channel';
 
+import { ShipPlacement, VIEWER_SLOT, placeShip, placeViewer, slotDepth } from '@/components/SeaScene/shipPlacement';
+
 import styles from './SeaScene.module.less';
-
-interface SceneSlot {
-    /** Горизонтальный центр корабля, % ширины сцены. */
-    left: number;
-    /** Глубина: 1 — ближний план, 0 — у горизонта. */
-    depth: number;
-    facing: 'left' | 'right';
-}
-
-const VIEWER_SLOT: SceneSlot = { left: 56, depth: 1, facing: 'left' };
-
-const OTHER_SLOTS: SceneSlot[] = [
-    { left: 18, depth: 0.48, facing: 'left' },
-    { left: 86, depth: 0.56, facing: 'right' },
-    { left: 40, depth: 0.28, facing: 'right' },
-    { left: 66, depth: 0.13, facing: 'left' },
-];
 
 // Качка живёт тем же циклом, что и вода: 10 секунд на полный круг, и за этот круг корабль
 // проходит и подъём со спуском, и оба наклона, возвращаясь ровно в исходное положение.
@@ -61,10 +46,10 @@ const HEAVE_NEAR = 0.95;
 const PITCH_PER_PX = 0.32;
 
 /** Высота волны под кораблём, px: линейно растёт от горизонта к переднему плану. */
-const waveAmplitude = (slot: SceneSlot) => WAVE_FAR + slot.depth * (WAVE_NEAR - WAVE_FAR);
+const waveAmplitude = (depth: number) => WAVE_FAR + depth * (WAVE_NEAR - WAVE_FAR);
 
 /** Ход корпуса по вертикали, px: та же прямая, но у переднего плана вдвое положе. */
-const heaveAmplitude = (slot: SceneSlot) => HEAVE_FAR + slot.depth * (HEAVE_NEAR - HEAVE_FAR);
+const heaveAmplitude = (depth: number) => HEAVE_FAR + depth * (HEAVE_NEAR - HEAVE_FAR);
 
 // Снимки воды: одно и то же море с разной рябью. Показываются по кругу в этом порядке.
 const SEA_FRAMES = [seaFrameOneUrl, seaFrameTwoUrl];
@@ -100,41 +85,65 @@ interface SeaSceneProps {
 
 /** Ночное море: слои неба, месяца, облаков, острова и воды с кораблями-участниками. */
 export default function SeaScene({ members, myId, morseFeeds }: SeaSceneProps) {
-    // Кто уже был в кадре к прошлой отрисовке. Новый корабль входит с краю сцены,
-    // а те, что стояли на рейде до нашего прихода, просто оказываются на месте:
-    // въезжать им неоткуда, мы к ним пришли, а не они к нам.
+    // Расстановка живёт в памяти вкладки: раз выбранное место корабль не меняет, пока
+    // не выйдет из канала. Иначе он переезжал бы при каждой отрисовке — например, когда
+    // кто-то просто отправил сообщение.
+    const placements = useRef(new Map<string, ShipPlacement>());
+    // Кто уже был в кадре. Заплывает только тот, кто вошёл при нас; те, что стояли на рейде
+    // до нашего прихода, просто оказываются на месте — въезжать им неоткуда, мы пришли к ним.
+    //
+    // Отсчёт ведём не от первой отрисовки, а от первой, где корабли вообще появились: пока
+    // канал грузится, их нет, и «первым кадром» оказался бы пустой экран — тогда заплывала бы
+    // вся эскадра разом при каждом открытии страницы.
     const seenIds = useRef<Set<string> | null>(null);
-    const firstRender = seenIds.current === null;
-    if (!seenIds.current) {
-        seenIds.current = new Set();
+    const baseline = seenIds.current === null && members.length > 0;
+    if (baseline) {
+        seenIds.current = new Set(members.map((member) => member.id));
     }
 
     const me = members.find((member) => member.id === myId);
     const others = members.filter((member) => member.id !== myId).sort((a, b) => a.joinedAt - b.joinedAt);
 
-    const placed: { member: Member; slot: SceneSlot }[] = [];
-    if (me) {
-        placed.push({ member: me, slot: VIEWER_SLOT });
-    }
-    others.forEach((member, index) => {
-        const slot = OTHER_SLOTS[index];
-        if (slot) {
-            placed.push({ member, slot });
+    // Ушедшие освобождают свои места: слот и коридор снова можно занять.
+    const aboard = new Set(members.map((member) => member.id));
+    placements.current.forEach((_, id) => {
+        if (!aboard.has(id)) {
+            placements.current.delete(id);
         }
     });
 
-    const slotStyle = ({ member, slot }: (typeof placed)[number]): CSSProperties => {
+    if (me && !placements.current.has(me.id)) {
+        placements.current.set(me.id, placeViewer());
+    }
+    others.forEach((member) => {
+        if (placements.current.has(member.id)) {
+            return;
+        }
+        const placement = placeShip([...placements.current.values()].filter((item) => item.slot < VIEWER_SLOT));
+        if (placement) {
+            placements.current.set(member.id, placement);
+        }
+    });
+
+    const placed = [me, ...others]
+        .filter((member): member is Member => Boolean(member))
+        .map((member) => ({ member, place: placements.current.get(member.id) }))
+        .filter((item): item is { member: Member; place: ShipPlacement } => Boolean(item.place));
+
+    const slotStyle = ({ member, place }: (typeof placed)[number]): CSSProperties => {
         const shipScale = SHIP_SPRITES[member.shipKind].scale;
-        const width = (20 + slot.depth * 30) * shipScale;
+        const depth = slotDepth(place.slot);
+        const width = (20 + depth * 30) * shipScale;
         return {
-            // Ширину и кламп «не выходить за кадр» досчитывает CSS: там же живёт масштаб для телефонов.
-            '--slot-left': `${slot.left}%`,
+            // Ширину и кламп «не подходить к краям кадра» досчитывает CSS: там же живёт
+            // масштаб для телефонов и отступ от краёв.
+            '--slot-left': `${place.left.toFixed(2)}%`,
             '--slot-width': `${width}%`,
-            '--slot-half': `${width / 2 + 1}%`,
+            '--slot-half': `${width / 2}%`,
             // Чем дальше корабль, тем выше он стоит в кадре — это и создаёт перспективу.
             // Ближний не прижимаем к самому низу: под ним нужна вода, иначе он «висит» на краю сцены.
-            bottom: `${8 + (1 - slot.depth) * 32}%`,
-            maxWidth: (150 + slot.depth * 200) * shipScale,
+            bottom: `${8 + (1 - depth) * 32}%`,
+            maxWidth: (150 + depth * 200) * shipScale,
         } as CSSProperties;
     };
 
@@ -162,7 +171,8 @@ export default function SeaScene({ members, myId, morseFeeds }: SeaSceneProps) {
             {/* Остров стоит на воде ниже горизонта, за ним видно море. Отражение уже есть в картинке. */}
             <img className={styles.island} src={islandUrl} alt="" />
             {placed.map((item, index) => {
-                const entering = !firstRender && !seenIds.current?.has(item.member.id);
+                const depth = slotDepth(item.place.slot);
+                const entering = !baseline && seenIds.current !== null && !seenIds.current.has(item.member.id);
                 seenIds.current?.add(item.member.id);
                 return (
                     <div
@@ -171,9 +181,11 @@ export default function SeaScene({ members, myId, morseFeeds }: SeaSceneProps) {
                         style={
                             {
                                 ...slotStyle(item),
-                                zIndex: Math.max(Math.round(item.slot.depth * 10), 1),
-                                // Заходит с той стороны, куда смотрит корма: корабль идёт носом вперёд.
-                                '--enter-from': item.slot.facing === 'left' ? '120vw' : '-120vw',
+                                // Ближний перекрывает дальнего: порядок наложения идёт от слота.
+                                zIndex: item.place.slot + 1,
+                                // Из-за какого края кадра заплывает. Ход задан в долях ширины экрана,
+                                // поэтому старт всегда за кадром, какой бы ширины он ни был.
+                                '--enter-from': item.place.enterFrom === 'right' ? '130vw' : '-130vw',
                             } as CSSProperties
                         }
                     >
@@ -186,16 +198,16 @@ export default function SeaScene({ members, myId, morseFeeds }: SeaSceneProps) {
                                     // Минус — момент старта в прошлом: корабль появляется уже качающимся.
                                     // Отсюда же CSS считает задержку тангажа, отняв четверть цикла.
                                     '--wave-start': `-${WAVE_STARTS[index].toFixed(2)}s`,
-                                    '--heave': `${heaveAmplitude(item.slot).toFixed(2)}px`,
+                                    '--heave': `${heaveAmplitude(depth).toFixed(2)}px`,
                                     // Крутизна волны идёт от её высоты, поэтому угол считаем из неё,
                                     // а не из хода корпуса: осадка корабля уклон воды не меняет.
                                     // Знак зависит от того, куда смотрит корабль: положительный
                                     // поворот поднимает левый край, отрицательный — правый, а вверх
                                     // вместе с корпусом должен идти нос, а не корма.
                                     '--pitch-angle': `${(
-                                        waveAmplitude(item.slot) *
+                                        waveAmplitude(depth) *
                                         PITCH_PER_PX *
-                                        (item.slot.facing === 'left' ? 1 : -1)
+                                        (item.place.facing === 'left' ? 1 : -1)
                                     ).toFixed(2)}deg`,
                                 } as CSSProperties
                             }
@@ -206,9 +218,9 @@ export default function SeaScene({ members, myId, morseFeeds }: SeaSceneProps) {
                                 kind={item.member.shipKind}
                                 name={item.member.name}
                                 hullNumber={item.member.hullNumber}
-                                facing={item.slot.facing}
+                                facing={item.place.facing}
                                 active={item.member.id === myId}
-                                depth={item.slot.depth}
+                                depth={depth}
                                 morseFeed={morseFeeds[item.member.id] ?? null}
                             />
                         </div>
