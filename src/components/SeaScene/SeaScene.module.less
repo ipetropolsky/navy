@@ -113,49 +113,16 @@
 }
 
 // Остров крупный и уходит за левый край: в кадре остаётся правая треть.
-// Стоит не на горизонте, а ближе — на воде, поэтому за ним видно море.
-.islandGroup {
+// Картинка прислана с прозрачным фоном и собственным отражением, поэтому берём её как есть.
+// Ватерлиния (граница острова и отражения) — на 55.5% высоты картинки, значит сдвиг вниз
+// на оставшиеся 44.5% ставит её ровно на заданную линию воды.
+.island {
     position: absolute;
     left: -60%; // -2/3 ширины: видна правая треть
     bottom: 34%;
     width: 90%;
-}
-
-.island {
-    display: block;
-    width: 100%;
     height: auto;
-}
-
-.islandReflection {
-    position: absolute;
-    top: 100%;
-    left: 0;
-    width: 100%;
-    height: auto;
-    transform: scaleY(-0.55);
-    transform-origin: top;
-    opacity: 0.3;
-    filter: blur(2.5px);
-    mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.85), transparent 75%);
-}
-
-// Под островом вода особенно тёмная: он большой и близко. Тоже нижняя половина овала.
-.islandShadow {
-    position: absolute;
-    top: 100%;
-    left: 4%;
-    width: 92%;
-    aspect-ratio: 12 / 1;
-    transform: translateY(-30%);
-    background: radial-gradient(
-        ellipse 50% 100% at 50% 0%,
-        rgba(3, 11, 26, 0.95) 0%,
-        rgba(3, 11, 26, 0.62) 42%,
-        transparent 78%
-    );
-    filter: blur(4px);
-    pointer-events: none;
+    transform: translateY(44.5%);
 }
 
 // Под кораблём — не зеркальное отражение, а тёмное пятно: нижняя половина овала,

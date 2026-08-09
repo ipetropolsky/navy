@@ -92,12 +92,8 @@ export default function SeaScene({ participants, viewerId, morseFeeds }: SeaScen
                     <img className={styles.seaTileMirrored} src={seaUrl} alt="" />
                 </div>
             </div>
-            {/* Остров стоит на воде ниже горизонта, за ним видно море; под ним — размытое отражение. */}
-            <div className={styles.islandGroup}>
-                <img className={styles.island} src={islandUrl} alt="" />
-                <div className={styles.islandShadow} />
-                <img className={styles.islandReflection} src={islandUrl} alt="" />
-            </div>
+            {/* Остров стоит на воде ниже горизонта, за ним видно море. Отражение уже есть в картинке. */}
+            <img className={styles.island} src={islandUrl} alt="" />
             {placed.map((item, index) => (
                 <div
                     key={item.participant.id}

@@ -26,8 +26,7 @@ BACKGROUNDS = {
 }
 
 ISLAND_SOURCE = 'island.png'
-ISLAND_WIDTH = 900
-ISLAND_EDGE = 14
+ISLAND_WIDTH = 1400
 
 # В новом небе месяца нет, берём его из первой присланной картинки неба.
 MOON_SOURCE = 'sky_clean_3296x1028.png'
@@ -37,17 +36,14 @@ MOON_CONTRAST = 55
 
 
 def prepare_island() -> None:
-    img = Image.open(SOURCES / ISLAND_SOURCE).convert('RGB')
-    grey = np.asarray(img).astype(np.float32).mean(axis=2)
+    """Остров прислан уже с прозрачным фоном и собственным отражением.
 
-    edges = np.hypot(ndimage.sobel(grey, axis=0), ndimage.sobel(grey, axis=1)) > ISLAND_EDGE
-    closed = ndimage.binary_dilation(edges, np.ones((3, 3)), iterations=3)
-    body = largest_blob(ndimage.binary_fill_holes(closed))
-    body = largest_blob(ndimage.binary_erosion(body, np.ones((3, 3)), iterations=3))
-
-    island = img.convert('RGBA')
-    island.putalpha(Image.fromarray((body * 255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(0.6)))
-    island = island.crop(island.getbbox())
+    Ничего не перерисовываем: только срезаем почти прозрачные поля и уменьшаем.
+    """
+    island = Image.open(SOURCES / ISLAND_SOURCE).convert('RGBA')
+    alpha = np.asarray(island)[..., 3] > 8
+    rows, cols = np.where(alpha.any(axis=1))[0], np.where(alpha.any(axis=0))[0]
+    island = island.crop((int(cols[0]), int(rows[0]), int(cols[-1]) + 1, int(rows[-1]) + 1))
 
     height = round(island.height * ISLAND_WIDTH / island.width)
     island.resize((ISLAND_WIDTH, height), Image.LANCZOS).save(OUT / 'island.png', optimize=True)
