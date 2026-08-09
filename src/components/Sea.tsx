@@ -17,12 +17,15 @@ export type SeaMode = 'wave' | 'ebb' | 'roll' | 'dissolve' | 'glints' | 'mirror'
 
 interface SeaProps {
     mode?: SeaMode;
-    /** Номера снимков для режима frames: показываются по кругу в этом порядке. */
-    frames?: number[];
+    /**
+     * Ключи снимков для режима frames: показываются по кругу в этом порядке.
+     * Соответствуют src/assets/sources/sea_<ключ>.png, поэтому строки — среди
+     * них есть sea_2a.
+     */
+    frames?: string[];
     /**
      * Насколько раньше начинается проявление следующего снимка, в долях слота.
-     * Ноль — строго по очереди; чем больше, тем мягче поворот скорости на
-     * границе слотов. Разумный предел — меньше единицы.
+     * Ноль — строго по очереди. Разумный предел — меньше единицы.
      */
     overlap?: number;
 }
@@ -73,7 +76,7 @@ const GLINTS: Glint[] = (() => {
     });
 })();
 
-export default function Sea({ mode = 'wave', frames = [1, 2, 3, 4], overlap = 0.3 }: SeaProps) {
+export default function Sea({ mode = 'wave', frames = ['1', '2', '2a', '3', '4'], overlap = 0 }: SeaProps) {
     return (
         <div
             className={`${styles.sea} ${styles[mode]}`}
