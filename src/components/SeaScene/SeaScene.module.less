@@ -1,11 +1,24 @@
+// Доля высоты сцены, которую занимает небо. На телефонах небо ниже: там место дороже.
 @horizon: 56%;
+@horizon-mobile: 42%;
+// Ширина, ниже которой считаем экран телефонным (iPhone 390-430, Android 360-412 CSS px).
+@mobile-width: 480px;
 
 .scene {
+    --horizon: @horizon;
+    // Корабли на телефоне крупнее, иначе совсем мелкие.
+    --ship-zoom: 1;
+
     position: relative;
     height: 100%;
     overflow: hidden;
     background: #050d1c;
     user-select: none;
+
+    @media (max-width: @mobile-width) {
+        --horizon: @horizon-mobile;
+        --ship-zoom: 1.22;
+    }
 
     img {
         pointer-events: none;
@@ -18,7 +31,7 @@
 .sky {
     position: absolute;
     inset: 0 0 auto;
-    height: @horizon;
+    height: var(--horizon);
     overflow: hidden;
     background: #000117;
 }
@@ -35,7 +48,7 @@
     width: 300%;
     display: flex;
     align-items: flex-end;
-    transform: translateX(calc(-50% + 11.111%));
+    transform: translate(calc(-50% + 11.111%), 20%);
 }
 
 .skyTile {
@@ -56,7 +69,7 @@
 // полосу можно двигать по горизонтали, меняя translateX у .seaStrip.
 .sea {
     position: absolute;
-    inset: @horizon 0 0;
+    inset: var(--horizon) 0 0;
     overflow: hidden;
     background: #01061a;
 }
@@ -90,7 +103,7 @@
 // на 2/3 высоты неба от горизонта (высота неба @horizon, значит центр на @horizon/3 сверху).
 .moon {
     position: absolute;
-    top: (@horizon / 3);
+    top: calc(var(--horizon) / 3);
     left: 50%;
     width: 14%;
     max-width: 120px;
@@ -144,9 +157,13 @@
     pointer-events: none;
 }
 
+// Ширину и границы кадра слот получает из инлайн-стилей, здесь применяем масштаб экрана.
 .shipSlot {
     position: absolute;
+    left: clamp(var(--slot-safe), var(--slot-left), calc(100% - var(--slot-safe)));
+    width: calc(var(--slot-width) * var(--ship-zoom));
     transform: translateX(-50%);
+    --slot-safe: calc(var(--slot-half) * var(--ship-zoom));
 }
 
 // Единый качающийся блок: спрайт, бортовой номер и огни неподвижны друг относительно друга.
@@ -164,6 +181,27 @@
 
     to {
         transform: translateY(var(--bob-amplitude, 2px));
+    }
+}
+
+// Тангаж: волна проходит под корпусом от носа к корме и слегка кренит корабль.
+// Период тот же, что у вертикальной качки, но со сдвигом фазы на четверть волны —
+// так это и выглядит у настоящего судна: сначала волна поднимает нос, потом весь корпус.
+// Центр вращения — примерный центр величины: 2/3 длины от носа, у ватерлинии.
+// Тень остаётся снаружи этого блока: пятно на воде не должно наклоняться вместе с корпусом.
+.shipPitch {
+    transform-origin: var(--pitch-origin, 66.7%) 82%;
+    animation: pitch 7s ease-in-out infinite alternate;
+    will-change: transform;
+}
+
+@keyframes pitch {
+    from {
+        transform: rotate(calc(var(--pitch-angle, 0.4deg) * -1));
+    }
+
+    to {
+        transform: rotate(var(--pitch-angle, 0.4deg));
     }
 }
 

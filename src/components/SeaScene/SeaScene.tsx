@@ -58,17 +58,17 @@ export default function SeaScene({ participants, viewerId, morseFeeds }: SeaScen
         }
     });
 
-    const slotStyle = ({ participant, slot }: (typeof placed)[number]) => {
+    const slotStyle = ({ participant, slot }: (typeof placed)[number]): CSSProperties => {
         const shipScale = SHIP_SPRITES[participant.shipKind].scale;
         const width = (20 + slot.depth * 30) * shipScale;
-        // Корабль не должен выходить за края сцены, поэтому центр держим на полширины от кромки.
-        const margin = width / 2 + 1;
         return {
-            left: `${Math.min(Math.max(slot.left, margin), 100 - margin)}%`,
+            // Ширину и кламп «не выходить за кадр» досчитывает CSS: там же живёт масштаб для телефонов.
+            '--slot-left': `${slot.left}%`,
+            '--slot-width': `${width}%`,
+            '--slot-half': `${width / 2 + 1}%`,
             bottom: `${4 + (1 - slot.depth) * 36}%`,
-            width: `${width}%`,
             maxWidth: (150 + slot.depth * 200) * shipScale,
-        };
+        } as CSSProperties;
     };
 
     return (
@@ -114,15 +114,32 @@ export default function SeaScene({ participants, viewerId, morseFeeds }: SeaScen
                     >
                         {/* Тень идёт перед кораблём в разметке, поэтому корпус её перекрывает. */}
                         <div className={styles.shipShadow} />
-                        <Ship
-                            kind={item.participant.shipKind}
-                            name={item.participant.name}
-                            hullNumber={item.participant.hullNumber}
-                            facing={item.slot.facing}
-                            active={item.participant.id === viewerId}
-                            depth={item.slot.depth}
-                            morseFeed={morseFeeds[item.participant.id] ?? null}
-                        />
+                        {/* Тангаж лежит внутри вертикальной качки: движения складываются. */}
+                        <div
+                            className={styles.shipPitch}
+                            style={
+                                {
+                                    animationDuration: `${item.slot.bob}s`,
+                                    // Четверть волны отставания от вертикальной качки.
+                                    animationDelay: `-${(index * BOB_PHASE_STEP + item.slot.bob / 2).toFixed(2)}s`,
+                                    // Нос смотрит в сторону facing, центр вращения — 2/3 длины от него.
+                                    '--pitch-origin': item.slot.facing === 'left' ? '66.7%' : '33.3%',
+                                    // Наклон едва заметный: корабль тяжёлый, волна его почти не кренит.
+                                    // У ближнего это ~2px хода на носу, у дальних ещё меньше.
+                                    '--pitch-angle': `${(0.1 + item.slot.depth * 0.38).toFixed(2)}deg`,
+                                } as CSSProperties
+                            }
+                        >
+                            <Ship
+                                kind={item.participant.shipKind}
+                                name={item.participant.name}
+                                hullNumber={item.participant.hullNumber}
+                                facing={item.slot.facing}
+                                active={item.participant.id === viewerId}
+                                depth={item.slot.depth}
+                                morseFeed={morseFeeds[item.participant.id] ?? null}
+                            />
+                        </div>
                     </div>
                 </div>
             ))}
