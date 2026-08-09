@@ -78,7 +78,7 @@ export default function MemberForm({ mode, crew, takenColors, initial, onSubmit,
                     className={styles.input}
                     value={name}
                     maxLength={20}
-                    placeholder="«Гроза»"
+                    placeholder="Гром"
                     autoComplete="off"
                     autoFocus
                     onChange={(event) => setName(event.target.value)}
@@ -98,7 +98,7 @@ export default function MemberForm({ mode, crew, takenColors, initial, onSubmit,
             </label>
 
             <div className={styles.field}>
-                <span className={styles.label}>Цвет позывного</span>
+                <span className={styles.label}>Цвет</span>
                 <div className={styles.colors}>
                     {MEMBER_COLORS.map((option) => (
                         <button
