@@ -82,15 +82,16 @@
     transform: scaleX(-1);
 }
 
-// Месяц вырезан отдельным слоем: стоит примерно по центру, над лунной дорожкой на воде.
+// Месяц вырезан отдельным слоем: по центру над лунной дорожкой на воде,
+// на 2/3 высоты неба от горизонта (высота неба @horizon, значит центр на @horizon/3 сверху).
 .moon {
     position: absolute;
-    top: 8%;
+    top: (@horizon / 3);
     left: 50%;
     width: 14%;
     max-width: 120px;
     height: auto;
-    transform: translateX(-50%);
+    transform: translate(-50%, -50%);
 }
 
 .cloudFar {
@@ -159,20 +160,15 @@
 
 // Под кораблём — не зеркальное отражение, а тёмное пятно: нижняя половина овала,
 // поэтому тень уходит только вниз от ватерлинии и не выглядывает за корпусом.
-// Центр градиента прижат к верхней кромке блока — это и даёт полуовал.
+// Лежит внутри .shipFloat, значит качается вместе с кораблём.
 .shipShadow {
     position: absolute;
+    top: 95%;
     left: 50%;
-    top: 100%;
-    width: 112%;
-    aspect-ratio: 14 / 1;
-    transform: translate(-50%, -34%);
-    background: radial-gradient(
-        ellipse 50% 100% at 50% 0%,
-        rgba(6, 18, 40, 0.85) 0%,
-        rgba(6, 18, 40, 0.5) 45%,
-        transparent 78%
-    );
+    width: 120%;
+    aspect-ratio: 13;
+    transform: translate(-50%);
+    background: radial-gradient(50% 100% at 50% 0, #000811cc 0%, #000811aa 80%, #0000 100%);
     filter: blur(2px);
     pointer-events: none;
 }

@@ -104,9 +104,7 @@ export default function SeaScene({ participants, viewerId, morseFeeds }: SeaScen
                     className={styles.shipSlot}
                     style={{ ...slotStyle(item), zIndex: Math.max(Math.round(item.slot.depth * 10), 1) }}
                 >
-                    {/* Тень на воде остаётся на месте, пока корабль качается. */}
-                    <div className={styles.shipShadow} />
-                    {/* Корабль вместе с номером, лампой и огнями качается как единое целое. */}
+                    {/* Корабль, номер, огни и тень на воде качаются как единое целое. */}
                     <div
                         className={styles.shipFloat}
                         style={
@@ -127,6 +125,7 @@ export default function SeaScene({ participants, viewerId, morseFeeds }: SeaScen
                             depth={item.slot.depth}
                             morseFeed={morseFeeds[item.participant.id] ?? null}
                         />
+                        <div className={styles.shipShadow} />
                     </div>
                 </div>
             ))}
