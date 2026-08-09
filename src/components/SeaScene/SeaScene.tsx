@@ -4,7 +4,8 @@ import cloudFarUrl from '@/assets/scene/cloud-1.png';
 import cloudNearUrl from '@/assets/scene/cloud-2.png';
 import islandUrl from '@/assets/scene/island.png';
 import moonUrl from '@/assets/scene/moon.png';
-import seaUrl from '@/assets/scene/sea.png';
+import seaFrameOneUrl from '@/assets/scene/sea-1.png';
+import seaFrameTwoUrl from '@/assets/scene/sea-2.png';
 import skyUrl from '@/assets/scene/sky.png';
 import Ship from '@/components/ships/Ship';
 import { SHIP_SPRITES } from '@/components/ships/shipSprites';
@@ -33,6 +34,32 @@ const OTHER_SLOTS: SceneSlot[] = [
 
 // Стартовые сдвиги фаз качки: даже при близких периодах корабли расходятся сразу.
 const BOB_PHASE_STEP = 1.7;
+
+// Снимки воды: одно и то же море с разной рябью. Показываются по кругу в этом порядке.
+const SEA_FRAMES = [seaFrameOneUrl, seaFrameTwoUrl];
+
+/**
+ * Плитка воды: снимки ряби линейно перетекают друг в друга по кругу, сама сцена
+ * при этом стоит на месте. Слоёв на один больше, чем снимков: последний повторяет
+ * первый, поэтому к концу круга сверху лежит ровно то же, что в его начале, —
+ * и общий сброс анимации на стыке не виден.
+ */
+function SeaTile({ mirrored = false }: { mirrored?: boolean }) {
+    return (
+        <div
+            className={mirrored ? styles.seaTileMirrored : styles.seaTile}
+            style={{ '--frames': SEA_FRAMES.length } as CSSProperties}
+        >
+            {[...SEA_FRAMES, SEA_FRAMES[0]].map((url, index) => (
+                <div
+                    key={`${url}-${index}`}
+                    className={styles.seaFrame}
+                    style={{ backgroundImage: `url(${url})`, '--frame-index': index } as CSSProperties}
+                />
+            ))}
+        </div>
+    );
+}
 
 interface SeaSceneProps {
     participants: Participant[];
@@ -87,9 +114,9 @@ export default function SeaScene({ participants, viewerId, morseFeeds }: SeaScen
             <div className={styles.sea}>
                 {/* Вода собрана так же, как небо: полосу можно двигать по горизонтали. */}
                 <div className={styles.seaStrip}>
-                    <img className={styles.seaTileMirrored} src={seaUrl} alt="" />
-                    <img className={styles.seaTile} src={seaUrl} alt="" />
-                    <img className={styles.seaTileMirrored} src={seaUrl} alt="" />
+                    <SeaTile mirrored />
+                    <SeaTile />
+                    <SeaTile mirrored />
                 </div>
             </div>
             {/* Остров стоит на воде ниже горизонта, за ним видно море. Отражение уже есть в картинке. */}

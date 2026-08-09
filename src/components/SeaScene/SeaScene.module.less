@@ -4,6 +4,20 @@
 // Ширина, ниже которой считаем экран телефонным (iPhone 390-430, Android 360-412 CSS px).
 @mobile-width: 480px;
 
+// Вода: секунд на один снимок ряби. Круг — столько же, умноженное на число снимков.
+@sea-frame-seconds: 3;
+@sea-frame-duration: (@sea-frame-seconds * 1s);
+// Пропорции рабочих копий sea-1.png и sea-2.png: размер у них общий.
+@sea-image-width: 1800;
+@sea-image-height: 601;
+
+// Доля пройденного круга. Без @property значение не интерполируется и идёт скачком.
+@property --progress {
+    syntax: '<number>';
+    inherits: false;
+    initial-value: 0;
+}
+
 .scene {
     --horizon: @horizon;
     // Корабли на телефоне крупнее, иначе совсем мелкие.
@@ -67,11 +81,12 @@
 
 // Вода собрана так же, как небо: три плитки в ряд (зеркальная, обычная, зеркальная),
 // полосу можно двигать по горизонтали, меняя translateX у .seaStrip.
+// Фон = цвет нижней кромки снимков: если по высоте картинки не хватает, шва не видно.
 .sea {
     position: absolute;
     inset: var(--horizon) 0 0;
     overflow: hidden;
-    background: #01061a;
+    background: #010616;
 }
 
 // Так же, как небо: каждая плитка шириной с кадр, лунная дорожка попадает под месяц.
@@ -86,17 +101,54 @@
     transform: translateX(-50%);
 }
 
+// Высоту плитки задаёт пропорция снимка: у обоих кадров она одна и та же.
 .seaTile {
-    display: block;
+    position: relative;
     flex: 0 0 33.34%;
     min-width: 0;
-    height: auto;
+    aspect-ratio: ~'@{sea-image-width} / @{sea-image-height}';
 }
 
 .seaTileMirrored {
     .seaTile();
 
     transform: scaleX(-1);
+}
+
+// Снимки ряби линейно перетекают друг в друга: сцена стоит на месте, меняется
+// только рисунок волн. Все слои гоняют одну и ту же анимацию --progress без
+// задержек — минус-задержка развернула бы порядок показа.
+//
+// Прозрачность слоя — сколько слотов круга прошло минус его собственный номер.
+// Всё, что вышло за границы, браузер обрежет сам, поэтому нижние слои не гаснут,
+// а просто перекрываются верхними: переход — обычное альфа-наложение, без
+// blend-режимов и без провала яркости на середине.
+.seaFrame {
+    position: absolute;
+    inset: 0;
+    background-position: top center;
+    background-size: cover;
+    z-index: var(--frame-index);
+
+    animation: sea-frames calc(var(--frames) * @sea-frame-duration) linear infinite;
+    opacity: calc(var(--progress) * var(--frames) - var(--frame-index) + 1);
+}
+
+@keyframes sea-frames {
+    from {
+        --progress: 0;
+    }
+
+    to {
+        --progress: 1;
+    }
+}
+
+// С отключённой анимацией остаётся неподвижный первый снимок.
+@media (prefers-reduced-motion: reduce) {
+    .seaFrame {
+        animation: none;
+    }
 }
 
 // Месяц вырезан отдельным слоем: по центру над лунной дорожкой на воде,

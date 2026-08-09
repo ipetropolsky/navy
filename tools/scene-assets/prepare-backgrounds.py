@@ -25,6 +25,15 @@ BACKGROUNDS = {
     'sea.png': ('sea', 1800),
 }
 
+# Снимки моря для анимации «Смена»: одна и та же сцена с разной рябью, кадры
+# линейно перетекают друг в друга. Сцена при этом стоит на месте, поэтому кадры
+# обязаны совпадать пиксель в пиксель — иначе на перетекании поплывёт вся вода.
+# Исходники отличаются на пиксель по ширине (2170 и 2169 при высоте 725), от чего
+# при уменьшении по одной только ширине высота выходит разной. Поэтому размер
+# рабочей копии задан целиком: искажение в 0.05% незаметно, а расхождения нет.
+SEA_FRAME_SOURCES = ('sea_1.png', 'sea_2.png')
+SEA_FRAME_SIZE = (1800, 601)
+
 ISLAND_SOURCE = 'island.png'
 ISLAND_WIDTH = 1400
 
@@ -92,6 +101,13 @@ def prepare_moon() -> None:
     print('moon', (MOON_WIDTH, height))
 
 
+def prepare_sea_frames() -> None:
+    for index, source in enumerate(SEA_FRAME_SOURCES, start=1):
+        img = Image.open(SOURCES / source).convert('RGB')
+        img.resize(SEA_FRAME_SIZE, Image.LANCZOS).save(OUT / f'sea-{index}.png', optimize=True)
+        print(f'sea-{index}', SEA_FRAME_SIZE)
+
+
 def largest_blob(mask: np.ndarray) -> np.ndarray:
     labels, count = ndimage.label(mask)
     if not count:
@@ -107,6 +123,7 @@ def main() -> None:
             img = img.resize((width, round(img.height * width / img.width)), Image.LANCZOS)
         img.save(OUT / f'{name}.png', optimize=True)
         print(name, img.size)
+    prepare_sea_frames()
     prepare_island()
     prepare_moon()
 
