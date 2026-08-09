@@ -19,10 +19,9 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 SOURCES = ROOT / 'src/assets/sources'
 OUT = ROOT / 'src/assets/scene'
 
-# Исходник -> (имя ассета, ширина рабочей копии). None — брать как есть, без уменьшения:
-# у неба уменьшение съедает яркость мелких звёзд, поэтому масштабирует уже браузер.
+# Исходник -> (имя ассета, ширина рабочей копии).
 BACKGROUNDS = {
-    'sky.png': ('sky', None),
+    'sky.png': ('sky', 1800),
     'sea.png': ('sea', 1800),
 }
 
