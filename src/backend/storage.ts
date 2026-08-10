@@ -1,33 +1,50 @@
-/* eslint-disable no-restricted-syntax -- Обёртки browser-api-utils в проекте нет, а правило
-   общего конфига бережёт от обращения к window при серверном рендеринге. Здесь статический SPA
-   без SSR, и весь прямой доступ к хранилищам собран в этом файле — больше его нигде нет. */
-
 /**
- * Хранилище браузера за одной дверью. Заодно они перестают падать: в приватном режиме
- * и при переполнении квоты запись бросает исключение, а чат из-за этого валиться не должен —
- * хуже, чем «не сохранилось», будет только белый экран.
+ * Весь прямой доступ к хранилищам браузера собран здесь — больше его в проекте нет.
+ * Обращение отложено до вызова: правило общего конфига бережёт от работы с window
+ * при серверном рендеринге, и хотя здесь статический SPA без SSR, ленивое обращение
+ * к нему честнее — на момент импорта окна может ещё не быть.
  */
 
-export const localStore = {
-    read(key: string): string | null {
+/**
+ * Хранилища браузера за одной дверью. Заодно они перестают падать: в приватном режиме
+ * и при переполнении квоты запись бросает исключение, а чат из-за этого валиться не должен —
+ * хуже, чем «не сохранилось», будет только белый экран.
+ *
+ * Хранилищ два, и разница между ними для нас смысловая, а не техническая:
+ * `localStorage` — общая на браузер память, в ней живёт состояние «сервера»;
+ * `sessionStorage` — память одной вкладки, в ней живёт то, что у каждой вкладки своё.
+ */
+
+interface Store {
+    read: (key: string) => string | null;
+    write: (key: string, value: string) => void;
+    remove: (key: string) => void;
+}
+
+/** Хранилище берём не сразу, а на каждом обращении: до первого вызова окна может не быть. */
+const guarded = (pick: () => Storage): Store => ({
+    read(key) {
         try {
-            return window.localStorage.getItem(key);
+            return pick().getItem(key);
         } catch {
             return null;
         }
     },
-    write(key: string, value: string): void {
+    write(key, value) {
         try {
-            window.localStorage.setItem(key, value);
+            pick().setItem(key, value);
         } catch {
             // Приватный режим или кончилась квота: продолжаем без записи.
         }
     },
-    remove(key: string): void {
+    remove(key) {
         try {
-            window.localStorage.removeItem(key);
+            pick().removeItem(key);
         } catch {
             // Нечего чистить — и не надо.
         }
     },
-};
+});
+
+export const localStore = guarded(() => window.localStorage);
+export const sessionStore = guarded(() => window.sessionStorage);

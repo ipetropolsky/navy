@@ -145,7 +145,11 @@ export default function App() {
                     </div>
                 )}
                 {!loading && !route.channel && (
-                    <CreateChannel onCreate={handleCreate} demoHref={`?channel=${DEMO_CHANNEL_SLUG}`} />
+                    <CreateChannel
+                        onCreate={handleCreate}
+                        demoHref={`?channel=${DEMO_CHANNEL_SLUG}`}
+                        onOpenDemo={() => route.openChannel(DEMO_CHANNEL_SLUG)}
+                    />
                 )}
                 {!loading && channel && !inChat && (
                     <MemberForm

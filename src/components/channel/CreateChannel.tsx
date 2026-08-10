@@ -9,13 +9,15 @@ interface CreateChannelProps {
     onCreate: (draft: ChannelDraft) => Promise<void>;
     /** Адрес демо-канала: обычная ссылка, её видно и можно скопировать. */
     demoHref: string;
+    /** Переход в демо без перезагрузки страницы. */
+    onOpenDemo: () => void;
 }
 
 /**
  * Главная сервиса: канал ещё не выбран, поэтому в море пусто — кораблей нет.
  * Отсюда два хода: завести свой канал связи или заглянуть в демо.
  */
-export default function CreateChannel({ onCreate, demoHref }: CreateChannelProps) {
+export default function CreateChannel({ onCreate, demoHref, onOpenDemo }: CreateChannelProps) {
     const [title, setTitle] = useState('');
     // Адрес предлагаем из названия, но как только его правят руками, перестаём перебивать:
     // человек знает, чего хочет, а название он может ещё десять раз поменять.
@@ -137,7 +139,21 @@ export default function CreateChannel({ onCreate, demoHref }: CreateChannelProps
 
             <p className={styles.demo}>
                 Или загляни в{' '}
-                <a className={styles.demoLink} href={demoHref}>
+                {/* Ссылка настоящая: её видно в строке состояния, можно скопировать и открыть
+                    в новой вкладке. Но обычный клик уводим в приложение — перезагружать страницу
+                    незачем, а со сцены при этом слетают и анимация входа, и загруженные картинки.
+                    Клик с модификатором и средней кнопкой не трогаем: человек метит в новую вкладку. */}
+                <a
+                    className={styles.demoLink}
+                    href={demoHref}
+                    onClick={(event) => {
+                        if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+                            return;
+                        }
+                        event.preventDefault();
+                        onOpenDemo();
+                    }}
+                >
                     демо-канал
                 </a>
             </p>
