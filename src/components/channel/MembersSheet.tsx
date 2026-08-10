@@ -1,4 +1,5 @@
 import HullBadge from '@/components/ships/HullBadge';
+import Button from '@/components/ui/Button';
 import { Member, SHIP_KIND_LABELS } from '@/types/channel';
 
 import styles from './MembersSheet.module.less';
@@ -49,12 +50,12 @@ export default function MembersSheet({ open, members, myId, onEditMe, onLeave, o
                 })}
                 {myId && (
                     <div className={styles.actions}>
-                        <button type="button" className={styles.action} onClick={onEditMe}>
+                        <Button variant="secondary" onClick={onEditMe}>
                             Переоснастить корабль
-                        </button>
-                        <button type="button" className={styles.actionDanger} onClick={onLeave}>
+                        </Button>
+                        <Button variant="danger" onClick={onLeave}>
                             Выйти из канала
-                        </button>
+                        </Button>
                     </div>
                 )}
             </div>

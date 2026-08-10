@@ -9,7 +9,7 @@
 .heading {
     margin: 0 0 12px;
     font-family: 'Roboto Slab', serif;
-    font-size: 21px;
+    font-size: var(--font-size-heading);
     font-weight: 600;
 }
 
@@ -17,7 +17,7 @@
 .crew {
     margin: 0 0 16px;
     color: var(--color-text-muted);
-    font-size: 13px;
+    font-size: var(--font-size-base);
 }
 
 .field {
@@ -29,7 +29,7 @@
     display: block;
     margin-bottom: 6px;
     color: var(--color-text-muted);
-    font-size: 12px;
+    font-size: var(--font-size-small);
 }
 
 .input {
@@ -87,7 +87,7 @@
 .colorPreview {
     margin-left: 4px;
     font-weight: 500;
-    font-size: 13px;
+    font-size: var(--font-size-base);
 }
 
 // Корабли в столбик: они вытянутые, в ряд превратились бы в нечитаемые полоски.
@@ -131,14 +131,14 @@
 
 .kindLabel {
     color: var(--color-text-muted);
-    font-size: 12px;
+    font-size: var(--font-size-small);
 }
 
 // Характеристики — приписка под названием: мельче и тише, читать их подряд не нужно,
 // но когда выбираешь между катером и тральщиком, разница видна сразу.
 .kindSpec {
     color: var(--color-text-muted);
-    font-size: 11px;
+    font-size: var(--font-size-small);
     opacity: 0.72;
 }
 
@@ -148,36 +148,14 @@
     border-radius: 11px;
     background: rgba(214, 96, 96, 0.16);
     color: #ffb4b4;
-    font-size: 13px;
+    font-size: var(--font-size-base);
 }
 
+// По центру, а не по правому краю: форма выровнена по центру целиком — заголовок, поля,
+// силуэты, — и одинокая кнопка у края смотрелась выпавшей из неё.
 .actions {
     display: flex;
     gap: 8px;
-    justify-content: flex-end;
+    justify-content: center;
     margin-top: 18px;
-}
-
-.primary {
-    padding: 11px 20px;
-    border: none;
-    border-radius: 11px;
-    background: var(--color-accent);
-    color: #04121e;
-    font: inherit;
-    font-weight: 600;
-    cursor: pointer;
-
-    &:disabled {
-        opacity: 0.45;
-        cursor: default;
-    }
-}
-
-.secondary {
-    .primary();
-
-    background: var(--color-bubble-in);
-    color: var(--color-text);
-    font-weight: 400;
 }

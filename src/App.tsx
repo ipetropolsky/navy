@@ -8,6 +8,7 @@ import MemberForm from '@/components/channel/MemberForm';
 import MembersSheet from '@/components/channel/MembersSheet';
 import Composer from '@/components/chat/Composer';
 import MessageList from '@/components/chat/MessageList';
+import Button from '@/components/ui/Button';
 import { useSnackbar } from '@/components/ui/Snackbar';
 import { useChannel } from '@/hooks/useChannel';
 import { channelLink, useRoute } from '@/routing';
@@ -96,9 +97,6 @@ export default function App() {
         if (typingMember) {
             return `«${typingMember.name}» передаёт…`;
         }
-        if (me) {
-            return `${members.length} на связи · ты — «${me.name}»`;
-        }
         return members.length ? `${members.length} на связи` : 'на связи пока никого';
     };
 
@@ -177,9 +175,9 @@ export default function App() {
                 {!loading && route.channel && !channel && (
                     <div className={styles.notFound}>
                         <p>Канала по адресу «{route.channel}» нет.</p>
-                        <button type="button" className={styles.notFoundAction} onClick={route.openHome}>
-                            Создать свой канал
-                        </button>
+                        <span className={styles.notFoundAction}>
+                            <Button onClick={route.openHome}>Создать свой канал</Button>
+                        </span>
                     </div>
                 )}
                 {!loading && !route.channel && (

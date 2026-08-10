@@ -1,6 +1,7 @@
 import { SyntheticEvent, useState } from 'react';
 
 import { ChannelDraft, ChannelError } from '@/backend';
+import Button from '@/components/ui/Button';
 import { useSnackbar } from '@/components/ui/Snackbar';
 import { channelLink } from '@/routing';
 import { copyText } from '@/utils/clipboard';
@@ -78,7 +79,7 @@ export default function CreateChannel({ onCreate, demoHref, onOpenDemo }: Create
             </p>
 
             <label className={styles.field}>
-                <span className={styles.label}>Название канала</span>
+                <span className={styles.label}>Название</span>
                 <input
                     className={styles.input}
                     value={title}
@@ -91,7 +92,7 @@ export default function CreateChannel({ onCreate, demoHref, onOpenDemo }: Create
             </label>
 
             <label className={styles.field}>
-                <span className={styles.label}>Адрес канала — латинские буквы, цифры и дефис</span>
+                <span className={styles.label}>Адрес — латинские буквы, цифры и дефис</span>
                 {/* Кнопка прилеплена к полю: сам адрес показывать негде — ссылка длинная,
                     а нужна она целиком и в буфере, а не на экране. */}
                 <span className={styles.inputRow}>
@@ -127,9 +128,9 @@ export default function CreateChannel({ onCreate, demoHref, onOpenDemo }: Create
 
             {error && <div className={styles.error}>{error}</div>}
 
-            <button type="submit" className={styles.primary} disabled={!canSubmit || busy}>
+            <Button type="submit" wide disabled={!canSubmit || busy}>
                 {busy ? 'Минуту…' : 'Создать канал'}
-            </button>
+            </Button>
 
             <p className={styles.demo}>
                 Или загляни в{' '}

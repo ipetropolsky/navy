@@ -2,6 +2,7 @@ import { SyntheticEvent, useState } from 'react';
 
 import { ChannelError, MemberDraft } from '@/backend';
 import { SHIP_SPRITES } from '@/components/ships/shipSprites';
+import Button from '@/components/ui/Button';
 import {
     HULL_NUMBER_LENGTH,
     MEMBER_COLORS,
@@ -57,8 +58,9 @@ export default function MemberForm({ mode, crew, takenColors, initial, onSubmit,
     const [busy, setBusy] = useState(false);
 
     const hullNumberOk = isValidHullNumber(hullNumber);
-    const doneLabel = mode === 'join' ? 'Войти в канал' : 'Сохранить';
-    const submitLabel = busy ? 'Минуту…' : doneLabel;
+    // Надпись одна на оба случая: что при входе, что при переоснащении человек делает одно
+    // и то же — заканчивает с формой. Что именно случится, уже написано в заголовке.
+    const submitLabel = busy ? 'Минуту…' : 'Готово';
     const canSubmit = name.trim().length > 0 && hullNumberOk;
 
     const handleSubmit = async (event: SyntheticEvent) => {
@@ -152,13 +154,13 @@ export default function MemberForm({ mode, crew, takenColors, initial, onSubmit,
 
             <div className={styles.actions}>
                 {onCancel && (
-                    <button type="button" className={styles.secondary} onClick={onCancel}>
+                    <Button variant="secondary" onClick={onCancel}>
                         Отмена
-                    </button>
+                    </Button>
                 )}
-                <button type="submit" className={styles.primary} disabled={!canSubmit || busy}>
+                <Button type="submit" disabled={!canSubmit || busy}>
                     {submitLabel}
-                </button>
+                </Button>
             </div>
         </form>
     );

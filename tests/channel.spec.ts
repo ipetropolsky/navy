@@ -31,7 +31,7 @@ test('канал заводится с главной, и в него можно
 
     // Корабль в кадре, и канал знает, кто это.
     await expect(ships(page)).toHaveCount(1);
-    await expect(page.locator('[class*="chatStatus"]')).toContainText('ты — «Буря»');
+    await expect(page.locator('[class*="chatStatus"]')).toHaveText('1 на связи');
     await expect(systemLines(page)).toHaveText(['Малый противолодочный корабль «Буря» 321 встал на рейд']);
 });
 

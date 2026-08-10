@@ -11,6 +11,8 @@
   каналы, участники, сообщения, события, ошибки.
 - [Принципы разработки API](docs/API-PRINCIPLES.md) — как проектируем контракты, чтобы
   их можно было расширять, и чему нынешний контракт пока не соответствует.
+- [Оформление](docs/STYLEGUIDE.md) — кегли, цвета и принципы: как выглядит интерфейс
+  и почему именно так.
 - [Проект](docs/PROJECT.md) — исходное задание, продуктовые решения, устройство сцены
   и план по шагам.
 - [TODO](docs/TODO.md) — отложенные задачи и технический долг.
@@ -36,6 +38,9 @@ npm run format-files file1 file2 ...
 
 # Check types, lint and format entire repo
 npm run check
+
+# Run browser tests (Playwright, builds and serves the app itself)
+npm run test:e2e
 ```
 
 ## Сборка и деплой

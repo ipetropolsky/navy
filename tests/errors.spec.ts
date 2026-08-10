@@ -29,7 +29,8 @@ test('позывной и бортовой номер заняты: отказ �
 
     // Форма никуда не делась: с исправленными данными вход проходит.
     await join(page, 'Гроза', '777');
-    await expect(page.locator('[class*="chatStatus"]')).toContainText('ты — «Гроза»');
+    // Вошли четвёртыми к трём кораблям демо-канала.
+    await expect(page.locator('[class*="chatStatus"]')).toHaveText('4 на связи');
 });
 
 test('адрес канала не той формы: отправить нельзя, подсказка на месте', async ({ page }) => {

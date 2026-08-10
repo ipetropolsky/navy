@@ -1,0 +1,68 @@
+// Общее для всех кнопок панелей. Отклик на нажатие обязателен: на телефоне он единственный,
+// по которому понятно, что кнопка сработала. Подсветка под указателем — под @media (hover),
+// иначе на тач-экране она залипает после тапа и кнопка выглядит вечно наведённой.
+.button {
+    padding: 11px 20px;
+    border: 0;
+    border-radius: 11px;
+    font: inherit;
+    font-weight: 500;
+    line-height: 1.2;
+    cursor: pointer;
+    transition:
+        background 0.15s ease,
+        transform 0.08s ease;
+
+    &:active {
+        transform: scale(0.97);
+    }
+
+    &:disabled {
+        opacity: 0.45;
+        cursor: default;
+        transform: none;
+    }
+}
+
+.wide {
+    width: 100%;
+}
+
+// Главное действие экрана: заливка акцентом, тёмный текст.
+.primary {
+    background: var(--color-accent);
+    color: #04121e;
+    font-weight: 600;
+
+    @media (hover: hover) {
+        &:hover:not(:disabled) {
+            background: var(--color-accent-hover);
+        }
+    }
+}
+
+// Рядом стоящее и менее важное. Фон заметно светлее панели: цвета пузыря кнопка на тёмной
+// шторке почти сливалась с фоном и кнопкой не читалась.
+.secondary {
+    background: var(--color-control);
+    color: var(--color-text);
+
+    @media (hover: hover) {
+        &:hover:not(:disabled) {
+            background: var(--color-control-hover);
+        }
+    }
+}
+
+// То, что убирает. Цветом только текст: сплошная красная заливка на тёмном экране кричит.
+.danger {
+    .secondary();
+
+    color: var(--color-danger);
+
+    @media (hover: hover) {
+        &:hover:not(:disabled) {
+            background: var(--color-danger-bg);
+        }
+    }
+}

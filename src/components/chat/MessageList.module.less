@@ -11,14 +11,16 @@
     scrollbar-color: rgba(120, 168, 214, 0.25) transparent;
 }
 
+// Фон тот же, что у панели с полем ввода: чип — служебная плашка, и цвет у служебного
+// в приложении один.
 .dateChip {
     align-self: center;
     margin-bottom: 6px;
     padding: 3px 12px;
     border-radius: 12px;
-    background: rgba(10, 26, 44, 0.75);
+    background: var(--color-bg-raised);
     color: var(--color-text-muted);
-    font-size: 13px;
+    font-size: var(--font-size-base);
 }
 
 // Системная строчка — про канал, а не про разговор: по центру, вполголоса, без пузыря.
@@ -87,7 +89,7 @@
 }
 
 .author {
-    font-size: 13px;
+    font-size: var(--font-size-base);
     font-weight: 500;
     margin-bottom: 1px;
 }
@@ -101,7 +103,7 @@
     border-left: 2px solid var(--color-accent);
     border-radius: 5px;
     background: rgba(255, 255, 255, 0.05);
-    font-size: 13px;
+    font-size: var(--font-size-base);
 }
 
 .replyAuthor {
@@ -124,5 +126,5 @@
     float: right;
     margin: 7px 0 -4px 8px;
     color: var(--color-text-muted);
-    font-size: 11px;
+    font-size: var(--font-size-small);
 }
