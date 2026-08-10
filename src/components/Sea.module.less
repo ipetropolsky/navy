@@ -31,6 +31,10 @@
 @frames-image-width: 2170;
 @frames-image-height: 725;
 
+// «Зеркало» на sea_fixed.png: у снимка тоже своя пропорция.
+@fixed-image-width: 2172;
+@fixed-image-height: 724;
+
 // «Блики»: спрайты волн 600×48 из src/assets/scene идут по перспективному лучу.
 // Отношение сдвига к масштабу одинаково на краях (7.7/0.08 = 96/1), поэтому
 // блик всё время остаётся на луче — какую кривую хода ни возьми.
@@ -131,6 +135,18 @@
     .front {
         transform: scaleX(-1);
         animation-name: sea-mirror;
+    }
+}
+
+// То же «Зеркало», но на sea_fixed.png. У старого sea.png лунная дорожка почти
+// по центру (1.5% ширины), поэтому при отражении она стоит на месте и меняется
+// только рябь. У sea_fixed она правее на 6% ширины, и свет заметно переезжает
+// через кадр туда и обратно.
+.mirrorFixed {
+    aspect-ratio: ~'@{fixed-image-width} / @{fixed-image-height}';
+
+    .layer {
+        background-image: url('@/assets/sources/sea_fixed.png');
     }
 }
 

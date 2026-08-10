@@ -19,6 +19,12 @@ interface SeaProps {
     mode?: SeaMode;
     /** Номера снимков для режима frames: показываются по кругу в этом порядке. */
     frames?: number[];
+    /**
+     * Какой снимок отражать в режиме mirror. У sea.png лунная дорожка почти по
+     * центру и при отражении стоит на месте; у sea_fixed она правее на 6%
+     * ширины, и свет заметно переезжает через кадр.
+     */
+    mirrorImage?: 'sea' | 'fixed';
 }
 
 interface Glint {
@@ -67,9 +73,14 @@ const GLINTS: Glint[] = (() => {
     });
 })();
 
-export default function Sea({ mode = 'wave', frames = [1, 2, 3, 4] }: SeaProps) {
+export default function Sea({ mode = 'wave', frames = [1, 2, 3, 4], mirrorImage = 'sea' }: SeaProps) {
+    const classes = [styles.sea, styles[mode]];
+    if (mode === 'mirror' && mirrorImage === 'fixed') {
+        classes.push(styles.mirrorFixed);
+    }
+
     return (
-        <div className={`${styles.sea} ${styles[mode]}`} role="img" aria-label="Спокойное ночное море">
+        <div className={classes.join(' ')} role="img" aria-label="Спокойное ночное море">
             <div className={`${styles.layer} ${styles.back}`} />
             <div className={styles.curtain}>
                 <div className={`${styles.layer} ${styles.front}`} />
