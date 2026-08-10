@@ -1,7 +1,14 @@
 import corvetteUrl from '@/assets/scene/ship-corvette.png';
 import frigateUrl from '@/assets/scene/ship-frigate.png';
 import patrolUrl from '@/assets/scene/ship-patrol.png';
-import { ShipKind } from '@/types/channel';
+import pr1141Url from '@/assets/scene/ship-pr1141.png';
+import pr1234Url from '@/assets/scene/ship-pr1234.png';
+import pr12412Url from '@/assets/scene/ship-pr12412.png';
+import pr1258Url from '@/assets/scene/ship-pr1258.png';
+import pr1400Url from '@/assets/scene/ship-pr1400.png';
+import pr201Url from '@/assets/scene/ship-pr201.png';
+import pr205Url from '@/assets/scene/ship-pr205.png';
+import { SHIP_SPECS, ShipKind } from '@/types/channel';
 
 export interface ShipSprite {
     url: string;
@@ -18,9 +25,88 @@ export interface ShipSprite {
     hullNumber: { x: number; y: number };
 }
 
-// Спрайты нарисованы носом влево; в сцене отражаем по горизонтали, если нужно наоборот.
-// Пока картинок три, поэтому пять типов кораблей используют их с разным масштабом.
+/** Корабль, по которому меряются все остальные: у него в сцене масштаб 1. */
+const SCALE_REFERENCE: ShipKind = 'corvette';
+
+/** Размер в сцене по длине корабля: настоящий корвет вдвое длиннее катера — вдвое и рисуем. */
+const scaleByLength = (kind: ShipKind): number =>
+    Number((SHIP_SPECS[kind].length / SHIP_SPECS[SCALE_REFERENCE].length).toFixed(3));
+
+/**
+ * Спрайты нарисованы носом влево; в сцене отражаем по горизонтали, если нужно наоборот.
+ *
+ * Рисунки проектов лежат в ветке `ships` (`src/assets/sources/ships`) вместе со справочником
+ * ships.json. Оттуда сюда они попадают в три шага: обрезка по непрозрачным пикселям,
+ * отражение (в источнике корабли смотрят вправо) и уменьшение до 1100px по ширине.
+ * Отметки лампы, огней и номера сняты с готовых картинок замером, а не на глаз.
+ *
+ * Пяти безномерным силуэтам рисунков досталось три на всех, поэтому размер им подобран
+ * вручную. У проектов он считается по длине из справочника.
+ */
 export const SHIP_SPRITES: Record<ShipKind, ShipSprite> = {
+    pr1234: {
+        url: pr1234Url,
+        size: { width: 1100, height: 393 },
+        scale: scaleByLength('pr1234'),
+        lamp: { x: 54, y: 1 },
+        bowLight: { x: 5, y: 85 },
+        sternLight: { x: 97, y: 85 },
+        hullNumber: { x: 22, y: 87 },
+    },
+    pr12412: {
+        url: pr12412Url,
+        size: { width: 1100, height: 387 },
+        scale: scaleByLength('pr12412'),
+        lamp: { x: 54.4, y: 1 },
+        bowLight: { x: 4, y: 85 },
+        sternLight: { x: 98, y: 85 },
+        hullNumber: { x: 22, y: 87 },
+    },
+    pr1141: {
+        url: pr1141Url,
+        size: { width: 1100, height: 385 },
+        scale: scaleByLength('pr1141'),
+        lamp: { x: 37, y: 1 },
+        bowLight: { x: 5, y: 85 },
+        sternLight: { x: 96, y: 85 },
+        hullNumber: { x: 22, y: 87 },
+    },
+    pr201: {
+        url: pr201Url,
+        size: { width: 1100, height: 351 },
+        scale: scaleByLength('pr201'),
+        lamp: { x: 51.3, y: 1 },
+        bowLight: { x: 5, y: 85 },
+        sternLight: { x: 97, y: 85 },
+        hullNumber: { x: 22, y: 87 },
+    },
+    pr205: {
+        url: pr205Url,
+        size: { width: 1100, height: 356 },
+        scale: scaleByLength('pr205'),
+        lamp: { x: 47.1, y: 1 },
+        bowLight: { x: 5, y: 85 },
+        sternLight: { x: 96, y: 85 },
+        hullNumber: { x: 22, y: 87 },
+    },
+    pr1258: {
+        url: pr1258Url,
+        size: { width: 1100, height: 542 },
+        scale: scaleByLength('pr1258'),
+        lamp: { x: 52.4, y: 1 },
+        bowLight: { x: 4, y: 88 },
+        sternLight: { x: 97, y: 88 },
+        hullNumber: { x: 22, y: 90 },
+    },
+    pr1400: {
+        url: pr1400Url,
+        size: { width: 1100, height: 450 },
+        scale: scaleByLength('pr1400'),
+        lamp: { x: 62.5, y: 1 },
+        bowLight: { x: 6, y: 87 },
+        sternLight: { x: 98, y: 87 },
+        hullNumber: { x: 22, y: 89 },
+    },
     corvette: {
         url: corvetteUrl,
         size: { width: 1100, height: 366 },
@@ -67,15 +153,3 @@ export const SHIP_SPRITES: Record<ShipKind, ShipSprite> = {
         hullNumber: { x: 23, y: 87 },
     },
 };
-
-/**
- * Соотношение сторон места под силуэт в форме корабля. Берётся самый «высокий» спрайт —
- * тот, у кого ширина к высоте меньше всех, — и по нему меряются остальные. Тогда любой
- * силуэт вписывается в это место по ширине целиком, а разница остаётся только в высоте
- * пустого поля сверху и снизу. Это важно не только для вида: масштабная линейка под
- * кораблём считается от ширины места, и стоит силуэту вписаться уже по высоте, как линейка
- * станет врать.
- */
-export const SHIP_IMAGE_ASPECT = Math.min(
-    ...Object.values(SHIP_SPRITES).map((sprite) => sprite.size.width / sprite.size.height)
-);

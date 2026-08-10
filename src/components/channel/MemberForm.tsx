@@ -2,7 +2,7 @@ import { Fragment, useState } from 'react';
 
 import { ChannelError, MemberDraft } from '@/backend';
 import MemberName from '@/components/ships/MemberName';
-import { SHIP_IMAGE_ASPECT, SHIP_SPRITES } from '@/components/ships/shipSprites';
+import { SHIP_SPRITES } from '@/components/ships/shipSprites';
 import Button from '@/components/ui/Button';
 import Field from '@/components/ui/Field';
 import Input from '@/components/ui/Input';
@@ -65,6 +65,17 @@ const scaleMetres = (kind: ShipKind): number =>
 
 /** Ширина силуэта в долях ширины кнопки: сколько в корабле линеек. */
 const shipWidth = (kind: ShipKind): number => (SHIP_SPECS[kind].length * SCALE_SHARE) / scaleMetres(kind);
+
+/** Высота силуэта в долях ширины кнопки: ширина, делённая на пропорции его рисунка. */
+const shipHeight = (kind: ShipKind): number =>
+    (shipWidth(kind) * SHIP_SPRITES[kind].size.height) / SHIP_SPRITES[kind].size.width;
+
+/**
+ * Место под силуэт: у всех кнопок одно, ростом с самый высокий из рисунков в их собственном
+ * масштабе. Кнопки от этого одной высоты, корабли стоят на одном уровне, а лишнего поля
+ * над мачтами ровно столько, сколько нужно самому высокому.
+ */
+const IMAGE_BOX_ASPECT = 1 / Math.max(...SHIP_KINDS.map(shipHeight));
 
 const percent = (share: number): string => `${(share * 100).toFixed(2)}%`;
 
@@ -208,7 +219,7 @@ export default function MemberForm({ mode, crew, myId, initial, onSubmit, onCanc
                         >
                             {/* Место под силуэт одно на всех, а сам силуэт в нём той ширины,
                                 какую даёт его масштаб; корма прижата к левому краю. */}
-                            <span className={styles.kindImageBox} style={{ aspectRatio: SHIP_IMAGE_ASPECT }}>
+                            <span className={styles.kindImageBox} style={{ aspectRatio: IMAGE_BOX_ASPECT }}>
                                 <img
                                     className={styles.kindImage}
                                     style={{ width: percent(shipWidth(kind)) }}
