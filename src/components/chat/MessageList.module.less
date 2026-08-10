@@ -5,7 +5,7 @@
     overflow-y: auto;
     display: flex;
     flex-direction: column;
-    gap: 3px;
+    gap: 4px;
     padding: 12px 12px 8px;
     scrollbar-width: thin;
     scrollbar-color: rgba(120, 168, 214, 0.25) transparent;
@@ -15,8 +15,8 @@
 // в приложении один.
 .dateChip {
     align-self: center;
-    margin-bottom: 6px;
-    padding: 3px 12px;
+    margin-bottom: 8px;
+    padding: 4px 12px;
     border-radius: 12px;
     background: var(--color-bg-raised);
     color: var(--color-text-muted);
@@ -56,7 +56,7 @@
     align-items: flex-start;
     max-width: 78%;
     margin: 0;
-    padding: 6px 10px 7px;
+    padding: 8px 12px;
     border: 0;
     border-radius: 15px;
     border-bottom-left-radius: 5px;
@@ -80,17 +80,13 @@
     background: var(--color-bubble-out);
 }
 
-.author {
-    margin-bottom: 1px;
-}
-
 // Цитата в пузыре: сама цитата — общий компонент, здесь только её место и предел ширины,
 // чтобы длинная реплика не растягивала пузырь.
 .replyCell {
     display: flex;
     align-self: stretch;
     max-width: 240px;
-    margin: 2px 0 4px;
+    margin: 4px 0;
 }
 
 .text {
@@ -99,7 +95,7 @@
 
 .time {
     float: right;
-    margin: 7px 0 -4px 8px;
+    margin: 8px 0 -4px 8px;
     color: var(--color-text-muted);
     font-size: var(--font-size-small);
 }

@@ -2,7 +2,7 @@ import { Fragment, useState } from 'react';
 
 import { ChannelError, MemberDraft } from '@/backend';
 import MemberName from '@/components/ships/MemberName';
-import { SHIP_SPRITES } from '@/components/ships/shipSprites';
+import { SHIP_IMAGE_ASPECT, SHIP_SPRITES } from '@/components/ships/shipSprites';
 import Button from '@/components/ui/Button';
 import Field from '@/components/ui/Field';
 import Input from '@/components/ui/Input';
@@ -37,15 +37,17 @@ interface MemberFormProps {
 
 const randomHullNumber = (): string => String(Math.floor(Math.random() * 900) + 100);
 
-/** Самый длинный корабль в справочнике: по нему меряются силуэты в списке. */
-const LONGEST_SHIP = Math.max(...SHIP_KINDS.map((kind) => SHIP_SPECS[kind].length));
-
 /**
- * Ширина силуэта в списке: доля от самого большого корабля по его длине из справочника.
- * Числа те же, что и в сцене, поэтому выбранный катер и в море окажется катером, а не
- * корветом другого цвета.
+ * Масштабная линейка под силуэтом — как на картах. Силуэты в списке нарисованы во всю ширину
+ * кнопки, то есть каждый в своём масштабе, и катер рядом с корветом выглядит одного размера.
+ * Линейка это и исправляет: она всегда десять метров, а вот занимает тем меньше места,
+ * чем крупнее корабль. Выровнена по корме — от неё и считают длину.
  */
-const shipImageWidth = (kind: ShipKind): string => `${((SHIP_SPECS[kind].length / LONGEST_SHIP) * 100).toFixed(1)}%`;
+const SCALE_METRES = 10;
+const SCALE_SEGMENTS = [...new Array<number>(SCALE_METRES)].map((_, metre) => metre);
+
+/** Сколько ширины кнопки занимают десять метров у этого корабля. */
+const scaleWidth = (kind: ShipKind): string => `${((SCALE_METRES / SHIP_SPECS[kind].length) * 100).toFixed(2)}%`;
 
 /**
  * Строчка с характеристиками силуэта: длина, водоизмещение, полный ход. Числа не украшение —
@@ -187,10 +189,21 @@ export default function MemberForm({ mode, crew, myId, initial, onSubmit, onCanc
                         >
                             <img
                                 className={styles.kindImage}
-                                style={{ width: shipImageWidth(kind) }}
+                                style={{ aspectRatio: SHIP_IMAGE_ASPECT }}
                                 src={SHIP_SPRITES[kind].url}
                                 alt=""
                             />
+                            <span className={styles.scaleRow}>
+                                <span className={styles.scaleLabel}>{SCALE_METRES} м</span>
+                                <span className={styles.scaleBar} style={{ width: scaleWidth(kind) }}>
+                                    {SCALE_SEGMENTS.map((metre) => (
+                                        <span
+                                            key={metre}
+                                            className={metre % 2 ? styles.scaleDark : styles.scaleLight}
+                                        />
+                                    ))}
+                                </span>
+                            </span>
                             <span className={styles.kindLabel}>{SHIP_KIND_LABELS[kind]}</span>
                             <span className={styles.kindSpec}>{shipSpecLine(kind)}</span>
                         </button>

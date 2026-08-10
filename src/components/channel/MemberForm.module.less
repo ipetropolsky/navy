@@ -18,11 +18,13 @@
     border-color: var(--color-text);
 }
 
-// Корабли в столбик: каждому достаётся вся ширина плашки.
+// Корабли в столбик: каждому достаётся вся ширина плашки. Сетка, а не флекс, ради
+// grid-auto-rows: 1fr — так все кнопки одной высоты, по самой высокой из них, и столбик
+// не выглядит рваным из-за того, что у одного корабля название переносится, а у другого нет.
 .kinds {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
+    display: grid;
+    grid-auto-rows: 1fr;
+    gap: 8px;
 }
 
 // Картинка сверху, подписи под ней: так силуэт не соперничает за место с текстом
@@ -31,7 +33,7 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 2px;
+    gap: 4px;
     padding: 20px;
     border-radius: 11px;
     border: 1px solid transparent;
@@ -48,13 +50,49 @@
     background: var(--color-bubble-out);
 }
 
-// Силуэты стоят рядом в одном масштабе: ширина каждого — его длина в метрах от длины
-// самого большого корабля, и катер рядом с корветом выглядит катером. Ширину задаёт
-// разметка, она считается из справочника; высота идёт за ней сама.
+// Силуэт во всю ширину кнопки, то есть каждый в своём масштабе — зато видно все детали.
+// Место под него одно на всех (SHIP_IMAGE_ASPECT, приходит из разметки): без этого кнопки
+// вышли бы разной высоты, а корабли — на разных уровнях. Вписывается силуэт по contain:
+// картинку не режем и не тянем, а место посчитано по самому «высокому» спрайту, поэтому
+// упирается силуэт всегда в ширину.
 .kindImage {
     display: block;
-    height: auto;
-    margin-bottom: 12px;
+    width: 100%;
+    object-fit: contain;
+}
+
+// Масштабная линейка под кораблём: десять метров, каждый метр своим цветом, как на картах.
+// Прижата к правому краю — там корма, от неё и меряют.
+.scaleRow {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    width: 100%;
+    margin: 4px 0 12px;
+}
+
+.scaleLabel {
+    color: var(--color-text-muted);
+    font-size: var(--font-size-small);
+}
+
+.scaleBar {
+    flex: none;
+    display: flex;
+    height: 6px;
+    // Ширина приходит из разметки: она считается из длины корабля в справочнике.
+    outline: 1px solid var(--color-text-muted);
+}
+
+.scaleLight {
+    flex: 1;
+    background: var(--color-text);
+}
+
+.scaleDark {
+    flex: 1;
+    background: var(--color-ship);
 }
 
 .kindLabel {

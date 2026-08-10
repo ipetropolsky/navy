@@ -87,11 +87,7 @@ export default function MessageList({ messages, members, myId, onReply }: Messag
                             onClick={() => onReply(message)}
                             title="Ответить"
                         >
-                            {!own && firstOfGroup && author && (
-                                <span className={styles.author}>
-                                    <MemberName name={author.name} color={author.color} />
-                                </span>
-                            )}
+                            {!own && firstOfGroup && author && <MemberName name={author.name} color={author.color} />}
                             {replyTo && (
                                 <span className={styles.replyCell}>
                                     <ReplyQuote author={byId.get(replyTo.author.memberId)} text={replyTo.text} />
