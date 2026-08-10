@@ -390,7 +390,14 @@ export default function SeaScene({ members, myId, morseFeeds, ready, onMoveShip 
                 // Заход: с той стороны, откуда пришёл, ровно до кромки кадра и ни шагом дальше.
                 const enterLengths = lengthsToEdge(member.place.left, width, member.place.enterFrom);
                 // Уход: вперёд, а если нос смотрит в остров — задним ходом в другую сторону.
-                const leave = leaveCourse(member.place);
+                const leave = leaveCourse(
+                    member.place,
+                    // Дорогу загораживают те, кто остаётся: сам себе корабль не помеха,
+                    // и уходящий сосед тоже — он уже трогается с места.
+                    placed
+                        .filter((other) => other.id !== member.id && !leavingById.current.has(other.id))
+                        .map((other) => other.place)
+                );
                 const leaveLengths = lengthsToEdge(member.place.left, width, leave.side);
                 // Ход поперёк кадра: вперёд, если идти туда же, куда смотрит нос, иначе задним.
                 // Старт правее нынешнего места — корабль идёт влево.

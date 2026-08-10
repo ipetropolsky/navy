@@ -67,11 +67,36 @@ export const crossesIsland = (slot: number, side: 'left' | 'right'): boolean =>
     side === ISLAND_SIDE && slot < ISLAND_FREE_SLOT;
 
 /**
- * В какую сторону корабль уходит из кадра и задним ли ходом. Обычно — вперёд, куда смотрит
- * нос: разворачиваться посреди рейда незачем. Но если нос уткнулся в остров, корабль выбирается
- * задним ходом, кормой вперёд — медленнее, зато не по суше.
+ * Ближе этого числа слотов чужой корабль считается стоящим на дороге. Порог строже, чем
+ * MIN_SLOT_GAP у коридоров: там речь про силуэты, которые не должны налезать друг на друга,
+ * а здесь про проход, и корабль двумя слотами дальше стоит настолько глубже в кадре,
+ * что мимо него проходят, а не сквозь него.
  */
-export const leaveCourse = (place: ShipPlacement): { side: 'left' | 'right'; astern: boolean } => {
-    const astern = crossesIsland(place.slot, place.facing);
-    return { side: astern ? otherSide(place.facing) : place.facing, astern };
+const FAIRWAY_SLOT_GAP = 2;
+
+/** Стоит ли на пути чужой корабль — на той же дальности и с той стороны, куда идём. */
+const shipInTheWay = (place: ShipPlacement, others: ShipPlacement[], side: 'left' | 'right'): boolean =>
+    others.some(
+        (other) =>
+            Math.abs(other.slot - place.slot) < FAIRWAY_SLOT_GAP &&
+            (side === 'left' ? other.left < place.left : other.left > place.left)
+    );
+
+/**
+ * В какую сторону корабль уходит из кадра и задним ли ходом. Обычно — вперёд, куда смотрит
+ * нос: разворачиваться посреди рейда незачем. Но если впереди остров или сосед по дальности,
+ * корабль выбирается задним ходом, кормой вперёд — медленнее, зато не по суше и не в чужой борт.
+ *
+ * Заперт с обеих сторон — пойдёт мимо соседа, но не на берег: с соседом разойтись можно,
+ * с островом нет.
+ */
+export const leaveCourse = (
+    place: ShipPlacement,
+    others: ShipPlacement[]
+): { side: 'left' | 'right'; astern: boolean } => {
+    const back = otherSide(place.facing);
+    const isClear = (side: 'left' | 'right'): boolean =>
+        !crossesIsland(place.slot, side) && !shipInTheWay(place, others, side);
+    const goBack = !isClear(place.facing) && (isClear(back) || crossesIsland(place.slot, place.facing));
+    return { side: goBack ? back : place.facing, astern: goBack };
 };
