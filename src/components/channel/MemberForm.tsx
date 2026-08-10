@@ -38,26 +38,35 @@ interface MemberFormProps {
 const randomHullNumber = (): string => String(Math.floor(Math.random() * 900) + 100);
 
 /**
- * Масштабная линейка под силуэтом — как на картах. Силуэты в списке нарисованы во всю ширину
- * кнопки, то есть каждый в своём масштабе, и катер рядом с корветом выглядит одного размера.
- * Линейка это и исправляет: она всегда десять метров, а вот занимает тем меньше места,
- * чем крупнее корабль. Выровнена по корме — от неё и считают длину.
+ * Масштабная линейка под силуэтом — как на чертеже. Считается она от линейки, а не от корабля:
+ * линейка у всех одна и та же по длине на экране — ровно четверть ширины кнопки, всегда пять
+ * делений, — а вот метров в ней столько, сколько нужно, чтобы корабль в эту мерку поместился.
+ * Уже из цены деления и получается ширина силуэта: сколько в нём таких четвертинок, столько
+ * и ширины. Поэтому катер выходит нарисованным крупнее корвета — и это видно по линейке:
+ * у катера в ней пять метров, у корвета двадцать.
  *
- * Собрана линейка у всех одинаково — по самому маленькому кораблю, у которого десять метров
- * занимают больше всего места, — и целиком уменьшается через scale. Уменьшается вся: и полоска,
- * и подпись, поэтому линейка читается не сама по себе, а как масштаб этого чертежа.
+ * Всё считается долями ширины кнопки, ни одного числа в пикселях: на любом экране и при любом
+ * изменении окна и линейка, и силуэт тянутся вместе, а соотношение между ними не меняется.
  */
-const SCALE_METRES = 10;
-const SCALE_SEGMENTS = [...new Array<number>(SCALE_METRES)].map((_, metre) => metre);
+const SCALE_SEGMENTS = [0, 1, 2, 3, 4];
 
-/** Самый маленький корабль в справочнике: по нему линейка и нарисована. */
-const SHORTEST_SHIP = Math.min(...SHIP_KINDS.map((kind) => SHIP_SPECS[kind].length));
+/** Какую долю ширины кнопки занимает линейка. */
+const SCALE_SHARE = 0.25;
 
-/** Ширина линейки до уменьшения: десять метров у самого маленького корабля. */
-const SCALE_BASE_WIDTH = `${((SCALE_METRES / SHORTEST_SHIP) * 100).toFixed(2)}%`;
+/** Цена деления и длина линейки кратны этому: круглые числа читаются с одного взгляда. */
+const SCALE_ROUND_TO = 5;
 
-/** Во сколько раз этот корабль крупнее самого маленького — во столько же мельче его линейка. */
-const scaleFactor = (kind: ShipKind): number => SHORTEST_SHIP / SHIP_SPECS[kind].length;
+/**
+ * Сколько метров в линейке у этого корабля. Наименьшее круглое число, при котором корабль
+ * в четыре линейки укладывается, — то есть силуэт гарантированно не шире кнопки.
+ */
+const scaleMetres = (kind: ShipKind): number =>
+    Math.ceil((SHIP_SPECS[kind].length * SCALE_SHARE) / SCALE_ROUND_TO) * SCALE_ROUND_TO;
+
+/** Ширина силуэта в долях ширины кнопки: сколько в корабле линеек. */
+const shipWidth = (kind: ShipKind): number => (SHIP_SPECS[kind].length * SCALE_SHARE) / scaleMetres(kind);
+
+const percent = (share: number): string => `${(share * 100).toFixed(2)}%`;
 
 /**
  * Строчка с характеристиками силуэта: длина, водоизмещение, полный ход. Числа не украшение —
@@ -197,23 +206,30 @@ export default function MemberForm({ mode, crew, myId, initial, onSubmit, onCanc
                             className={kind === shipKind ? styles.kindActive : styles.kind}
                             onClick={() => setShipKind(kind)}
                         >
-                            <img
-                                className={styles.kindImage}
-                                style={{ aspectRatio: SHIP_IMAGE_ASPECT }}
-                                src={SHIP_SPRITES[kind].url}
-                                alt=""
-                            />
+                            {/* Место под силуэт одно на всех, а сам силуэт в нём той ширины,
+                                какую даёт его масштаб; по бокам остаётся поле. */}
+                            <span className={styles.kindImageBox} style={{ aspectRatio: SHIP_IMAGE_ASPECT }}>
+                                <img
+                                    className={styles.kindImage}
+                                    style={{ width: percent(shipWidth(kind)) }}
+                                    src={SHIP_SPRITES[kind].url}
+                                    alt=""
+                                />
+                            </span>
                             <span className={styles.scaleRow}>
-                                <span className={styles.scale} style={{ scale: scaleFactor(kind) }}>
-                                    <span className={styles.scaleLabel}>{SCALE_METRES} м</span>
-                                    <span className={styles.scaleBar} style={{ width: SCALE_BASE_WIDTH }}>
-                                        {SCALE_SEGMENTS.map((metre) => (
-                                            <span
-                                                key={metre}
-                                                className={metre % 2 ? styles.scaleDark : styles.scaleLight}
-                                            />
-                                        ))}
-                                    </span>
+                                <span className={styles.scaleLabel}>{scaleMetres(kind)} м</span>
+                                {/* Отступ справа ставит линейку под корму: силуэт по центру,
+                                    и справа от него остаётся половина незанятого места. */}
+                                <span
+                                    className={styles.scaleBar}
+                                    style={{
+                                        width: percent(SCALE_SHARE),
+                                        marginRight: percent((1 - shipWidth(kind)) / 2),
+                                    }}
+                                >
+                                    {SCALE_SEGMENTS.map((step) => (
+                                        <span key={step} className={step % 2 ? styles.scaleDark : styles.scaleLight} />
+                                    ))}
                                 </span>
                             </span>
                             <span className={styles.kindLabel}>{SHIP_KIND_LABELS[kind]}</span>
