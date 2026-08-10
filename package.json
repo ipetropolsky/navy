@@ -16,6 +16,7 @@
     "format-check": "prettier --check --ignore-unknown .",
     "format-files": "prettier --write --ignore-unknown",
     "format-files-check": "prettier --check --ignore-unknown",
+    "test:e2e": "playwright test",
     "check": "npm run ts-check && npm run lint-check && npm run format-check",
     "check-and-fix": "npm run lint && npm run format",
     "deploy": "npm run build && gh-pages -d build",
@@ -33,6 +34,7 @@
   },
   "devDependencies": {
     "@hh.ru/eslint-config": "18.1.5",
+    "@playwright/test": "1.62.1",
     "@types/node": "25.5.0",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",

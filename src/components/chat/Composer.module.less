@@ -77,6 +77,18 @@
     }
 }
 
+// Набрано больше, чем можно отправить. Текст не трогаем — только говорим рамкой,
+// что в таком виде оно не уйдёт.
+.inputTooLong {
+    .input();
+
+    border-color: #d66060;
+
+    &:focus {
+        border-color: #d66060;
+    }
+}
+
 .send {
     flex: none;
     display: flex;

@@ -1,6 +1,6 @@
 import { SyntheticEvent, useRef, useState } from 'react';
 
-import { Member, Message } from '@/types/channel';
+import { MAX_MESSAGE_LENGTH, Member, Message } from '@/types/channel';
 
 import styles from './Composer.module.less';
 
@@ -9,12 +9,14 @@ interface ComposerProps {
     replyToAuthor: Member | null;
     onCancelReply: () => void;
     onSend: (text: string) => void;
+    /** Набрано больше, чем можно отправить. Показать это — дело того, кто нас позвал. */
+    onTooLong: (length: number) => void;
     /** Вызывается на каждое изменение текста: добавленные символы (или '\b' при удалении). */
     onTyped: (chars: string) => void;
 }
 
 /** Поле ввода в стиле Telegram: плашка ответа, кнопка отправки появляется при вводе. */
-export default function Composer({ replyTo, replyToAuthor, onCancelReply, onSend, onTyped }: ComposerProps) {
+export default function Composer({ replyTo, replyToAuthor, onCancelReply, onSend, onTooLong, onTyped }: ComposerProps) {
     const [value, setValue] = useState('');
     const prevValueRef = useRef('');
     const inputRef = useRef<HTMLInputElement>(null);
@@ -30,10 +32,18 @@ export default function Composer({ replyTo, replyToAuthor, onCancelReply, onSend
         }
     };
 
+    const text = value.trim();
+    // Длинное не обрезаем: обрезать чужой текст нельзя. Рамкой показываем, что отправить
+    // это нельзя, а по нажатию говорим, насколько именно перебрали.
+    const tooLong = text.length > MAX_MESSAGE_LENGTH;
+
     const handleSubmit = (event: SyntheticEvent) => {
         event.preventDefault();
-        const text = value.trim();
         if (!text) {
+            return;
+        }
+        if (tooLong) {
+            onTooLong(text.length);
             return;
         }
         onSend(text);
@@ -70,7 +80,7 @@ export default function Composer({ replyTo, replyToAuthor, onCancelReply, onSend
             <div className={styles.inputRow}>
                 <input
                     ref={inputRef}
-                    className={styles.input}
+                    className={tooLong ? styles.inputTooLong : styles.input}
                     type="text"
                     value={value}
                     placeholder="Сообщение"

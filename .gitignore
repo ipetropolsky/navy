@@ -6,3 +6,5 @@ build
 .claude/cache
 .claude/settings.local.json
 .CLAUDE.local.md
+test-results
+playwright-report

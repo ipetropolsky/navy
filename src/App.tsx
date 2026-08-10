@@ -11,7 +11,7 @@ import MessageList from '@/components/chat/MessageList';
 import { useSnackbar } from '@/components/ui/Snackbar';
 import { useChannel } from '@/hooks/useChannel';
 import { channelLink, useRoute } from '@/routing';
-import { Message, MorseFeed } from '@/types/channel';
+import { MAX_MESSAGE_LENGTH, Message, MorseFeed } from '@/types/channel';
 import { copyText } from '@/utils/clipboard';
 
 import styles from './App.module.less';
@@ -212,6 +212,7 @@ export default function App() {
                             replyToAuthor={replyToAuthor}
                             onCancelReply={() => setReplyTo(null)}
                             onSend={handleSend}
+                            onTooLong={(length) => notify(`Максимум ${MAX_MESSAGE_LENGTH} символов, у вас ${length}`)}
                             onTyped={channelState.reportTyping}
                         />
                     </>
