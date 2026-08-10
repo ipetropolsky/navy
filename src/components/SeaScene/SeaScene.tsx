@@ -201,10 +201,9 @@ export default function SeaScene({ members, myId, morseFeeds, ready, onMoveShip 
             const shown = shownById.current.get(member.id)!;
             shownById.current.set(member.id, member.place);
             if (shown.slot === member.place.slot) {
-                // Свой слот, другой коридор: короткий ход поперёк кадра, из старой точки в новую.
-                // Пересчитываем разницу в длинах корпуса — в них же задан и сам сдвиг в стилях.
-                const width = shipWidthPercent(member.place.slot, member.shipKind);
-                shiftById.current.set(member.id, (shown.left - member.place.left) / width);
+                // Свой слот, другой коридор: короткий ход поперёк кадра. Запоминаем, откуда
+                // корабль пошёл, — дальше стили доведут его до нынешней точки.
+                shiftById.current.set(member.id, shown.left);
             } else {
                 // Другой слот: туда не переползают, туда перезаходят — уход, пауза, вход.
                 leavingById.current.set(member.id, { ...member, place: shown });
@@ -327,11 +326,12 @@ export default function SeaScene({ members, myId, morseFeeds, ready, onMoveShip 
                 const width = shipWidthPercent(member.place.slot, member.shipKind);
                 const leaving = leavingById.current.has(member.id);
                 const entering = !leaving && enteringIds.current.has(member.id);
-                const shiftLengths = leaving ? undefined : shiftById.current.get(member.id);
+                // Откуда корабль пошёл, если он сейчас переходит в соседний коридор.
+                const shiftFrom = leaving ? undefined : shiftById.current.get(member.id);
                 const motion =
                     (leaving && styles.shipLeaving) ||
                     (entering && styles.shipEntering) ||
-                    (shiftLengths !== undefined && styles.shipShifting) ||
+                    (shiftFrom !== undefined && styles.shipShifting) ||
                     '';
                 // Заход: с той стороны, откуда пришёл, ровно до кромки кадра и ни шагом дальше.
                 const enterLengths = lengthsToEdge(member.place.left, width, member.place.enterFrom);
@@ -339,20 +339,24 @@ export default function SeaScene({ members, myId, morseFeeds, ready, onMoveShip 
                 const leave = leaveCourse(member.place);
                 const leaveLengths = lengthsToEdge(member.place.left, width, leave.side);
                 // Ход поперёк кадра: вперёд, если идти туда же, куда смотрит нос, иначе задним.
-                // Положительный сдвиг — старт правее места, то есть корабль идёт влево.
-                const shiftAstern = shiftLengths !== undefined && shiftLengths > 0 !== (member.place.facing === 'left');
-                const mine = member.id === myId && !leaving;
+                // Старт правее нынешнего места — корабль идёт влево.
+                const shiftLengths = shiftFrom === undefined ? 0 : Math.abs(shiftFrom - member.place.left) / width;
+                const shiftAstern =
+                    shiftFrom !== undefined && shiftFrom > member.place.left !== (member.place.facing === 'left');
+                // Корабль на ходу приказов не принимает: щелчок посреди манёвра сорвал бы анимацию
+                // и швырнул корабль в конечную точку, откуда тот пошёл бы заново.
+                const canMove = member.id === myId && !leaving && !motion;
                 return (
                     <div
                         key={member.id}
                         className={
-                            [styles.shipSlot, motion, mine ? styles.shipMine : ''].filter(Boolean).join(' ') ||
+                            [styles.shipSlot, motion, canMove ? styles.shipMine : ''].filter(Boolean).join(' ') ||
                             undefined
                         }
                         // Свой корабль по щелчку снимается с места. Чужие не трогаем: рейд общий,
                         // но распоряжаться там можно только собой.
-                        onClick={mine ? onMoveShip : undefined}
-                        title={mine ? 'Сменить место на рейде' : undefined}
+                        onClick={canMove ? onMoveShip : undefined}
+                        title={canMove ? 'Сменить место на рейде' : undefined}
                         onAnimationEnd={motion ? () => finishMotion(member.id) : undefined}
                         style={
                             {
@@ -371,12 +375,15 @@ export default function SeaScene({ members, myId, morseFeeds, ready, onMoveShip 
                                 // Задний ход отличается только длительностью: кривая та же,
                                 // а скорость ниже — иначе замер пиковой скорости под неё не подходит.
                                 '--leave-seconds': `${sailSeconds(leaveLengths, leave.astern).toFixed(1)}s`,
-                                // Ход поперёк кадра: откуда начать и сколько идти. Кривая у него
-                                // своя — корабль и трогается с места, и останавливается на месте.
-                                '--shift-from': `${((shiftLengths ?? 0) * 100).toFixed(0)}%`,
-                                '--shift-seconds': `${sailSeconds(Math.abs(shiftLengths ?? 0), shiftAstern).toFixed(
-                                    1
-                                )}s`,
+                                // Ход поперёк кадра: откуда корабль пошёл и сколько ему идти.
+                                // Здесь именно положение в кадре, а не сдвиг: стили доводят
+                                // корабль до нынешнего --slot-left, и промежуточные значения
+                                // проходят через тот же кламп, что и конечное. Сдвигом это
+                                // не выразить — translate считается от ширины самого корабля,
+                                // а её ограничивает max-width, отчего в начале хода корабль
+                                // прыгал на десяток пикселей.
+                                '--shift-from': `${(shiftFrom ?? member.place.left).toFixed(2)}%`,
+                                '--shift-seconds': `${sailSeconds(shiftLengths, shiftAstern).toFixed(1)}s`,
                             } as CSSProperties
                         }
                     >

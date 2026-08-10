@@ -17,10 +17,10 @@
 
 ```ts
 // Плохо: расширяется только новыми полями по соседству, и связь между ними видна лишь по имени.
-{ memberName: 'Гроза', memberColor: '#8ecae6' }
+const bad = { memberName: 'Гроза', memberColor: '#8ecae6' };
 
 // Хорошо: место для любых полей участника уже есть.
-{ member: { memberId: 'm-1', name: 'Гроза', color: '#8ecae6' } }
+const good = { member: { memberId: 'm-1', name: 'Гроза', color: '#8ecae6' } };
 ```
 
 **Списки — списки объектов, а не идентификаторов.** Это тот же принцип, но ошибка здесь
@@ -28,14 +28,10 @@
 
 ```ts
 // Плохо: понадобились имена — контракт менять целиком.
-{
-    members: ['m-1', 'm-2'];
-}
+const bad = { members: ['m-1', 'm-2'] };
 
 // Хорошо: имена, цвета и что угодно ещё дописываются внутрь элемента.
-{
-    members: [{ memberId: 'm-1' }, { memberId: 'm-2' }];
-}
+const good = { members: [{ memberId: 'm-1' }, { memberId: 'm-2' }] };
 ```
 
 **Поле-ссылка называется по сущности и внутри несёт её канонический идентификатор.**
@@ -48,10 +44,13 @@
 
 ```ts
 // Плохо: чьё поле title, а чьё name — понятно только из головы.
-{ channelId: 'ch-1', title: 'Полночь', memberId: 'm-1', name: 'Гроза' }
+const bad = { channelId: 'ch-1', title: 'Полночь', memberId: 'm-1', name: 'Гроза' };
 
 // Хорошо.
-{ channel: { channelId: 'ch-1', title: 'Полночь' }, member: { memberId: 'm-1', name: 'Гроза' } }
+const good = {
+    channel: { channelId: 'ch-1', title: 'Полночь' },
+    member: { memberId: 'm-1', name: 'Гроза' },
+};
 ```
 
 **Ответ — всегда объект.** Никогда голый массив и никогда голый скаляр: и то и другое
@@ -133,8 +132,8 @@ setTyping({ channelId, memberId, typing: { chars } });
 
 Разбор по правилам выше — задача заведена в [TODO.md](./TODO.md).
 
-1. **Сущность смешана с коллекциями.** `ChannelSnapshot` — это `{ id, slug, title, createdAt,
-members, messages }`, то есть поля канала лежат вперемешку со списками. Нужно
+1. **Сущность смешана с коллекциями.** `ChannelSnapshot` — это `{ id, slug, title, createdAt, members, messages }`,
+   то есть поля канала лежат вперемешку со списками. Нужно
    `{ channel: { channelId, slug, title, createdAt }, members, messages }`.
 2. **Идентификатор сущности и ссылка на неё называются по-разному.** В сущности это `id`
    (`Member.id`, `Message.id`), а в ссылке — `memberId`, `channelId`, `threadId`. Должно быть
