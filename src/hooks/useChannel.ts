@@ -31,6 +31,8 @@ export interface ChannelController {
     typing: TypingState | null;
     join: (draft: MemberDraft) => Promise<void>;
     updateMe: (draft: MemberDraft) => Promise<void>;
+    /** Переставить свой корабль на другое место на рейде. */
+    moveShip: () => Promise<void>;
     leave: () => Promise<void>;
     sendMessage: (draft: Omit<MessageDraft, 'memberId'>) => Promise<void>;
     reportTyping: (chars: string) => void;
@@ -160,6 +162,16 @@ export function useChannel(slug: string | null, memberIdFromUrl: string | null):
         [channelId, myId]
     );
 
+    /**
+     * Переставить свой корабль. Куда — решает бэкенд: место общее для всех вкладок,
+     * и новое приезжает обратно событием, как и всё остальное.
+     */
+    const moveShip = useCallback(async () => {
+        if (channelId && myId) {
+            await backend.moveShip(channelId, myId);
+        }
+    }, [channelId, myId]);
+
     const leave = useCallback(async () => {
         if (channelId && myId) {
             await backend.leave(channelId, myId);
@@ -186,5 +198,5 @@ export function useChannel(slug: string | null, memberIdFromUrl: string | null):
         [channelId, myId]
     );
 
-    return { loading, channel, myId, typing, join, updateMe, leave, sendMessage, reportTyping };
+    return { loading, channel, myId, typing, join, updateMe, moveShip, leave, sendMessage, reportTyping };
 }

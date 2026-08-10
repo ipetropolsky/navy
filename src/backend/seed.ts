@@ -38,7 +38,7 @@ export const createDemoChannel = (): ChannelSnapshot => ({
             hullNumber: '317',
             shipKind: 'patrol',
             color: '#8ecae6',
-            place: { slot: 9, corridor: 1, left: 52, facing: 'left', enterFrom: 'right' },
+            place: { slot: 9, corridor: 1, left: 52, facing: 'left', enterFrom: 'right', tried: [1] },
             joinedAt: minutesAfterMidnight(21, 30),
         },
         {
@@ -47,7 +47,7 @@ export const createDemoChannel = (): ChannelSnapshot => ({
             hullNumber: '561',
             shipKind: 'missile',
             color: '#f2cc8f',
-            place: { slot: 6, corridor: 2, left: 79, facing: 'right', enterFrom: 'left' },
+            place: { slot: 6, corridor: 2, left: 79, facing: 'right', enterFrom: 'left', tried: [2] },
             joinedAt: minutesAfterMidnight(21, 32),
         },
         {
@@ -56,7 +56,7 @@ export const createDemoChannel = (): ChannelSnapshot => ({
             hullNumber: '208',
             shipKind: 'torpedo',
             color: '#95d5b2',
-            place: { slot: 4, corridor: 0, left: 21, facing: 'left', enterFrom: 'right' },
+            place: { slot: 4, corridor: 0, left: 21, facing: 'left', enterFrom: 'right', tried: [0] },
             joinedAt: minutesAfterMidnight(21, 34),
         },
     ],

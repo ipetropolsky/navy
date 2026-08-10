@@ -1,7 +1,7 @@
 import { Member, Message } from '@/types/channel';
 import { isValidSlug } from '@/utils/slug';
 
-import { placeShip } from '@/backend/placement';
+import { moveShip, placeShip } from '@/backend/placement';
 import { DEMO_CHANNEL_ID, createDemoChannel } from '@/backend/seed';
 import { localStore } from '@/backend/storage';
 import {
@@ -40,7 +40,7 @@ const BROADCAST_NAME = 'kilvater';
  * переписывать вчерашние разговоры под новую схему дороже, чем начать с чистого рейда.
  * У настоящего сервера на этом месте была бы миграция.
  */
-const STORAGE_VERSION = 4;
+const STORAGE_VERSION = 5;
 
 /** Ключ, под которым состояние лежало до появления версии. Чистим, чтобы не мусорить. */
 const LEGACY_STORAGE_KEY = 'kilvater.v1';
@@ -245,6 +245,25 @@ export function createLocalBackend(): ChannelBackend {
                 member.color = draft.color;
                 return { ...member };
             });
+            emit(channelId, { type: 'member-updated', member: updated });
+            return delay(updated);
+        },
+
+        moveShip: async (channelId, memberId) => {
+            const updated = mutate(channelId, (current) => {
+                const member = current.members.find((item) => item.id === memberId);
+                if (!member) {
+                    throw new ChannelError('member-not-found', 'Такого корабля в канале нет');
+                }
+                const others = current.members.filter((item) => item.id !== memberId).map((item) => item.place);
+                const place = moveShip(member.place, others);
+                if (place) {
+                    member.place = place;
+                }
+                return { ...member };
+            });
+            // Событие шлём всегда, даже если места не нашлось: у всех вкладок сцена одна,
+            // и решать, было движение или нет, они должны по данным, а не по молчанию.
             emit(channelId, { type: 'member-updated', member: updated });
             return delay(updated);
         },

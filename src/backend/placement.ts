@@ -52,6 +52,43 @@ const shuffled = <T>(items: T[]): T[] => {
     return copy;
 };
 
+const allSlots = (): number[] => [...new Array<number>(SLOT_COUNT)].map((_, index) => index);
+
+/**
+ * Коридоры, свободные для этого слота, в случайном порядке: занятые соседями по дальности
+ * и остров — мимо.
+ */
+const freeCorridors = (slot: number, taken: ShipPlacement[]): number[] => {
+    const blocked = new Set(
+        taken
+            .filter((placement) => Math.abs(placement.slot - slot) < MIN_SLOT_GAP)
+            .map((placement) => placement.corridor)
+    );
+    if (slot < ISLAND_FREE_SLOT) {
+        blocked.add(ISLAND_CORRIDOR);
+    }
+    return shuffled(CORRIDOR_CENTERS.map((_, index) => index)).filter((corridor) => !blocked.has(corridor));
+};
+
+/** Точка внутри коридора. Место любое: строй не должен выглядеть расчерченным по линейке. */
+const leftInside = (corridor: number): number => CORRIDOR_CENTERS[corridor] + (Math.random() - 0.5) * CORRIDOR_WIDTH;
+
+/** Полное место на выбранном слоте: коридор, точка в нём, сторона захода и куда смотрит нос. */
+const placeAt = (slot: number, corridor: number): ShipPlacement => {
+    // Заходить сквозь остров нельзя — на дальних слотах корабль прошёл бы прямо по нему.
+    // Туда идут только с чистой стороны; ближе к переднему плану сторона любая.
+    const enterFrom = slot < ISLAND_FREE_SLOT ? otherSide(ISLAND_SIDE) : pick<'left' | 'right'>(['left', 'right']);
+    return {
+        slot,
+        corridor,
+        left: leftInside(corridor),
+        // Пришёл справа — значит идёт влево, носом вперёд.
+        facing: enterFrom === 'right' ? 'left' : 'right',
+        enterFrom,
+        tried: [corridor],
+    };
+};
+
 /**
  * Ставит новый корабль среди уже занятых мест. Слоты перебираем в случайном порядке
  * и берём первый, где остался хоть один разрешённый коридор. Если свободных мест нет —
@@ -59,37 +96,29 @@ const shuffled = <T>(items: T[]): T[] => {
  * дешевле, чем разбирательство, если однажды станет возможно.
  */
 export const placeShip = (taken: ShipPlacement[]): ShipPlacement | null => {
-    const allSlots = [...new Array<number>(SLOT_COUNT)].map((_, index) => index);
-    const freeSlots = shuffled(allSlots.filter((slot) => !taken.some((placement) => placement.slot === slot)));
+    const freeSlots = shuffled(allSlots().filter((slot) => !taken.some((placement) => placement.slot === slot)));
+    const slot = freeSlots.find((candidate) => freeCorridors(candidate, taken).length > 0);
+    return slot === undefined ? null : placeAt(slot, freeCorridors(slot, taken)[0]);
+};
 
-    /** Коридоры, свободные для этого слота: занятые соседями по дальности и остров — мимо. */
-    const corridorsFor = (slot: number): number[] => {
-        const blocked = new Set(
-            taken
-                .filter((placement) => Math.abs(placement.slot - slot) < MIN_SLOT_GAP)
-                .map((placement) => placement.corridor)
-        );
-        if (slot < ISLAND_FREE_SLOT) {
-            blocked.add(ISLAND_CORRIDOR);
-        }
-        return shuffled(CORRIDOR_CENTERS.map((_, index) => index)).filter((corridor) => !blocked.has(corridor));
-    };
-
-    const slot = freeSlots.find((candidate) => corridorsFor(candidate).length > 0);
-    if (slot !== undefined) {
-        const corridor = corridorsFor(slot)[0];
-        // Заходить сквозь остров нельзя — на дальних слотах корабль прошёл бы прямо по нему.
-        // Туда идут только с чистой стороны; ближе к переднему плану сторона любая.
-        const enterFrom = slot < ISLAND_FREE_SLOT ? otherSide(ISLAND_SIDE) : pick<'left' | 'right'>(['left', 'right']);
-        return {
-            slot,
-            corridor,
-            // Внутри коридора место любое: строй не должен выглядеть расчерченным по линейке.
-            left: CORRIDOR_CENTERS[corridor] + (Math.random() - 0.5) * CORRIDOR_WIDTH,
-            // Пришёл справа — значит идёт влево, носом вперёд.
-            facing: enterFrom === 'right' ? 'left' : 'right',
-            enterFrom,
-        };
+/**
+ * Куда переставить корабль, которого попросили сдвинуться. Сначала перебираются коридоры
+ * своего слота: корабль переходит в тот, где ещё не стоял, и это короткий ход поперёк кадра.
+ * Когда слот обойдён весь, корабль снимается и перезаходит на другой свободный слот —
+ * на свой он не возвращается, иначе перестановка ходила бы по кругу.
+ *
+ * Возвращает null, если двигаться некуда: и коридоры кончились, и свободных слотов нет.
+ */
+export const moveShip = (place: ShipPlacement, others: ShipPlacement[]): ShipPlacement | null => {
+    const untried = freeCorridors(place.slot, others).filter((corridor) => !place.tried.includes(corridor));
+    if (untried.length > 0) {
+        const corridor = untried[0];
+        return { ...place, corridor, left: leftInside(corridor), tried: [...place.tried, corridor] };
     }
-    return null;
+
+    const freeSlots = shuffled(
+        allSlots().filter((slot) => slot !== place.slot && !others.some((placement) => placement.slot === slot))
+    );
+    const slot = freeSlots.find((candidate) => freeCorridors(candidate, others).length > 0);
+    return slot === undefined ? null : placeAt(slot, freeCorridors(slot, others)[0]);
 };

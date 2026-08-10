@@ -89,6 +89,7 @@ export default function App() {
                         members={members}
                         myId={myId ?? ''}
                         morseFeeds={morseFeeds}
+                        onMoveShip={() => void channelState.moveShip()}
                         ready={!loading && Boolean(channel)}
                     />
                 </div>

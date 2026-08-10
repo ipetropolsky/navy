@@ -111,6 +111,12 @@ export interface ChannelBackend {
 
     join(channelId: string, draft: MemberDraft): Promise<Member>;
     updateMember(channelId: string, memberId: string, draft: MemberDraft): Promise<Member>;
+    /**
+     * Переставить корабль на другое место: в другой коридор своего слота, а когда слот
+     * обойдён весь — на другой слот. Куда именно, решает бэкенд: место корабля общее
+     * для всех вкладок, и придумывать его на клиенте нельзя.
+     */
+    moveShip(channelId: string, memberId: string): Promise<Member>;
     leave(channelId: string, memberId: string): Promise<void>;
 
     sendMessage(channelId: string, draft: MessageDraft): Promise<Message>;
