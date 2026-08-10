@@ -4,8 +4,7 @@ import cloudFarUrl from '@/assets/scene/cloud-1.png';
 import cloudNearUrl from '@/assets/scene/cloud-2.png';
 import islandUrl from '@/assets/scene/island.png';
 import moonUrl from '@/assets/scene/moon.png';
-import seaFrameOneUrl from '@/assets/scene/sea-1.png';
-import seaFrameTwoUrl from '@/assets/scene/sea-2.png';
+import seaUrl from '@/assets/scene/sea.png';
 import skyUrl from '@/assets/scene/sky.png';
 import Ship from '@/components/ships/Ship';
 import { SHIP_SPRITES } from '@/components/ships/shipSprites';
@@ -52,16 +51,13 @@ const waveAmplitude = (depth: number) => WAVE_FAR + depth * (WAVE_NEAR - WAVE_FA
 /** Ход корпуса по вертикали, px: та же прямая, но у переднего плана вдвое положе. */
 const heaveAmplitude = (depth: number) => HEAVE_FAR + depth * (HEAVE_NEAR - HEAVE_FAR);
 
-// Снимки воды: одно и то же море с разной рябью. Показываются по кругу в этом порядке.
-const SEA_FRAMES = [seaFrameOneUrl, seaFrameTwoUrl];
-
 // Задники сцены. Пока они грузятся, показывать нечего: небо, вода и остров весят мегабайтами
 // и приходят вразнобой, так что сцена собиралась бы на глазах — сперва пустая синева, потом
 // небо, потом вода. Дожидаемся всех и проявляем разом.
 //
 // Кораблей в этом списке нет намеренно: их картинки лёгкие, а ждать их — значит держать
 // пустое море дольше нужного. Появление одного корабля глаз почти не ловит.
-const SCENE_IMAGES = [skyUrl, moonUrl, cloudFarUrl, cloudNearUrl, islandUrl, ...SEA_FRAMES];
+const SCENE_IMAGES = [skyUrl, moonUrl, cloudFarUrl, cloudNearUrl, islandUrl, seaUrl];
 
 // Сколько корабль пропадает из виду, перезаходя на другой слот. Пауза нужна, чтобы уход
 // и заход читались как два разных манёвра, а не как рывок из одного края кадра в другой.
@@ -82,29 +78,6 @@ const MOTION_CLASS: Record<string, string> = {
     entering: styles.shipEntering,
     shifting: styles.shipShifting,
 };
-
-/**
- * Плитка воды: снимки ряби линейно перетекают друг в друга по кругу, сама сцена
- * при этом стоит на месте. Слоёв на один больше, чем снимков: последний повторяет
- * первый, поэтому к концу круга сверху лежит ровно то же, что в его начале, —
- * и общий сброс анимации на стыке не виден.
- */
-function SeaTile({ mirrored = false }: { mirrored?: boolean }) {
-    return (
-        <div
-            className={mirrored ? styles.seaTileMirrored : styles.seaTile}
-            style={{ '--frames': SEA_FRAMES.length } as CSSProperties}
-        >
-            {[...SEA_FRAMES, SEA_FRAMES[0]].map((url, index) => (
-                <div
-                    key={`${url}-${index}`}
-                    className={styles.seaFrame}
-                    style={{ backgroundImage: `url(${url})`, '--frame-index': index } as CSSProperties}
-                />
-            ))}
-        </div>
-    );
-}
 
 interface SeaSceneProps {
     members: Member[];
@@ -365,13 +338,14 @@ export default function SeaScene({ members, myId, morseFeeds, ready, onMoveShip 
             <img className={styles.moon} src={moonUrl} alt="" />
             <img className={styles.cloudFar} src={cloudFarUrl} alt="" />
             <img className={styles.cloudNear} src={cloudNearUrl} alt="" />
+            {/* Вода: снимок перетекает в собственное зеркальное отражение и обратно.
+                Нижний слой лежит неподвижно, верхний — зеркальный — проступает поверх него. */}
             <div className={styles.sea}>
-                {/* Вода собрана так же, как небо: полосу можно двигать по горизонтали. */}
-                <div className={styles.seaStrip}>
-                    <SeaTile mirrored />
-                    <SeaTile />
-                    <SeaTile mirrored />
-                </div>
+                <div className={styles.seaLayer} style={{ backgroundImage: `url(${seaUrl})` }} />
+                <div
+                    className={`${styles.seaLayer} ${styles.seaMirror}`}
+                    style={{ backgroundImage: `url(${seaUrl})` }}
+                />
             </div>
             {/* Остров стоит на воде ниже горизонта, за ним видно море. Отражение уже есть в картинке. */}
             <img className={styles.island} src={islandUrl} alt="" />
