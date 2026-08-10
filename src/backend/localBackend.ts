@@ -1,4 +1,4 @@
-import { Member, Message } from '@/types/channel';
+import { Member, Message, SHIP_KIND_LABELS, ShipKind } from '@/types/channel';
 import { isValidSlug } from '@/utils/slug';
 
 import { moveShip, placeShip } from '@/backend/placement';
@@ -100,6 +100,49 @@ const writeState = (state: ServerState): void => {
 
 const randomId = (prefix: string): string =>
     `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+/** Название силуэта со строчной буквы: в строчке о переоснащении оно идёт не первым словом. */
+const kindLabel = (kind: ShipKind): string => {
+    const label = SHIP_KIND_LABELS[kind];
+    return label.charAt(0).toLowerCase() + label.slice(1);
+};
+
+/**
+ * Как назвать смену позывного и номера. Три случая, и они правда разные: неизменившееся
+ * повторять не надо — «„Буран“ 042 теперь „Буран“ 517» читается как оговорка, а не как новость.
+ */
+const renameNotice = (before: Member, after: Member): string | null => {
+    const nameChanged = before.name !== after.name;
+    const hullChanged = before.hullNumber !== after.hullNumber;
+    if (nameChanged && hullChanged) {
+        return `«${before.name}» ${before.hullNumber} теперь «${after.name}» ${after.hullNumber}`;
+    }
+    if (nameChanged) {
+        return `«${before.name}» ${before.hullNumber} теперь «${after.name}»`;
+    }
+    if (hullChanged) {
+        return `«${after.name}» сменил бортовой номер: ${before.hullNumber} → ${after.hullNumber}`;
+    }
+    return null;
+};
+
+/**
+ * Строчка о переоснащении: что было и что стало. Складывается из того, что человек и правда
+ * поменял, — молчаливая подмена корабля выглядела бы сменой участника, а сообщение обо всех
+ * полях подряд каждый раз ничего не сообщало бы.
+ *
+ * Имя и облик идут порознь: позывной с номером — это то, как корабль зовут, а силуэт — то,
+ * как он выглядит, и в одну фразу они складываются плохо. Цвет позывного не отмечаем: он
+ * не меняет ни имени, ни облика.
+ */
+const refitNotice = (before: Member, after: Member): string | null => {
+    const renamed = renameNotice(before, after);
+    if (before.shipKind === after.shipKind) {
+        return renamed;
+    }
+    const silhouette = `силуэт: ${kindLabel(before.shipKind)} → ${kindLabel(after.shipKind)}`;
+    return renamed ? `${renamed}, ${silhouette}` : `«${after.name}» ${after.hullNumber} сменил ${silhouette}`;
+};
 
 /** Адрес свободен, если его не занял другой канал. Сам себя канал не блокирует. */
 const isSlugFree = (state: ServerState, slug: string, exceptId?: string): boolean =>
@@ -249,11 +292,14 @@ export function createLocalBackend(): ChannelBackend {
 
         updateMember: async (channelId, memberId, draft) => {
             checkDraftIsFree(requireChannel(channelId), draft, memberId);
+            let before: Member | null = null;
             const updated = mutate(channelId, (current) => {
                 const member = current.members.find((item) => item.id === memberId);
                 if (!member) {
                     throw new ChannelError('member-not-found', 'Такого корабля в канале нет');
                 }
+                // Запоминаем, каким корабль был: по этому и складывается строчка о переоснащении.
+                before = { ...member };
                 member.name = draft.name.trim();
                 member.hullNumber = draft.hullNumber.trim();
                 member.shipKind = draft.shipKind;
@@ -261,6 +307,18 @@ export function createLocalBackend(): ChannelBackend {
                 return { ...member };
             });
             emit(channelId, { type: 'member-updated', member: updated });
+            const text = before && refitNotice(before, updated);
+            if (text) {
+                const notice: Message = {
+                    id: randomId('msg'),
+                    memberId: updated.id,
+                    kind: 'system',
+                    text,
+                    sentAt: Date.now(),
+                };
+                mutate(channelId, (current) => current.messages.push(notice));
+                emit(channelId, { type: 'message-added', message: notice });
+            }
             return delay(updated);
         },
 
