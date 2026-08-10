@@ -207,7 +207,7 @@ export default function MemberForm({ mode, crew, myId, initial, onSubmit, onCanc
                             onClick={() => setShipKind(kind)}
                         >
                             {/* Место под силуэт одно на всех, а сам силуэт в нём той ширины,
-                                какую даёт его масштаб; по бокам остаётся поле. */}
+                                какую даёт его масштаб; корма прижата к левому краю. */}
                             <span className={styles.kindImageBox} style={{ aspectRatio: SHIP_IMAGE_ASPECT }}>
                                 <img
                                     className={styles.kindImage}
@@ -216,21 +216,15 @@ export default function MemberForm({ mode, crew, myId, initial, onSubmit, onCanc
                                     alt=""
                                 />
                             </span>
+                            {/* Линейка начинается от того же края, что и корма: длину корабля
+                                меряют от неё, и обе отметки стоят на одной линии. */}
                             <span className={styles.scaleRow}>
-                                <span className={styles.scaleLabel}>{scaleMetres(kind)} м</span>
-                                {/* Отступ справа ставит линейку под корму: силуэт по центру,
-                                    и справа от него остаётся половина незанятого места. */}
-                                <span
-                                    className={styles.scaleBar}
-                                    style={{
-                                        width: percent(SCALE_SHARE),
-                                        marginRight: percent((1 - shipWidth(kind)) / 2),
-                                    }}
-                                >
+                                <span className={styles.scaleBar} style={{ width: percent(SCALE_SHARE) }}>
                                     {SCALE_SEGMENTS.map((step) => (
                                         <span key={step} className={step % 2 ? styles.scaleDark : styles.scaleLight} />
                                     ))}
                                 </span>
+                                <span className={styles.scaleLabel}>{scaleMetres(kind)} м</span>
                             </span>
                             <span className={styles.kindLabel}>{SHIP_KIND_LABELS[kind]}</span>
                             <span className={styles.kindSpec}>{shipSpecLine(kind)}</span>
