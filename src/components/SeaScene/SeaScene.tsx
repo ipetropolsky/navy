@@ -79,6 +79,19 @@ const MOTION_CLASS: Record<string, string> = {
     shifting: styles.shipShifting,
 };
 
+/**
+ * Склеенная полоса воды: три плитки шириной с кадр, соседние зеркальны друг другу — поэтому
+ * стыков не видно и полосу можно двигать в любую сторону, всегда есть чем закрыть кадр.
+ * Одна и та же разметка идёт и в нижнюю полосу, и в верхнюю, перевёрнутую.
+ */
+const seaTiles = (
+    <>
+        <div className={styles.seaTileMirrored} style={{ backgroundImage: `url(${seaUrl})` }} />
+        <div className={styles.seaTile} style={{ backgroundImage: `url(${seaUrl})` }} />
+        <div className={styles.seaTileMirrored} style={{ backgroundImage: `url(${seaUrl})` }} />
+    </>
+);
+
 interface SeaSceneProps {
     members: Member[];
     myId: string;
@@ -338,14 +351,11 @@ export default function SeaScene({ members, myId, morseFeeds, ready, onMoveShip 
             <img className={styles.moon} src={moonUrl} alt="" />
             <img className={styles.cloudFar} src={cloudFarUrl} alt="" />
             <img className={styles.cloudNear} src={cloudNearUrl} alt="" />
-            {/* Вода: снимок перетекает в собственное зеркальное отражение и обратно.
-                Нижний слой лежит неподвижно, верхний — зеркальный — проступает поверх него. */}
+            {/* Вода: та же склеенная полоса, что и небо, а поверх — она же, перевёрнутая ещё раз.
+                Верхняя проступает и гаснет, отчего рябь перетекает в собственное отражение. */}
             <div className={styles.sea}>
-                <div className={styles.seaLayer} style={{ backgroundImage: `url(${seaUrl})` }} />
-                <div
-                    className={`${styles.seaLayer} ${styles.seaMirror}`}
-                    style={{ backgroundImage: `url(${seaUrl})` }}
-                />
+                <div className={styles.seaStrip}>{seaTiles}</div>
+                <div className={styles.seaStripMirrored}>{seaTiles}</div>
             </div>
             {/* Остров стоит на воде ниже горизонта, за ним видно море. Отражение уже есть в картинке. */}
             <img className={styles.island} src={islandUrl} alt="" />
