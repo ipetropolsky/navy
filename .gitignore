@@ -9,3 +9,5 @@ build
 test-results
 playwright-report
 __pycache__/
+
+firebase-debug.log

@@ -23,7 +23,10 @@
     "deploy": "npm run build && gh-pages -d build",
     "deps-latest": "node tools/get-latest-deps.cjs",
     "lint-staged": "lint-staged",
-    "postinstall": "cp tools/githooks/* .git/hooks || true"
+    "postinstall": "cp tools/githooks/* .git/hooks || true",
+    "firebase": "firebase",
+    "functions:dev": "firebase emulators:start --only firestore,functions",
+    "functions:deploy": "firebase deploy --only functions"
   },
   "engines": {
     "node": ">22.0.0"
@@ -43,6 +46,7 @@
     "autoprefixer": "10.4.27",
     "eslint": "9.39.4",
     "eslint-config-prettier": "10.1.8",
+    "firebase-tools": "15.26.0",
     "gh-pages": "6.3.0",
     "globals": "17.4.0",
     "less": "4.6.4",
