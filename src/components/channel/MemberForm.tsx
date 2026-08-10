@@ -42,12 +42,22 @@ const randomHullNumber = (): string => String(Math.floor(Math.random() * 900) + 
  * кнопки, то есть каждый в своём масштабе, и катер рядом с корветом выглядит одного размера.
  * Линейка это и исправляет: она всегда десять метров, а вот занимает тем меньше места,
  * чем крупнее корабль. Выровнена по корме — от неё и считают длину.
+ *
+ * Собрана линейка у всех одинаково — по самому маленькому кораблю, у которого десять метров
+ * занимают больше всего места, — и целиком уменьшается через scale. Уменьшается вся: и полоска,
+ * и подпись, поэтому линейка читается не сама по себе, а как масштаб этого чертежа.
  */
 const SCALE_METRES = 10;
 const SCALE_SEGMENTS = [...new Array<number>(SCALE_METRES)].map((_, metre) => metre);
 
-/** Сколько ширины кнопки занимают десять метров у этого корабля. */
-const scaleWidth = (kind: ShipKind): string => `${((SCALE_METRES / SHIP_SPECS[kind].length) * 100).toFixed(2)}%`;
+/** Самый маленький корабль в справочнике: по нему линейка и нарисована. */
+const SHORTEST_SHIP = Math.min(...SHIP_KINDS.map((kind) => SHIP_SPECS[kind].length));
+
+/** Ширина линейки до уменьшения: десять метров у самого маленького корабля. */
+const SCALE_BASE_WIDTH = `${((SCALE_METRES / SHORTEST_SHIP) * 100).toFixed(2)}%`;
+
+/** Во сколько раз этот корабль крупнее самого маленького — во столько же мельче его линейка. */
+const scaleFactor = (kind: ShipKind): number => SHORTEST_SHIP / SHIP_SPECS[kind].length;
 
 /**
  * Строчка с характеристиками силуэта: длина, водоизмещение, полный ход. Числа не украшение —
@@ -194,14 +204,16 @@ export default function MemberForm({ mode, crew, myId, initial, onSubmit, onCanc
                                 alt=""
                             />
                             <span className={styles.scaleRow}>
-                                <span className={styles.scaleLabel}>{SCALE_METRES} м</span>
-                                <span className={styles.scaleBar} style={{ width: scaleWidth(kind) }}>
-                                    {SCALE_SEGMENTS.map((metre) => (
-                                        <span
-                                            key={metre}
-                                            className={metre % 2 ? styles.scaleDark : styles.scaleLight}
-                                        />
-                                    ))}
+                                <span className={styles.scale} style={{ scale: scaleFactor(kind) }}>
+                                    <span className={styles.scaleLabel}>{SCALE_METRES} м</span>
+                                    <span className={styles.scaleBar} style={{ width: SCALE_BASE_WIDTH }}>
+                                        {SCALE_SEGMENTS.map((metre) => (
+                                            <span
+                                                key={metre}
+                                                className={metre % 2 ? styles.scaleDark : styles.scaleLight}
+                                            />
+                                        ))}
+                                    </span>
                                 </span>
                             </span>
                             <span className={styles.kindLabel}>{SHIP_KIND_LABELS[kind]}</span>
