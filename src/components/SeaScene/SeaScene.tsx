@@ -11,6 +11,8 @@ import Ship from '@/components/ships/Ship';
 import { SHIP_SPRITES } from '@/components/ships/shipSprites';
 import { Member, MorseFeed, slotDepth } from '@/types/channel';
 
+import { leaveCourse, lengthsToEdge, sailSeconds, shipWidthPercent } from '@/components/SeaScene/shipMotion';
+
 import styles from './SeaScene.module.less';
 
 // Качка живёт тем же циклом, что и вода: 10 секунд на полный круг, и за этот круг корабль
@@ -197,10 +199,9 @@ export default function SeaScene({ members, myId, morseFeeds, ready }: SeaSceneP
         }
     }
 
-    const slotStyle = (member: Member): CSSProperties => {
+    const slotStyle = (member: Member, width: number): CSSProperties => {
         const shipScale = SHIP_SPRITES[member.shipKind].scale;
         const depth = slotDepth(member.place.slot);
-        const width = (20 + depth * 30) * shipScale;
         return {
             // Ширину и кламп «не подходить к краям кадра» досчитывает CSS: там же живёт
             // масштаб для телефонов и отступ от краёв.
@@ -239,9 +240,15 @@ export default function SeaScene({ members, myId, morseFeeds, ready }: SeaSceneP
             <img className={styles.island} src={islandUrl} alt="" />
             {placed.map((member) => {
                 const depth = slotDepth(member.place.slot);
+                const width = shipWidthPercent(member.place.slot, member.shipKind);
                 const leaving = leavingById.current.has(member.id);
                 const entering = !leaving && enteringIds.current.has(member.id);
                 const motion = (leaving && styles.shipLeaving) || (entering && styles.shipEntering) || '';
+                // Заход: с той стороны, откуда пришёл, ровно до кромки кадра и ни шагом дальше.
+                const enterLengths = lengthsToEdge(member.place.left, width, member.place.enterFrom);
+                // Уход: вперёд, а если нос смотрит в остров — задним ходом в другую сторону.
+                const leave = leaveCourse(member.place);
+                const leaveLengths = lengthsToEdge(member.place.left, width, leave.side);
                 return (
                     <div
                         key={member.id}
@@ -261,14 +268,21 @@ export default function SeaScene({ members, myId, morseFeeds, ready }: SeaSceneP
                         }
                         style={
                             {
-                                ...slotStyle(member),
+                                ...slotStyle(member, width),
                                 // Ближний перекрывает дальнего: порядок наложения идёт от слота.
                                 zIndex: member.place.slot + 1,
-                                // Из-за какого края кадра заплывает. Ход задан в долях ширины экрана,
-                                // поэтому старт всегда за кадром, какой бы ширины он ни был.
-                                '--enter-from': member.place.enterFrom === 'right' ? '130vw' : '-130vw',
-                                // Уходит в ту сторону, куда смотрит нос: разворачиваться незачем.
-                                '--leave-to': member.place.facing === 'right' ? '130vw' : '-130vw',
+                                // Ход в процентах — это доли собственной ширины корабля, то есть
+                                // прямо длины корпуса: «180%» значит «полторы длины и ещё немного».
+                                // Считаем ровно до кромки кадра, чтобы корабль не проводил половину
+                                // прогона за экраном и чтобы длительность отвечала пройденному пути.
+                                '--enter-from': `${member.place.enterFrom === 'right' ? '' : '-'}${(
+                                    enterLengths * 100
+                                ).toFixed(0)}%`,
+                                '--enter-seconds': `${sailSeconds(enterLengths, false).toFixed(1)}s`,
+                                '--leave-to': `${leave.side === 'right' ? '' : '-'}${(leaveLengths * 100).toFixed(0)}%`,
+                                // Задний ход отличается только длительностью: кривая та же,
+                                // а скорость ниже — иначе замер пиковой скорости под неё не подходит.
+                                '--leave-seconds': `${sailSeconds(leaveLengths, leave.astern).toFixed(1)}s`,
                             } as CSSProperties
                         }
                     >

@@ -17,7 +17,7 @@
  * тогда они разнесены по дальности достаточно, чтобы не наложиться силуэтами.
  */
 
-import { SLOT_COUNT, ShipPlacement } from '@/types/channel';
+import { ISLAND_FREE_SLOT, ISLAND_SIDE, SLOT_COUNT, ShipPlacement, otherSide } from '@/types/channel';
 
 /** Центры коридоров, % ширины сцены. */
 const CORRIDOR_CENTERS = [20, 50, 80];
@@ -36,10 +36,10 @@ const MIN_SLOT_GAP = 3;
  *
  * Поэтому левый коридор закрыт для дальних слотов. Начиная с ISLAND_FREE_SLOT корабль
  * заметно ближе острова и крупнее — перекрытие читается как «прошёл перед берегом»,
- * а это как раз то, что нужно.
+ * а это как раз то, что нужно. Сам порог живёт в types/channel.ts: про остров знает
+ * не только расстановка, но и сцена, когда решает, в какую сторону кораблю уходить.
  */
 const ISLAND_CORRIDOR = 0;
-const ISLAND_FREE_SLOT = 4;
 
 const pick = <T>(items: T[]): T => items[Math.floor(Math.random() * items.length)];
 
@@ -78,7 +78,9 @@ export const placeShip = (taken: ShipPlacement[]): ShipPlacement | null => {
     const slot = freeSlots.find((candidate) => corridorsFor(candidate).length > 0);
     if (slot !== undefined) {
         const corridor = corridorsFor(slot)[0];
-        const enterFrom = pick<'left' | 'right'>(['left', 'right']);
+        // Заходить сквозь остров нельзя — на дальних слотах корабль прошёл бы прямо по нему.
+        // Туда идут только с чистой стороны; ближе к переднему плану сторона любая.
+        const enterFrom = slot < ISLAND_FREE_SLOT ? otherSide(ISLAND_SIDE) : pick<'left' | 'right'>(['left', 'right']);
         return {
             slot,
             corridor,
