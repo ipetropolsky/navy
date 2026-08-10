@@ -19,8 +19,14 @@ import { backend } from '@/backend';
 
 - **Всё асинхронно.** Даже там, где реализация может ответить мгновенно. Синхронный ответ
   приучил бы интерфейс к порядку, которого у настоящего сервера не будет.
-- **Всё адресно.** Канал — `channelId`, участник — `memberId`, сообщение — `messageId`
-  (поле `id` у сообщения), ответ — `threadId`, то есть id сообщения, к которому он привязан.
+- **Всё адресно и одним именем.** У сущности ровно один идентификатор — `channelId`,
+  `memberId`, `messageId`, `eventId`, — и называется он так же и в самой сущности,
+  и в ссылке на неё: `message.author.memberId` и `member.memberId` — одно и то же поле.
+- **Ссылка — объект, а не строка.** `author: { memberId }`, `thread: { messageId }`.
+  Понадобится рядом с id ещё и позывной — допишется внутрь, не ломая читателей.
+- **Метод принимает один именованный объект, а возвращает тоже объект.** Адресные поля
+  (`channelId`, `memberId`) лежат в нём скалярами — это адрес запроса, — а содержимое рядом,
+  своим ключом: `sendMessage({ channelId, memberId, message })`.
 - **Изменения возвращаются событиями, а не ответами.** Метод сообщает, что действие принято;
   состояние приложение обновляет по подписке. Событие приходит одинаково и на своё действие,
   и на чужое, поэтому в UI нет ветки «это сделал я».
@@ -38,20 +44,21 @@ import { backend } from '@/backend';
 | Где встречается | все методы и события   | только в ссылке `?channel=nord-ost` |
 
 Ссылка на канал выглядит как `?channel=nord-ost`. Приложение разбирает адрес один раз —
-`getChannelBySlug(slug)` — и дальше работает с `channel.id`. Всё остальное — подписка,
+`getChannelBySlug({ slug })` — и дальше работает с `channel.channelId`. Всё остальное — подписка,
 отправка, вход, выход — адресуется только идентификатором, поэтому смена адреса ничего
 не ломает: ни привязка участника к каналу, ни доставка событий на неё не завязаны.
 
 ```ts
 // Ссылка → канал: один раз, при открытии.
-const channel = await backend.getChannelBySlug('nord-ost');
+const snapshot = await backend.getChannelBySlug({ slug: 'nord-ost' });
+const { channelId, title } = snapshot.channel;
 
-// Дальше только id.
-backend.subscribe(channel.id, handle);
-await backend.sendMessage(channel.id, { memberId, text: 'Курс норд' });
+// Дальше только channelId.
+backend.subscribe({ channelId, onEvent: handle });
+await backend.sendMessage({ channelId, memberId, message: { text: 'Курс норд' } });
 
-// Адрес можно переназначить — id останется прежним, разговор не прервётся.
-await backend.updateChannel(channel.id, { slug: 'nord-ost-2', title: channel.title });
+// Адрес можно переназначить — channelId останется прежним, разговор не прервётся.
+await backend.updateChannel({ channelId, channel: { slug: 'nord-ost-2', title } });
 ```
 
 Требования к `slug`: только строчные латинские буквы, цифры и дефис между словами
@@ -63,17 +70,22 @@ await backend.updateChannel(channel.id, { slug: 'nord-ost-2', title: channel.tit
 ## Сущности
 
 ```ts
+// Канал целиком: сам канал и его коллекции, каждая своим ключом.
 interface ChannelSnapshot {
-    id: string; // channelId: основной идентификатор, неизменный
-    slug: string; // адрес в ссылке, меняется через updateChannel
-    title: string;
-    createdAt: number; // мс эпохи
+    channel: Channel;
     members: Member[];
     messages: Message[];
 }
 
+interface Channel {
+    channelId: string; // основной идентификатор, неизменный
+    slug: string; // адрес в ссылке, меняется через updateChannel
+    title: string;
+    createdAt: number; // мс эпохи
+}
+
 interface Member {
-    id: string;
+    memberId: string;
     name: string; // позывной, он же название корабля
     hullNumber: string; // ровно три цифры
     shipKind: ShipKind; // 'patrol' | 'missile' | 'minesweeper' | 'corvette' | 'torpedo'
@@ -82,58 +94,70 @@ interface Member {
     joinedAt: number;
 }
 
+interface Message {
+    messageId: string;
+    author: MemberRef; // кто отправил; у системной записи — тот, о ком она
+    text: string; // не длиннее MAX_MESSAGE_LENGTH = 500
+    kind?: 'system'; // запись самого канала, а не участника: «встал на рейд»
+    thread?: MessageRef; // ответ: сообщение, к которому он привязан
+    sentAt: number; // мс эпохи; как показать — дело интерфейса
+}
+
+// Ссылки — объекты, а не голые строки: рядом с id однажды встанет что-то ещё.
+interface MemberRef {
+    memberId: string;
+}
+interface MessageRef {
+    messageId: string;
+}
+
+type Side = 'left' | 'right';
+type Corridor = 'left' | 'center' | 'right';
+
+interface ShipPlacement {
+    slot: number; // 0 — у горизонта, 9 — первая линия
+    corridor: Corridor;
+    left: number; // центр корабля, % ширины сцены
+    facing: Side; // куда смотрит нос
+    enterFrom: Side; // с какой стороны заплыл
+    tried: Corridor[]; // коридоры, где корабль уже стоял на этом слоте
+}
+
 // Что за корабль на самом деле: по этим числам считается его ход в сцене.
 interface ShipSpec {
     length: number; // длина наибольшая, м
     displacement: number; // полное водоизмещение, т
     knots: number; // полный ход, узлов
 }
-
-interface ShipPlacement {
-    slot: number; // 0 — у горизонта, 9 — первая линия
-    corridor: number; // 0 — левый, 2 — правый
-    left: number; // центр корабля, % ширины сцены
-    facing: 'left' | 'right'; // куда смотрит нос
-    enterFrom: 'left' | 'right'; // с какой стороны заплыл
-    tried: number[]; // коридоры, где корабль уже стоял на этом слоте
-}
-
-interface Message {
-    id: string;
-    memberId: string; // кто отправил; у системной записи — тот, о ком она
-    text: string;
-    kind?: 'system'; // запись самого канала, а не участника: «встал на рейд»
-    threadId?: string; // id сообщения, на которое отвечаем
-    sentAt: number; // мс эпохи; как показать — дело интерфейса
-}
 ```
 
 ## Методы
 
-| Метод                                      | Что делает                           | Возвращает                |
-| ------------------------------------------ | ------------------------------------ | ------------------------- |
-| `getChannel(channelId)`                    | Состояние канала целиком             | `ChannelSnapshot \| null` |
-| `getChannelBySlug(slug)`                   | Разбор адреса из ссылки              | `ChannelSnapshot \| null` |
-| `createChannel({ slug, title })`           | Заводит канал без участников         | `ChannelSnapshot`         |
-| `updateChannel(channelId, draft)`          | Меняет адрес и название канала       | `ChannelSnapshot`         |
-| `join(channelId, draft)`                   | Ставит корабль в строй               | `Member`                  |
-| `updateMember(channelId, memberId, draft)` | Меняет позывной, номер, силуэт, цвет | `Member`                  |
-| `moveShip(channelId, memberId)`            | Переставляет корабль на рейде        | `Member`                  |
-| `leave(channelId, memberId)`               | Выводит корабль из канала            | `void`                    |
-| `sendMessage(channelId, draft)`            | Отправляет сообщение                 | `Message`                 |
-| `setTyping(channelId, memberId, chars)`    | Сообщает о печати                    | `void`                    |
-| `subscribe(channelId, listener)`           | Подписка на события канала           | функция отписки           |
+| Метод                                           | Что делает                           | Возвращает                |
+| ----------------------------------------------- | ------------------------------------ | ------------------------- |
+| `getChannel({ channelId })`                     | Состояние канала целиком             | `ChannelSnapshot \| null` |
+| `getChannelBySlug({ slug })`                    | Разбор адреса из ссылки              | `ChannelSnapshot \| null` |
+| `createChannel({ channel })`                    | Заводит канал без участников         | `{ channel }`             |
+| `updateChannel({ channelId, channel })`         | Меняет адрес и название канала       | `{ channel }`             |
+| `join({ channelId, member })`                   | Ставит корабль в строй               | `{ member }`              |
+| `updateMember({ channelId, memberId, member })` | Меняет позывной, номер, силуэт, цвет | `{ member }`              |
+| `moveShip({ channelId, memberId })`             | Переставляет корабль на рейде        | `{ member }`              |
+| `leave({ channelId, memberId })`                | Выводит корабль из канала            | —                         |
+| `sendMessage({ channelId, memberId, message })` | Отправляет сообщение                 | `{ message }`             |
+| `setTyping({ channelId, memberId, typing })`    | Сообщает о печати                    | —                         |
+| `subscribe({ channelId, onEvent })`             | Подписка на события канала           | функция отписки           |
 
 ### Открыть канал и подписаться
 
 ```ts
-const channel = await backend.getChannel(channelId);
-if (!channel) {
+const snapshot = await backend.getChannel({ channelId });
+if (!snapshot) {
     // Канала нет: адрес устарел или канал не создавали.
 }
 
-const unsubscribe = backend.subscribe(channelId, (event) => {
-    console.log(event.type, event);
+const unsubscribe = backend.subscribe({
+    channelId,
+    onEvent: (event) => console.log(event.type, event),
 });
 // когда экран закрывается
 unsubscribe();
@@ -145,8 +169,8 @@ unsubscribe();
 import { slugify } from '@/utils/slug';
 
 const title = 'Эскадра «Полночь»';
-const channel = await backend.createChannel({ slug: slugify(title), title });
-// channel.id — 'ch-…', channel.slug — 'eskadra-polnoch'
+const { channel } = await backend.createChannel({ channel: { slug: slugify(title), title } });
+// channel.channelId — 'ch-…', channel.slug — 'eskadra-polnoch'
 // дальше открываем ?channel=<channel.slug> и встаём в строй
 ```
 
@@ -171,7 +195,7 @@ const channel = await backend.createChannel({ slug: slugify(title), title });
 место общее для всех вкладок, поэтому придумывать его на клиенте нельзя.
 
 ```ts
-await backend.moveShip(channelId, myId);
+await backend.moveShip({ channelId, memberId: myId });
 // Новое место приедет событием member-updated — своё оно или чужое, не важно.
 ```
 
@@ -192,13 +216,11 @@ await backend.moveShip(channelId, myId);
 import { ChannelError } from '@/backend';
 
 try {
-    const me = await backend.join(channelId, {
-        name: 'Гроза',
-        hullNumber: '042',
-        shipKind: 'corvette',
-        color: '#8ecae6',
+    const { member } = await backend.join({
+        channelId,
+        member: { name: 'Гроза', hullNumber: '042', shipKind: 'corvette', color: '#8ecae6' },
     });
-    rememberMemberId(channelId, me.id);
+    rememberMemberId(channelId, member.memberId);
 } catch (error) {
     if (error instanceof ChannelError) {
         // error.code: 'channel-full' | 'name-taken' | 'hull-taken' | ...
@@ -226,42 +248,55 @@ try {
 ### Отправить сообщение и ответить на него
 
 ```ts
-const message = await backend.sendMessage(channelId, {
+const { message } = await backend.sendMessage({
+    channelId,
     memberId: myId,
-    text: 'Швартовы отданы, выходим из бухты',
+    message: { text: 'Швартовы отданы, выходим из бухты' },
 });
 
-// Ответ ссылается на id того сообщения, к которому привязан.
-await backend.sendMessage(channelId, {
+// Ответ ссылается на сообщение, к которому привязан.
+await backend.sendMessage({
+    channelId,
     memberId: myId,
-    text: 'Идём следом, держу кильватер',
-    threadId: message.id,
+    message: { text: 'Идём следом, держу кильватер', thread: { messageId: message.messageId } },
 });
 ```
+
+Длину проверяет бэкенд, а не только форма: интерфейсов может стать больше одного, и правило
+должно жить там, где данные. Больше `MAX_MESSAGE_LENGTH` = 500 символов — отказ с кодом
+`message-too-long` и готовым текстом «Максимум 500 символов, у вас 505». Набранное при этом
+не обрезается: обрезать чужой текст нельзя.
 
 ### Печать
 
 ```ts
 // На каждое изменение поля ввода: добавленные символы или '\b' при удалении.
 // Из них лампа на мачте набирает Морзе.
-void backend.setTyping(channelId, myId, chars);
+void backend.setTyping({ channelId, memberId: myId, typing: { chars } });
 ```
 
 Печать — единственное, что никуда не сохраняется: она живёт ровно столько, сколько идёт.
 
+И единственное место контракта, которое на Firebase не переносится один в один. Там не открытый
+сокет, а `query` + `onSnapshot`, то есть запись документа на каждую букву: и дорого, и упирается
+в предел записей в один документ. Заменять это будем не транспортом, а другой механикой —
+принятое сообщение получатель печатает у себя по буквам, и всё это время у отправителя мигает
+лампа и стоит «передаёт». Тогда во время набора на сервер не уходит ничего, а `setTyping`
+и событие `typing` исчезают из контракта совсем. Разбор — в [TODO.md](./TODO.md).
+
 ## События
 
-У всех событий одинаковый конверт: `id`, `channelId`, `at`. Различает их только `type`.
+У всех событий одинаковый конверт: `eventId`, `channelId`, `at`. Различает их только `type`.
 
 ```ts
-type ChannelEvent = { id: string; channelId: string; at: number } & (
-    | { type: 'channel-created'; channel: ChannelSnapshot }
-    | { type: 'channel-updated'; slug: string; title: string }
+type ChannelEvent = { eventId: string; channelId: string; at: number } & (
+    | { type: 'channel-created'; channel: Channel }
+    | { type: 'channel-updated'; channel: Channel }
     | { type: 'member-joined'; member: Member }
     | { type: 'member-updated'; member: Member }
-    | { type: 'member-left'; memberId: string }
+    | { type: 'member-left'; member: MemberRef }
     | { type: 'message-added'; message: Message }
-    | { type: 'typing'; memberId: string; chars: string }
+    | { type: 'typing'; member: MemberRef; typing: { chars: string } }
 );
 ```
 
@@ -301,8 +336,13 @@ switch (event.type) {
 
 ```json
 {
+    "version": 6,
     "channels": {
-        "ch-demo": { "id": "ch-demo", "slug": "demo", "title": "…", "members": [], "messages": [] }
+        "ch-demo": {
+            "channel": { "channelId": "ch-demo", "slug": "demo", "title": "…", "createdAt": 0 },
+            "members": [],
+            "messages": []
+        }
     }
 }
 ```

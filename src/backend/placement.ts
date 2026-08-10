@@ -17,10 +17,19 @@
  * тогда они разнесены по дальности достаточно, чтобы не наложиться силуэтами.
  */
 
-import { ISLAND_FREE_SLOT, ISLAND_SIDE, SLOT_COUNT, ShipPlacement, otherSide } from '@/types/channel';
+import {
+    CORRIDORS,
+    Corridor,
+    ISLAND_FREE_SLOT,
+    ISLAND_SIDE,
+    SLOT_COUNT,
+    ShipPlacement,
+    Side,
+    otherSide,
+} from '@/types/channel';
 
 /** Центры коридоров, % ширины сцены. */
-const CORRIDOR_CENTERS = [20, 50, 80];
+const CORRIDOR_CENTERS: Record<Corridor, number> = { left: 20, center: 50, right: 80 };
 
 /** Ширина коридора, % ширины сцены: шестая часть кадра. */
 const CORRIDOR_WIDTH = 100 / 6;
@@ -39,7 +48,7 @@ const MIN_SLOT_GAP = 3;
  * а это как раз то, что нужно. Сам порог живёт в types/channel.ts: про остров знает
  * не только расстановка, но и сцена, когда решает, в какую сторону кораблю уходить.
  */
-const ISLAND_CORRIDOR = 0;
+const ISLAND_CORRIDOR: Corridor = 'left';
 
 const pick = <T>(items: T[]): T => items[Math.floor(Math.random() * items.length)];
 
@@ -58,7 +67,7 @@ const allSlots = (): number[] => [...new Array<number>(SLOT_COUNT)].map((_, inde
  * Коридоры, свободные для этого слота, в случайном порядке: занятые соседями по дальности
  * и остров — мимо.
  */
-const freeCorridors = (slot: number, taken: ShipPlacement[]): number[] => {
+const freeCorridors = (slot: number, taken: ShipPlacement[]): Corridor[] => {
     const blocked = new Set(
         taken
             .filter((placement) => Math.abs(placement.slot - slot) < MIN_SLOT_GAP)
@@ -67,17 +76,17 @@ const freeCorridors = (slot: number, taken: ShipPlacement[]): number[] => {
     if (slot < ISLAND_FREE_SLOT) {
         blocked.add(ISLAND_CORRIDOR);
     }
-    return shuffled(CORRIDOR_CENTERS.map((_, index) => index)).filter((corridor) => !blocked.has(corridor));
+    return shuffled(CORRIDORS).filter((corridor) => !blocked.has(corridor));
 };
 
 /** Точка внутри коридора. Место любое: строй не должен выглядеть расчерченным по линейке. */
-const leftInside = (corridor: number): number => CORRIDOR_CENTERS[corridor] + (Math.random() - 0.5) * CORRIDOR_WIDTH;
+const leftInside = (corridor: Corridor): number => CORRIDOR_CENTERS[corridor] + (Math.random() - 0.5) * CORRIDOR_WIDTH;
 
 /** Полное место на выбранном слоте: коридор, точка в нём, сторона захода и куда смотрит нос. */
-const placeAt = (slot: number, corridor: number): ShipPlacement => {
+const placeAt = (slot: number, corridor: Corridor): ShipPlacement => {
     // Заходить сквозь остров нельзя — на дальних слотах корабль прошёл бы прямо по нему.
     // Туда идут только с чистой стороны; ближе к переднему плану сторона любая.
-    const enterFrom = slot < ISLAND_FREE_SLOT ? otherSide(ISLAND_SIDE) : pick<'left' | 'right'>(['left', 'right']);
+    const enterFrom = slot < ISLAND_FREE_SLOT ? otherSide(ISLAND_SIDE) : pick<Side>(['left', 'right']);
     return {
         slot,
         corridor,

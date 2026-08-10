@@ -31,9 +31,9 @@ export default function MembersSheet({ open, members, myId, onEditMe, onLeave, o
                 <div className={styles.title}>На связи</div>
                 <div className={styles.hint}>Каждый корабль говорит из своей вкладки</div>
                 {members.map((member) => {
-                    const mine = member.id === myId;
+                    const mine = member.memberId === myId;
                     return (
-                        <div key={member.id} className={mine ? styles.rowActive : styles.row}>
+                        <div key={member.memberId} className={mine ? styles.rowActive : styles.row}>
                             <span className={styles.avatar}>
                                 <HullBadge number={member.hullNumber} />
                             </span>

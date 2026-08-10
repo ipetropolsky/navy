@@ -1,6 +1,6 @@
 import { useState } from 'react';
 
-import { ChannelDraft, MemberDraft, backend } from '@/backend';
+import { ChannelDraft, ChannelError, MemberDraft, backend } from '@/backend';
 import { DEMO_CHANNEL_SLUG } from '@/backend/seed';
 import SeaScene from '@/components/SeaScene/SeaScene';
 import CreateChannel from '@/components/channel/CreateChannel';
@@ -38,11 +38,11 @@ export default function App() {
     const notify = useSnackbar();
 
     const members = channel?.members ?? [];
-    const me = members.find((member) => member.id === myId) ?? null;
+    const me = members.find((member) => member.memberId === myId) ?? null;
     const inChat = Boolean(channel && me && !editing);
 
     const handleCreate = async (draft: ChannelDraft) => {
-        const created = await backend.createChannel(draft);
+        const { channel: created } = await backend.createChannel({ channel: draft });
         route.openChannel(created.slug);
     };
 
@@ -56,8 +56,10 @@ export default function App() {
     };
 
     const typingMember =
-        typing && typing.memberId !== myId ? members.find((member) => member.id === typing.memberId) : null;
-    const replyToAuthor = replyTo ? (members.find((member) => member.id === replyTo.memberId) ?? null) : null;
+        typing && typing.memberId !== myId ? members.find((member) => member.memberId === typing.memberId) : null;
+    const replyToAuthor = replyTo
+        ? (members.find((member) => member.memberId === replyTo.author.memberId) ?? null)
+        : null;
 
     // Лампа мигает у того, кто печатает, — и у своего корабля тоже: событие о печати
     // приходит от бэкенда одинаково, своё оно или чужое.
@@ -67,13 +69,19 @@ export default function App() {
     }
 
     const handleSend = (text: string) => {
-        void channelState.sendMessage({ text, threadId: replyTo?.id });
-        setReplyTo(null);
+        // Отказ показываем снекбаром: у бэкенда для него уже есть человеческий текст,
+        // а молча проглотить его нельзя — человек решит, что сообщение ушло.
+        void channelState
+            .sendMessage({ text, thread: replyTo ? { messageId: replyTo.messageId } : undefined })
+            .then(() => setReplyTo(null))
+            .catch((failure: unknown) =>
+                notify(failure instanceof ChannelError ? failure.message : 'Не вышло отправить')
+            );
     };
 
     const handleCopyLink = () => {
         if (channel) {
-            void copyText(channelLink(channel.slug)).then((done) =>
+            void copyText(channelLink(channel.channel.slug)).then((done) =>
                 notify(done ? 'Ссылка на канал скопирована' : 'Не вышло скопировать ссылку')
             );
         }
@@ -117,7 +125,7 @@ export default function App() {
                                 onClick={handleCopyLink}
                                 title="Скопировать ссылку на канал"
                             >
-                                {channel.title}
+                                {channel.channel.title}
                             </button>
                         ) : (
                             <div className={styles.chatTitle}>Кильватер</div>
@@ -185,7 +193,7 @@ export default function App() {
                     <MemberForm
                         mode={editing ? 'edit' : 'join'}
                         crew={members.map((member) => member.name)}
-                        takenColors={members.filter((member) => member.id !== myId).map((member) => member.color)}
+                        takenColors={members.filter((member) => member.memberId !== myId).map((member) => member.color)}
                         initial={me ?? undefined}
                         onSubmit={handleMemberSubmit}
                         onCancel={editing ? () => setEditing(false) : undefined}
@@ -193,7 +201,12 @@ export default function App() {
                 )}
                 {inChat && channel && me && (
                     <>
-                        <MessageList messages={channel.messages} members={members} myId={me.id} onReply={setReplyTo} />
+                        <MessageList
+                            messages={channel.messages}
+                            members={members}
+                            myId={me.memberId}
+                            onReply={setReplyTo}
+                        />
                         <Composer
                             replyTo={replyTo}
                             replyToAuthor={replyToAuthor}

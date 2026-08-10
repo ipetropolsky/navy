@@ -1,4 +1,4 @@
-import { Member, Message, ShipKind } from '@/types/channel';
+import { Channel, Member, MemberRef, Message, MessageRef, ShipKind } from '@/types/channel';
 
 /**
  * Контракт бэкенда. Фронтенд знает только его и ничего — про то, где лежат данные:
@@ -6,22 +6,21 @@ import { Member, Message, ShipKind } from '@/types/channel';
  * асинхронные, даже когда реализация может ответить мгновенно: синхронный ответ
  * приучил бы UI к порядку, которого у настоящего сервера не будет.
  *
- * Всё общение адресное: канал называется channelId, участник — memberId, сообщение —
- * его собственным id, а ответ ссылается на threadId — id сообщения, к которому он привязан.
+ * Форма контракта подчинена правилам из docs/API-PRINCIPLES.md. Коротко: всё, что может
+ * стать объектом, кладётся объектом; ссылка называется по сущности и несёт её канонический
+ * идентификатор (`author: { memberId }`, а не `memberId`); методы принимают один именованный
+ * объект; ответ — тоже объект, а не голая сущность. Всё это ради одного: чтобы завтрашнее
+ * поле дописывалось рядом, а не ломало читателей.
  *
- * У канала два имени, и путать их нельзя. channelId — основной идентификатор: неизменный,
- * машинный, по нему адресуются все действия и события. Slug — читаемый адрес для ссылки
+ * У канала два имени, и путать их нельзя. `channelId` — основной идентификатор: неизменный,
+ * машинный, по нему адресуются все действия и события. `slug` — читаемый адрес для ссылки
  * (`?channel=eskadra-polnoch`), его можно переназначить, и внутри системы на него никто
  * не ссылается. Отсюда и отдельный метод разбора адреса: getChannelBySlug.
  */
 
-/** Канал связи со всем, что в нём есть, на один момент времени. */
+/** Канал целиком: сам канал и его коллекции, каждая своим ключом. */
 export interface ChannelSnapshot {
-    id: string;
-    /** Читаемый адрес канала для ссылки. Меняется, в отличие от id. */
-    slug: string;
-    title: string;
-    createdAt: number;
+    channel: Channel;
     members: Member[];
     messages: Message[];
 }
@@ -36,16 +35,19 @@ export interface MemberDraft {
 
 /** Что у канала можно задать и потом поменять: адрес и человеческое название. */
 export interface ChannelDraft {
-    /** Латинские буквы и дефис; в ссылке стоит именно он. */
+    /** Латинские буквы, цифры и дефис; в ссылке стоит именно он. */
     slug: string;
     title: string;
 }
 
+/**
+ * Тело сообщения — и только оно. Отправитель сюда не входит: он адресует запрос,
+ * а не является частью текста, и передаётся отдельным полем метода.
+ */
 export interface MessageDraft {
-    memberId: string;
     text: string;
-    /** id сообщения, на которое отвечаем. */
-    threadId?: string;
+    /** Ответ: сообщение, к которому он привязан. */
+    thread?: MessageRef;
 }
 
 /**
@@ -56,25 +58,30 @@ export interface MessageDraft {
  */
 interface ChannelEventBase {
     /** Свой у каждого события: по нему отбрасываем повторную доставку. */
-    id: string;
+    eventId: string;
     channelId: string;
     at: number;
 }
 
 export type ChannelEvent = ChannelEventBase &
     (
-        | { type: 'channel-created'; channel: ChannelSnapshot }
-        | { type: 'channel-updated'; slug: string; title: string }
+        | { type: 'channel-created'; channel: Channel }
+        | { type: 'channel-updated'; channel: Channel }
         | { type: 'member-joined'; member: Member }
         | { type: 'member-updated'; member: Member }
-        | { type: 'member-left'; memberId: string }
+        | { type: 'member-left'; member: MemberRef }
         | { type: 'message-added'; message: Message }
         /**
          * Единственное событие, которое никуда не сохраняется: печать живёт ровно столько,
          * сколько идёт. `chars` — добавленные символы или '\b' при удалении, из них лампа
          * набирает Морзе.
+         *
+         * И единственное место контракта, которое на Firebase не переносится один в один:
+         * там `query` + `onSnapshot`, то есть запись документа на каждую букву. Заменять
+         * его будем не транспортом, а другой механикой — приём печатается по буквам уже
+         * после доставки, и лампа мигает по нему. Разбор — в docs/TODO.md.
          */
-        | { type: 'typing'; memberId: string; chars: string }
+        | { type: 'typing'; member: MemberRef; typing: { chars: string } }
     );
 
 export type ChannelEventType = ChannelEvent['type'];
@@ -87,7 +94,8 @@ export type ChannelErrorCode =
     | 'slug-invalid'
     | 'name-taken'
     | 'hull-taken'
-    | 'member-not-found';
+    | 'member-not-found'
+    | 'message-too-long';
 
 export class ChannelError extends Error {
     constructor(
@@ -101,33 +109,46 @@ export class ChannelError extends Error {
 
 export type Unsubscribe = () => void;
 
+/**
+ * Адрес канала — во всех методах, кроме создания и разбора ссылки. Скаляром, а не объектом:
+ * это адрес запроса, то, что в настоящем API стояло бы в пути, а не его содержимое.
+ */
+interface ChannelAddress {
+    channelId: string;
+}
+
+/** Адрес участника внутри канала. По той же причине скаляром. */
+interface MemberAddress extends ChannelAddress {
+    memberId: string;
+}
+
 export interface ChannelBackend {
-    getChannel(channelId: string): Promise<ChannelSnapshot | null>;
-    /** Разбор адреса из ссылки: по slug находим канал и дальше работаем с его id. */
-    getChannelBySlug(slug: string): Promise<ChannelSnapshot | null>;
+    getChannel(request: ChannelAddress): Promise<ChannelSnapshot | null>;
+    /** Разбор адреса из ссылки: по slug находим канал и дальше работаем с его channelId. */
+    getChannelBySlug(request: { slug: string }): Promise<ChannelSnapshot | null>;
 
-    createChannel(draft: ChannelDraft): Promise<ChannelSnapshot>;
-    updateChannel(channelId: string, draft: ChannelDraft): Promise<ChannelSnapshot>;
+    createChannel(request: { channel: ChannelDraft }): Promise<{ channel: Channel }>;
+    updateChannel(request: ChannelAddress & { channel: ChannelDraft }): Promise<{ channel: Channel }>;
 
-    join(channelId: string, draft: MemberDraft): Promise<Member>;
-    updateMember(channelId: string, memberId: string, draft: MemberDraft): Promise<Member>;
+    join(request: ChannelAddress & { member: MemberDraft }): Promise<{ member: Member }>;
+    updateMember(request: MemberAddress & { member: MemberDraft }): Promise<{ member: Member }>;
     /**
      * Переставить корабль на другое место: в другой коридор своего слота, а когда слот
      * обойдён весь — на другой слот. Куда именно, решает бэкенд: место корабля общее
      * для всех вкладок, и придумывать его на клиенте нельзя.
      */
-    moveShip(channelId: string, memberId: string): Promise<Member>;
-    leave(channelId: string, memberId: string): Promise<void>;
+    moveShip(request: MemberAddress): Promise<{ member: Member }>;
+    leave(request: MemberAddress): Promise<void>;
 
-    sendMessage(channelId: string, draft: MessageDraft): Promise<Message>;
-    setTyping(channelId: string, memberId: string, chars: string): Promise<void>;
+    sendMessage(request: MemberAddress & { message: MessageDraft }): Promise<{ message: Message }>;
+    setTyping(request: MemberAddress & { typing: { chars: string } }): Promise<void>;
 
     /**
      * Подписка на всё, что происходит в канале. Возвращает функцию отписки.
      * События приходят и от чужих вкладок, и от собственных действий этой вкладки —
      * UI не должен угадывать, кто сделал изменение, чтобы применить его.
      */
-    subscribe(channelId: string, listener: (event: ChannelEvent) => void): Unsubscribe;
+    subscribe(request: ChannelAddress & { onEvent: (event: ChannelEvent) => void }): Unsubscribe;
 }
 
 /** Сколько кораблей помещается в сцену. */

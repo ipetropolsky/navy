@@ -1,4 +1,4 @@
-import { Member, Message, SHIP_KIND_LABELS, ShipKind } from '@/types/channel';
+import { Channel, MAX_MESSAGE_LENGTH, Member, Message, SHIP_KIND_LABELS, ShipKind } from '@/types/channel';
 import { isValidSlug } from '@/utils/slug';
 
 import { moveShip, placeShip } from '@/backend/placement';
@@ -43,7 +43,7 @@ const BROADCAST_NAME = 'kilvater';
  * Здесь должна появиться миграция раньше, чем в канале заведётся первый неигрушечный разговор.
  * Подробно — в docs/BACKEND-API.md, раздел «К чужим данным — бережно».
  */
-const STORAGE_VERSION = 5;
+const STORAGE_VERSION = 6;
 
 /** Ключ, под которым состояние лежало до появления версии. Чистим, чтобы не мусорить. */
 const LEGACY_STORAGE_KEY = 'kilvater.v1';
@@ -64,7 +64,7 @@ interface ServerState {
  * и потеряет разбор по `type`.
  */
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
-type ChannelEventPayload = DistributiveOmit<ChannelEvent, 'id' | 'channelId' | 'at'>;
+type ChannelEventPayload = DistributiveOmit<ChannelEvent, 'eventId' | 'channelId' | 'at'>;
 
 const delay = <T>(value: T): Promise<T> =>
     new Promise((resolve) => {
@@ -139,7 +139,9 @@ const refitNotice = (before: Member, after: Member): string | null => {
 
 /** Адрес свободен, если его не занял другой канал. Сам себя канал не блокирует. */
 const isSlugFree = (state: ServerState, slug: string, exceptId?: string): boolean =>
-    !Object.values(state.channels).some((channel) => channel.slug === slug && channel.id !== exceptId);
+    !Object.values(state.channels).some(
+        (snapshot) => snapshot.channel.slug === slug && snapshot.channel.channelId !== exceptId
+    );
 
 /** Прочитал — поменял — записал одним движением: между вкладками так теряется меньше. */
 const mutate = <T>(channelId: string, change: (channel: ChannelSnapshot) => T): T => {
@@ -165,10 +167,10 @@ export function createLocalBackend(): ChannelBackend {
 
     const deliver = (event: ChannelEvent): void => {
         // Событие может прийти дважды: своё эхо и чужая доставка. Второй раз пропускаем.
-        if (seenEventIds.has(event.id)) {
+        if (seenEventIds.has(event.eventId)) {
             return;
         }
-        seenEventIds.add(event.id);
+        seenEventIds.add(event.eventId);
         listeners.get(event.channelId)?.forEach((listener) => listener(event));
     };
 
@@ -176,14 +178,14 @@ export function createLocalBackend(): ChannelBackend {
 
     /** Разослать событие всем: и соседним вкладкам, и подписчикам этой. */
     const emit = (channelId: string, payload: ChannelEventPayload): void => {
-        const event = { ...payload, id: randomId('e'), channelId, at: Date.now() } as ChannelEvent;
+        const event = { ...payload, eventId: randomId('e'), channelId, at: Date.now() } as ChannelEvent;
         wire?.postMessage(event);
         deliver(event);
     };
 
     /** Записать в ленту строчку от самого канала и разослать её как обычное сообщение. */
     const postNotice = (channelId: string, memberId: string, text: string, sentAt: number): void => {
-        const notice: Message = { id: randomId('msg'), memberId, kind: 'system', text, sentAt };
+        const notice: Message = { messageId: randomId('msg'), author: { memberId }, kind: 'system', text, sentAt };
         mutate(channelId, (current) => current.messages.push(notice));
         emit(channelId, { type: 'message-added', message: notice });
     };
@@ -198,7 +200,7 @@ export function createLocalBackend(): ChannelBackend {
 
     /** Позывной и бортовой номер должны быть свободны: иначе в ленте не различить, кто говорит. */
     const checkDraftIsFree = (snapshot: ChannelSnapshot, draft: MemberDraft, exceptId?: string): void => {
-        const others = snapshot.members.filter((member) => member.id !== exceptId);
+        const others = snapshot.members.filter((member) => member.memberId !== exceptId);
         if (others.some((member) => member.name.toLowerCase() === draft.name.trim().toLowerCase())) {
             throw new ChannelError('name-taken', 'Корабль с таким позывным уже на связи');
         }
@@ -208,12 +210,12 @@ export function createLocalBackend(): ChannelBackend {
     };
 
     return {
-        getChannel: (channelId) => delay(readState().channels[channelId] ?? null),
+        getChannel: ({ channelId }) => delay(readState().channels[channelId] ?? null),
 
-        getChannelBySlug: (slug) =>
-            delay(Object.values(readState().channels).find((channel) => channel.slug === slug) ?? null),
+        getChannelBySlug: ({ slug }) =>
+            delay(Object.values(readState().channels).find((snapshot) => snapshot.channel.slug === slug) ?? null),
 
-        createChannel: async ({ slug, title }) => {
+        createChannel: async ({ channel: { slug, title } }) => {
             const state = readState();
             if (!isValidSlug(slug)) {
                 throw new ChannelError('slug-invalid', 'В адресе только латинские буквы, цифры и дефис');
@@ -221,21 +223,19 @@ export function createLocalBackend(): ChannelBackend {
             if (!isSlugFree(state, slug)) {
                 throw new ChannelError('slug-taken', 'Канал с таким адресом уже есть');
             }
-            const snapshot: ChannelSnapshot = {
-                id: randomId('ch'),
+            const channel: Channel = {
+                channelId: randomId('ch'),
                 slug,
                 title: title.trim(),
                 createdAt: Date.now(),
-                members: [],
-                messages: [],
             };
-            state.channels[snapshot.id] = snapshot;
+            state.channels[channel.channelId] = { channel, members: [], messages: [] };
             writeState(state);
-            emit(snapshot.id, { type: 'channel-created', channel: snapshot });
-            return delay(snapshot);
+            emit(channel.channelId, { type: 'channel-created', channel });
+            return delay({ channel });
         },
 
-        updateChannel: async (channelId, { slug, title }) => {
+        updateChannel: async ({ channelId, channel: { slug, title } }) => {
             const state = readState();
             if (!isValidSlug(slug)) {
                 throw new ChannelError('slug-invalid', 'В адресе только латинские буквы, цифры и дефис');
@@ -244,15 +244,15 @@ export function createLocalBackend(): ChannelBackend {
                 throw new ChannelError('slug-taken', 'Канал с таким адресом уже есть');
             }
             const updated = mutate(channelId, (snapshot) => {
-                snapshot.slug = slug;
-                snapshot.title = title.trim();
-                return { ...snapshot };
+                snapshot.channel.slug = slug;
+                snapshot.channel.title = title.trim();
+                return { ...snapshot.channel };
             });
-            emit(channelId, { type: 'channel-updated', slug: updated.slug, title: updated.title });
-            return delay(updated);
+            emit(channelId, { type: 'channel-updated', channel: updated });
+            return delay({ channel: updated });
         },
 
-        join: async (channelId, draft) => {
+        join: async ({ channelId, member: draft }) => {
             const snapshot = requireChannel(channelId);
             if (snapshot.members.length >= MAX_MEMBERS) {
                 throw new ChannelError('channel-full', 'В канале уже пять кораблей');
@@ -265,7 +265,7 @@ export function createLocalBackend(): ChannelBackend {
                 throw new ChannelError('channel-full', 'На рейде не осталось свободного места');
             }
             const member: Member = {
-                id: randomId('m'),
+                memberId: randomId('m'),
                 name: draft.name.trim(),
                 hullNumber: draft.hullNumber.trim(),
                 shipKind: draft.shipKind,
@@ -278,15 +278,15 @@ export function createLocalBackend(): ChannelBackend {
             // Вход отмечается в ленте: корабль заплывает в кадр молча, и без строчки в чате
             // непонятно, кто пришёл. Текст складывает бэкенд — тогда он останется прежним,
             // даже если корабль потом сменит позывной.
-            postNotice(channelId, member.id, `${shipTitle(member)} встал на рейд`, member.joinedAt);
-            return delay(member);
+            postNotice(channelId, member.memberId, `${shipTitle(member)} встал на рейд`, member.joinedAt);
+            return delay({ member });
         },
 
-        updateMember: async (channelId, memberId, draft) => {
+        updateMember: async ({ channelId, memberId, member: draft }) => {
             checkDraftIsFree(requireChannel(channelId), draft, memberId);
             let before: Member | null = null;
             const updated = mutate(channelId, (current) => {
-                const member = current.members.find((item) => item.id === memberId);
+                const member = current.members.find((item) => item.memberId === memberId);
                 if (!member) {
                     throw new ChannelError('member-not-found', 'Такого корабля в канале нет');
                 }
@@ -301,18 +301,18 @@ export function createLocalBackend(): ChannelBackend {
             emit(channelId, { type: 'member-updated', member: updated });
             const text = before && refitNotice(before, updated);
             if (text) {
-                postNotice(channelId, updated.id, text, Date.now());
+                postNotice(channelId, updated.memberId, text, Date.now());
             }
-            return delay(updated);
+            return delay({ member: updated });
         },
 
-        moveShip: async (channelId, memberId) => {
+        moveShip: async ({ channelId, memberId }) => {
             const updated = mutate(channelId, (current) => {
-                const member = current.members.find((item) => item.id === memberId);
+                const member = current.members.find((item) => item.memberId === memberId);
                 if (!member) {
                     throw new ChannelError('member-not-found', 'Такого корабля в канале нет');
                 }
-                const others = current.members.filter((item) => item.id !== memberId).map((item) => item.place);
+                const others = current.members.filter((item) => item.memberId !== memberId).map((item) => item.place);
                 const place = moveShip(member.place, others);
                 if (place) {
                     member.place = place;
@@ -322,18 +322,18 @@ export function createLocalBackend(): ChannelBackend {
             // Событие шлём всегда, даже если места не нашлось: у всех вкладок сцена одна,
             // и решать, было движение или нет, они должны по данным, а не по молчанию.
             emit(channelId, { type: 'member-updated', member: updated });
-            return delay(updated);
+            return delay({ member: updated });
         },
 
-        leave: async (channelId, memberId) => {
+        leave: async ({ channelId, memberId }) => {
             // Кем корабль был, узнаём до того, как вычеркнем его: после вычёркивания
             // называть в строчке будет нечего.
             const gone = mutate(channelId, (snapshot) => {
-                const member = snapshot.members.find((item) => item.id === memberId) ?? null;
-                snapshot.members = snapshot.members.filter((item) => item.id !== memberId);
+                const member = snapshot.members.find((item) => item.memberId === memberId) ?? null;
+                snapshot.members = snapshot.members.filter((item) => item.memberId !== memberId);
                 return member;
             });
-            emit(channelId, { type: 'member-left', memberId });
+            emit(channelId, { type: 'member-left', member: { memberId } });
             if (gone) {
                 // «Сняться с рейда» — это и значит покинуть якорную стоянку: подняли якорь
                 // и пошли. Ровно то, что происходит в кадре, и ровно так об этом и говорят.
@@ -342,26 +342,34 @@ export function createLocalBackend(): ChannelBackend {
             return delay(undefined);
         },
 
-        sendMessage: async (channelId, draft) => {
+        sendMessage: async ({ channelId, memberId, message: draft }) => {
+            // Длину проверяет бэкенд, а не только форма: интерфейсов может стать больше одного,
+            // и правило должно жить там, где данные, а не там, где поле ввода.
+            if (draft.text.length > MAX_MESSAGE_LENGTH) {
+                throw new ChannelError(
+                    'message-too-long',
+                    `Максимум ${MAX_MESSAGE_LENGTH} символов, у вас ${draft.text.length}`
+                );
+            }
             const message: Message = {
-                id: randomId('msg'),
-                memberId: draft.memberId,
+                messageId: randomId('msg'),
+                author: { memberId },
                 text: draft.text,
-                threadId: draft.threadId,
+                thread: draft.thread,
                 sentAt: Date.now(),
             };
             mutate(channelId, (snapshot) => snapshot.messages.push(message));
             emit(channelId, { type: 'message-added', message });
-            return delay(message);
+            return delay({ message });
         },
 
-        setTyping: (channelId, memberId, chars) => {
+        setTyping: ({ channelId, memberId, typing }) => {
             // Мимо хранилища: печать нигде не оседает.
-            emit(channelId, { type: 'typing', memberId, chars });
+            emit(channelId, { type: 'typing', member: { memberId }, typing });
             return Promise.resolve();
         },
 
-        subscribe: (channelId, listener): Unsubscribe => {
+        subscribe: ({ channelId, onEvent: listener }): Unsubscribe => {
             const forChannel = listeners.get(channelId) ?? new Set();
             forChannel.add(listener);
             listeners.set(channelId, forChannel);

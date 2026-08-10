@@ -164,43 +164,43 @@ export default function SeaScene({ members, myId, morseFeeds, ready, onMoveShip 
 
     const known = useRef<Member[]>([]);
     if (ready && seenIds.current === null) {
-        seenIds.current = new Set(members.map((member) => member.id));
-        members.forEach((member) => shownById.current.set(member.id, member.place));
+        seenIds.current = new Set(members.map((member) => member.memberId));
+        members.forEach((member) => shownById.current.set(member.memberId, member.place));
     } else if (seenIds.current) {
         for (const member of members) {
-            if (!seenIds.current.has(member.id)) {
-                seenIds.current.add(member.id);
-                enteringIds.current.add(member.id);
-                shownById.current.set(member.id, member.place);
+            if (!seenIds.current.has(member.memberId)) {
+                seenIds.current.add(member.memberId);
+                enteringIds.current.add(member.memberId);
+                shownById.current.set(member.memberId, member.place);
             }
         }
         // Пропал из канала — значит вышел. Только пока канал открыт: на переходе на главную
         // корабли исчезают все разом, и провожать всю эскадру за горизонт незачем.
         if (ready) {
             for (const member of known.current) {
-                if (!members.some((item) => item.id === member.id)) {
-                    leavingById.current.set(member.id, member);
+                if (!members.some((item) => item.memberId === member.memberId)) {
+                    leavingById.current.set(member.memberId, member);
                 }
             }
         }
         // Место сменилось — значит корабль попросили переставить. Перезаходящих пропускаем:
         // у них новое место уже принято, они его отыгрывают.
         const relocated = members.filter((member) => {
-            const shown = shownById.current.get(member.id);
-            return shown && !relocatingIds.current.has(member.id) && shown.left !== member.place.left;
+            const shown = shownById.current.get(member.memberId);
+            return shown && !relocatingIds.current.has(member.memberId) && shown.left !== member.place.left;
         });
         for (const member of relocated) {
             // Место в списке заведомо есть: по нему этот корабль в список и попал.
-            const shown = shownById.current.get(member.id)!;
-            shownById.current.set(member.id, member.place);
+            const shown = shownById.current.get(member.memberId)!;
+            shownById.current.set(member.memberId, member.place);
             if (shown.slot === member.place.slot) {
                 // Свой слот, другой коридор: короткий ход поперёк кадра. Запоминаем, откуда
                 // корабль пошёл, — дальше стили доведут его до нынешней точки.
-                shiftById.current.set(member.id, shown.left);
+                shiftById.current.set(member.memberId, shown.left);
             } else {
                 // Другой слот: туда не переползают, туда перезаходят — уход, пауза, вход.
-                leavingById.current.set(member.id, { ...member, place: shown });
-                relocatingIds.current.add(member.id);
+                leavingById.current.set(member.memberId, { ...member, place: shown });
+                relocatingIds.current.add(member.memberId);
             }
         }
     }
@@ -208,8 +208,8 @@ export default function SeaScene({ members, myId, morseFeeds, ready, onMoveShip 
     for (const member of members) {
         // Вернулся тем же id (например, пока шла его же анимация ухода) — уходить он передумал.
         // Перезаходящего это не касается: его двойник в кадре как раз и есть он сам.
-        if (!relocatingIds.current.has(member.id)) {
-            leavingById.current.delete(member.id);
+        if (!relocatingIds.current.has(member.memberId)) {
+            leavingById.current.delete(member.memberId);
         }
     }
 
@@ -217,7 +217,7 @@ export default function SeaScene({ members, myId, morseFeeds, ready, onMoveShip 
     // Уходящие рисуются вместе со всеми: пока корабль в кадре, он такой же корабль.
     // Перезаходящий участник не рисуется на новом месте, пока не отработает уход со старого.
     const placed = [
-        ...members.filter((member) => !relocatingIds.current.has(member.id)),
+        ...members.filter((member) => !relocatingIds.current.has(member.memberId)),
         ...leavingById.current.values(),
     ].sort((a, b) => a.place.slot - b.place.slot);
 
@@ -226,7 +226,7 @@ export default function SeaScene({ members, myId, morseFeeds, ready, onMoveShip 
     // Каждому новому достаётся первый свободный момент, освободившиеся возвращаются в оборот, —
     // так корабли и не совпадают по фазе, и не зависят друг от друга.
     const waveStarts = waveStartById.current;
-    const aboard = new Set(placed.map((member) => member.id));
+    const aboard = new Set(placed.map((member) => member.memberId));
     for (const id of [...waveStarts.keys()]) {
         if (!aboard.has(id)) {
             waveStarts.delete(id);
@@ -234,12 +234,12 @@ export default function SeaScene({ members, myId, morseFeeds, ready, onMoveShip 
     }
     const takenStarts = new Set(waveStarts.values());
     for (const member of placed) {
-        if (!waveStarts.has(member.id)) {
+        if (!waveStarts.has(member.memberId)) {
             // Если кораблей вдруг больше, чем моментов, последний момент достаётся всем
             // оставшимся: два корабля пойдут в такт, что некрасиво, но не сломано.
             const free = WAVE_STARTS.findIndex((_, index) => !takenStarts.has(index));
             const start = free === -1 ? WAVE_STARTS.length - 1 : free;
-            waveStarts.set(member.id, start);
+            waveStarts.set(member.memberId, start);
             takenStarts.add(start);
         }
     }
@@ -366,10 +366,10 @@ export default function SeaScene({ members, myId, morseFeeds, ready, onMoveShip 
             {placed.map((member) => {
                 const depth = slotDepth(member.place.slot);
                 const width = shipWidthPercent(member.place.slot, member.shipKind);
-                const leaving = leavingById.current.has(member.id);
-                const entering = !leaving && enteringIds.current.has(member.id);
+                const leaving = leavingById.current.has(member.memberId);
+                const entering = !leaving && enteringIds.current.has(member.memberId);
                 // Откуда корабль пошёл, если он сейчас переходит в соседний коридор.
-                const shiftFrom = leaving ? undefined : shiftById.current.get(member.id);
+                const shiftFrom = leaving ? undefined : shiftById.current.get(member.memberId);
                 // Вид движения нужен и сам по себе, а не только как класс: по нему сцена
                 // помечает идущий корабль и понимает, что ход сменился на другой.
                 const motionKind =
@@ -383,7 +383,9 @@ export default function SeaScene({ members, myId, morseFeeds, ready, onMoveShip 
                     // Дорогу загораживают те, кто остаётся: сам себе корабль не помеха,
                     // и уходящий сосед тоже — он уже трогается с места.
                     placed
-                        .filter((other) => other.id !== member.id && !leavingById.current.has(other.id))
+                        .filter(
+                            (other) => other.memberId !== member.memberId && !leavingById.current.has(other.memberId)
+                        )
                         .map((other) => other.place)
                 );
                 const leaveLengths = lengthsToEdge(member.place.left, width, leave.side);
@@ -394,10 +396,10 @@ export default function SeaScene({ members, myId, morseFeeds, ready, onMoveShip 
                     shiftFrom !== undefined && shiftFrom > member.place.left !== (member.place.facing === 'left');
                 // Корабль на ходу приказов не принимает: щелчок посреди манёвра сорвал бы анимацию
                 // и швырнул корабль в конечную точку, откуда тот пошёл бы заново.
-                const canMove = member.id === myId && !leaving && !motion;
+                const canMove = member.memberId === myId && !leaving && !motion;
                 return (
                     <div
-                        key={member.id}
+                        key={member.memberId}
                         className={
                             [styles.shipSlot, motion, canMove ? styles.shipMine : ''].filter(Boolean).join(' ') ||
                             undefined
@@ -406,8 +408,8 @@ export default function SeaScene({ members, myId, morseFeeds, ready, onMoveShip 
                         // но распоряжаться там можно только собой.
                         onClick={canMove ? onMoveShip : undefined}
                         title={canMove ? 'Сменить место на рейде' : undefined}
-                        onAnimationEnd={motion ? () => finishMotion(member.id) : undefined}
-                        data-ship={motionKind ? member.id : undefined}
+                        onAnimationEnd={motion ? () => finishMotion(member.memberId) : undefined}
+                        data-ship={motionKind ? member.memberId : undefined}
                         data-motion={motionKind || undefined}
                         style={
                             {
@@ -446,7 +448,7 @@ export default function SeaScene({ members, myId, morseFeeds, ready, onMoveShip 
                                 {
                                     // Минус — момент старта в прошлом: корабль появляется уже качающимся.
                                     // Отсюда же CSS считает задержку тангажа, отняв четверть цикла.
-                                    '--wave-start': `-${WAVE_STARTS[waveStarts.get(member.id) ?? 0].toFixed(2)}s`,
+                                    '--wave-start': `-${WAVE_STARTS[waveStarts.get(member.memberId) ?? 0].toFixed(2)}s`,
                                     '--heave': `${heaveAmplitude(depth).toFixed(2)}px`,
                                     // Крутизна волны идёт от её высоты, поэтому угол считаем из неё,
                                     // а не из хода корпуса: осадка корабля уклон воды не меняет.
@@ -468,9 +470,9 @@ export default function SeaScene({ members, myId, morseFeeds, ready, onMoveShip 
                                 name={member.name}
                                 hullNumber={member.hullNumber}
                                 facing={member.place.facing}
-                                active={member.id === myId}
+                                active={member.memberId === myId}
                                 depth={depth}
-                                morseFeed={morseFeeds[member.id] ?? null}
+                                morseFeed={morseFeeds[member.memberId] ?? null}
                             />
                         </div>
                     </div>

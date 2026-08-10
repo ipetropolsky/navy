@@ -42,10 +42,11 @@ export default function MessageList({ messages, members, myId, onReply }: Messag
         }
     }, [messages.length]);
 
-    const byId = new Map(members.map((member) => [member.id, member]));
+    const byId = new Map(members.map((member) => [member.memberId, member]));
     // По кому группировать подряд идущие сообщения. Системная запись не группируется ни с чем:
     // иначе реплика вошедшего прилипла бы к строчке о его входе и осталась без подписи.
-    const groupKey = (message: Message): string => (message.kind === 'system' ? message.id : message.memberId);
+    const groupKey = (message: Message): string =>
+        message.kind === 'system' ? message.messageId : message.author.memberId;
     // Цвет позывного выбирает сам участник, поэтому он лежит в его данных, а не считается здесь.
     const colorOf = (memberId: string): string => byId.get(memberId)?.color ?? 'var(--color-text-muted)';
 
@@ -55,24 +56,25 @@ export default function MessageList({ messages, members, myId, onReply }: Messag
             {messages.map((message, index) => {
                 if (message.kind === 'system') {
                     return (
-                        <div key={message.id} className={styles.systemChip}>
+                        <div key={message.messageId} className={styles.systemChip}>
                             {emphasise(message.text)}
                         </div>
                     );
                 }
 
-                const own = message.memberId === myId;
-                const author = byId.get(message.memberId);
+                const own = message.author.memberId === myId;
+                const author = byId.get(message.author.memberId);
                 const prev = messages[index - 1];
                 const next = messages[index + 1];
                 const firstOfGroup = !prev || groupKey(prev) !== groupKey(message);
                 const lastOfGroup = !next || groupKey(next) !== groupKey(message);
-                const replyTo = message.threadId
-                    ? messages.find((candidate) => candidate.id === message.threadId)
+                const thread = message.thread;
+                const replyTo = thread
+                    ? messages.find((candidate) => candidate.messageId === thread.messageId)
                     : undefined;
 
                 return (
-                    <div key={message.id} className={own ? styles.rowOwn : styles.row}>
+                    <div key={message.messageId} className={own ? styles.rowOwn : styles.row}>
                         {!own && (
                             <div className={styles.avatarCell}>
                                 {lastOfGroup && author && (
@@ -89,14 +91,20 @@ export default function MessageList({ messages, members, myId, onReply }: Messag
                             title="Ответить"
                         >
                             {!own && firstOfGroup && author && (
-                                <span className={styles.author} style={{ color: colorOf(author.id) }}>
+                                <span className={styles.author} style={{ color: colorOf(author.memberId) }}>
                                     {author.name}
                                 </span>
                             )}
                             {replyTo && (
-                                <span className={styles.replyQuote} style={{ borderColor: colorOf(replyTo.memberId) }}>
-                                    <span className={styles.replyAuthor} style={{ color: colorOf(replyTo.memberId) }}>
-                                        {byId.get(replyTo.memberId)?.name}
+                                <span
+                                    className={styles.replyQuote}
+                                    style={{ borderColor: colorOf(replyTo.author.memberId) }}
+                                >
+                                    <span
+                                        className={styles.replyAuthor}
+                                        style={{ color: colorOf(replyTo.author.memberId) }}
+                                    >
+                                        {byId.get(replyTo.author.memberId)?.name}
                                     </span>
                                     <span className={styles.replyText}>{replyTo.text}</span>
                                 </span>

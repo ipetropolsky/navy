@@ -35,7 +35,7 @@ export interface ChannelController {
     /** Переставить свой корабль на другое место на рейде. */
     moveShip: () => Promise<void>;
     leave: () => Promise<void>;
-    sendMessage: (draft: Omit<MessageDraft, 'memberId'>) => Promise<void>;
+    sendMessage: (draft: MessageDraft) => Promise<void>;
     reportTyping: (chars: string) => void;
 }
 
@@ -58,7 +58,7 @@ export function useChannel(slug: string | null, memberIdFromUrl: string | null):
         } else {
             setLoading(true);
             void backend
-                .getChannelBySlug(slug)
+                .getChannelBySlug({ slug })
                 .then((snapshot) => {
                     if (!alive) {
                         return;
@@ -70,8 +70,8 @@ export function useChannel(slug: string | null, memberIdFromUrl: string | null):
                     }
                     // Адрес важнее сохранённого: так соседняя вкладка говорит за другой корабль.
                     // Личность привязана к channelId, а не к slug: адрес канала может смениться.
-                    const candidate = memberIdFromUrl ?? readMemberId(snapshot.id);
-                    const aboard = snapshot.members.some((member) => member.id === candidate);
+                    const candidate = memberIdFromUrl ?? readMemberId(snapshot.channel.channelId);
+                    const aboard = snapshot.members.some((member) => member.memberId === candidate);
                     // Корабль мог выйти из другой вкладки, пока эта была закрыта.
                     setMyId(aboard ? candidate : null);
                 })
@@ -87,7 +87,7 @@ export function useChannel(slug: string | null, memberIdFromUrl: string | null):
     }, [slug, memberIdFromUrl]);
 
     // Дальше всё адресуется основным идентификатором канала, а не адресом из ссылки.
-    const channelId = channel?.id ?? null;
+    const channelId = channel?.channel.channelId ?? null;
 
     // Подписка живёт, пока открыт канал. Незнакомые события молча пропускаем —
     // так добавление новых типов не потребует правок здесь.
@@ -97,26 +97,29 @@ export function useChannel(slug: string | null, memberIdFromUrl: string | null):
         }
         const applyEvent = (event: ChannelEvent): void => {
             setChannel((current) => {
-                if (current?.id !== event.channelId) {
+                if (current?.channel.channelId !== event.channelId) {
                     return current;
                 }
                 switch (event.type) {
                     case 'channel-updated':
-                        return { ...current, slug: event.slug, title: event.title };
+                        return { ...current, channel: event.channel };
                     case 'member-joined':
                         return { ...current, members: [...current.members, event.member] };
                     case 'member-updated':
                         return {
                             ...current,
                             members: current.members.map((member) =>
-                                member.id === event.member.id ? event.member : member
+                                member.memberId === event.member.memberId ? event.member : member
                             ),
                         };
                     case 'member-left':
-                        return { ...current, members: current.members.filter((m) => m.id !== event.memberId) };
+                        return {
+                            ...current,
+                            members: current.members.filter((item) => item.memberId !== event.member.memberId),
+                        };
                     case 'message-added':
                         // Повтор возможен, если событие придёт дважды: по id и отсекаем.
-                        return current.messages.some((message) => message.id === event.message.id)
+                        return current.messages.some((message) => message.messageId === event.message.messageId)
                             ? current
                             : { ...current, messages: [...current.messages, event.message] };
                     default:
@@ -125,25 +128,31 @@ export function useChannel(slug: string | null, memberIdFromUrl: string | null):
             });
         };
 
-        return backend.subscribe(channelId, (event: ChannelEvent) => {
-            if (event.type === 'typing') {
-                setTyping({ memberId: event.memberId, feed: { seq: event.at, text: event.chars } });
-                window.clearTimeout(typingTimerRef.current);
-                typingTimerRef.current = window.setTimeout(() => setTyping(null), TYPING_IDLE_MS);
-                return;
-            }
-            // Применяем в том же такте, в котором пришло событие, а не когда до отрисовки
-            // дойдёт очередь. Это важно для вкладки в фоне: доставку самого события браузер
-            // не придерживает, а вот отложенную работу — вполне, и новость о вошедшем корабле
-            // повисала бы до возвращения на вкладку.
-            flushSync(() => applyEvent(event));
+        return backend.subscribe({
+            channelId,
+            onEvent: (event: ChannelEvent) => {
+                if (event.type === 'typing') {
+                    setTyping({
+                        memberId: event.member.memberId,
+                        feed: { seq: event.at, text: event.typing.chars },
+                    });
+                    window.clearTimeout(typingTimerRef.current);
+                    typingTimerRef.current = window.setTimeout(() => setTyping(null), TYPING_IDLE_MS);
+                    return;
+                }
+                // Применяем в том же такте, в котором пришло событие, а не когда до отрисовки
+                // дойдёт очередь. Это важно для вкладки в фоне: доставку самого события браузер
+                // не придерживает, а вот отложенную работу — вполне, и новость о вошедшем корабле
+                // повисала бы до возвращения на вкладку.
+                flushSync(() => applyEvent(event));
+            },
         });
     }, [channelId]);
 
     // Корабль вышел (например, из другой вкладки) — эта вкладка возвращается к постановке в строй.
     useEffect(() => {
-        if (channel && myId && !channel.members.some((member) => member.id === myId)) {
-            forgetMemberId(channel.id);
+        if (channel && myId && !channel.members.some((member) => member.memberId === myId)) {
+            forgetMemberId(channel.channel.channelId);
             setMyId(null);
         }
     }, [channel, myId]);
@@ -155,9 +164,9 @@ export function useChannel(slug: string | null, memberIdFromUrl: string | null):
             if (!channelId) {
                 return;
             }
-            const member = await backend.join(channelId, draft);
-            rememberMemberId(channelId, member.id);
-            setMyId(member.id);
+            const { member } = await backend.join({ channelId, member: draft });
+            rememberMemberId(channelId, member.memberId);
+            setMyId(member.memberId);
         },
         [channelId]
     );
@@ -165,7 +174,7 @@ export function useChannel(slug: string | null, memberIdFromUrl: string | null):
     const updateMe = useCallback(
         async (draft: MemberDraft) => {
             if (channelId && myId) {
-                await backend.updateMember(channelId, myId, draft);
+                await backend.updateMember({ channelId, memberId: myId, member: draft });
             }
         },
         [channelId, myId]
@@ -177,22 +186,22 @@ export function useChannel(slug: string | null, memberIdFromUrl: string | null):
      */
     const moveShip = useCallback(async () => {
         if (channelId && myId) {
-            await backend.moveShip(channelId, myId);
+            await backend.moveShip({ channelId, memberId: myId });
         }
     }, [channelId, myId]);
 
     const leave = useCallback(async () => {
         if (channelId && myId) {
-            await backend.leave(channelId, myId);
+            await backend.leave({ channelId, memberId: myId });
             forgetMemberId(channelId);
             setMyId(null);
         }
     }, [channelId, myId]);
 
     const sendMessage = useCallback(
-        async (draft: Omit<MessageDraft, 'memberId'>) => {
+        async (draft: MessageDraft) => {
             if (channelId && myId) {
-                await backend.sendMessage(channelId, { ...draft, memberId: myId });
+                await backend.sendMessage({ channelId, memberId: myId, message: draft });
             }
         },
         [channelId, myId]
@@ -201,7 +210,7 @@ export function useChannel(slug: string | null, memberIdFromUrl: string | null):
     const reportTyping = useCallback(
         (chars: string) => {
             if (channelId && myId) {
-                void backend.setTyping(channelId, myId, chars);
+                void backend.setTyping({ channelId, memberId: myId, typing: { chars } });
             }
         },
         [channelId, myId]
