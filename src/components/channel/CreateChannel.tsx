@@ -1,6 +1,9 @@
 import { SyntheticEvent, useState } from 'react';
 
 import { ChannelDraft, ChannelError } from '@/backend';
+import { useSnackbar } from '@/components/ui/Snackbar';
+import { channelLink } from '@/routing';
+import { copyText } from '@/utils/clipboard';
 import { SLUG_MAX_LENGTH, isValidSlug, slugify, slugifyInput } from '@/utils/slug';
 
 import styles from './CreateChannel.module.less';
@@ -25,7 +28,7 @@ export default function CreateChannel({ onCreate, demoHref, onOpenDemo }: Create
     const [slugEdited, setSlugEdited] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [busy, setBusy] = useState(false);
-    const [copied, setCopied] = useState(false);
+    const notify = useSnackbar();
 
     const handleTitleChange = (nextTitle: string) => {
         setTitle(nextTitle);
@@ -43,19 +46,11 @@ export default function CreateChannel({ onCreate, demoHref, onOpenDemo }: Create
 
     const slugOk = isValidSlug(slug);
     const canSubmit = Boolean(title.trim()) && slugOk;
-    // Адрес будущего канала целиком: страница та же, меняется только параметр.
-    const channelUrl = `${window.location.origin}${window.location.pathname}?channel=${slug}`;
 
     const handleCopy = () => {
-        // Буфер обмена доступен не везде — например, в iframe без разрешения. Тогда молчим:
-        // сообщение «скопирована» покажем только если копирование действительно вышло.
-        void navigator.clipboard
-            ?.writeText(channelUrl)
-            .then(() => {
-                setCopied(true);
-                window.setTimeout(() => setCopied(false), 1800);
-            })
-            .catch(() => undefined);
+        void copyText(channelLink(slug)).then((done) =>
+            notify(done ? 'Ссылка на канал скопирована' : 'Не вышло скопировать ссылку')
+        );
     };
 
     const handleSubmit = async (event: SyntheticEvent) => {
@@ -77,7 +72,7 @@ export default function CreateChannel({ onCreate, demoHref, onOpenDemo }: Create
     return (
         <form className={styles.card} onSubmit={handleSubmit}>
             {/* Название сервиса уже стоит в шапке над сценой, здесь — про действие. */}
-            <h1 className={styles.heading}>Канал связи</h1>
+            <h1 className={styles.heading}>Создать канал</h1>
             <p className={styles.hint}>
                 Заведи свой канал связи, поставь корабль на рейд и позови остальных, отправив им адрес.
             </p>
@@ -128,7 +123,6 @@ export default function CreateChannel({ onCreate, demoHref, onOpenDemo }: Create
                         </svg>
                     </button>
                 </span>
-                {copied && <span className={styles.copied}>Ссылка скопирована</span>}
             </label>
 
             {error && <div className={styles.error}>{error}</div>}

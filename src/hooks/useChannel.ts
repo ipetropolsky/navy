@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 
 import { ChannelEvent, ChannelSnapshot, MemberDraft, MessageDraft, backend } from '@/backend';
 import { forgetMemberId, readMemberId, rememberMemberId } from '@/backend/identity';
@@ -94,13 +95,7 @@ export function useChannel(slug: string | null, memberIdFromUrl: string | null):
         if (!channelId) {
             return undefined;
         }
-        return backend.subscribe(channelId, (event: ChannelEvent) => {
-            if (event.type === 'typing') {
-                setTyping({ memberId: event.memberId, feed: { seq: event.at, text: event.chars } });
-                window.clearTimeout(typingTimerRef.current);
-                typingTimerRef.current = window.setTimeout(() => setTyping(null), TYPING_IDLE_MS);
-                return;
-            }
+        const applyEvent = (event: ChannelEvent): void => {
             setChannel((current) => {
                 if (current?.id !== event.channelId) {
                     return current;
@@ -128,6 +123,20 @@ export function useChannel(slug: string | null, memberIdFromUrl: string | null):
                         return current;
                 }
             });
+        };
+
+        return backend.subscribe(channelId, (event: ChannelEvent) => {
+            if (event.type === 'typing') {
+                setTyping({ memberId: event.memberId, feed: { seq: event.at, text: event.chars } });
+                window.clearTimeout(typingTimerRef.current);
+                typingTimerRef.current = window.setTimeout(() => setTyping(null), TYPING_IDLE_MS);
+                return;
+            }
+            // Применяем в том же такте, в котором пришло событие, а не когда до отрисовки
+            // дойдёт очередь. Это важно для вкладки в фоне: доставку самого события браузер
+            // не придерживает, а вот отложенную работу — вполне, и новость о вошедшем корабле
+            // повисала бы до возвращения на вкладку.
+            flushSync(() => applyEvent(event));
         });
     }, [channelId]);
 

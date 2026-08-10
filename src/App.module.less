@@ -70,6 +70,27 @@
     text-shadow: 0 1px 6px rgba(0, 0, 0, 0.7);
 }
 
+// Тот же заголовок, но нажимаемый: копирует ссылку на канал. Выглядеть кнопкой он не должен —
+// это по-прежнему название чата, поэтому от кнопки берём только поведение.
+.chatTitleButton {
+    .chatTitle();
+
+    display: block;
+    max-width: 100%;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font-family: 'Roboto Slab', serif;
+    text-align: left;
+    cursor: pointer;
+
+    &:hover {
+        color: var(--color-accent);
+    }
+}
+
 .chatStatus {
     overflow: hidden;
     white-space: nowrap;
@@ -77,6 +98,13 @@
     color: var(--color-accent);
     font-size: 13px;
     text-shadow: 0 1px 6px rgba(0, 0, 0, 0.7);
+}
+
+// Кнопки шапки стоят вплотную: между ними отступа нет, потому что это один блок действий.
+.headerActions {
+    flex: none;
+    display: flex;
+    align-items: flex-start;
 }
 
 .headerButton {

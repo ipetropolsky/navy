@@ -31,6 +31,9 @@ export default function MessageList({ messages, members, myId, onReply }: Messag
     }, [messages.length]);
 
     const byId = new Map(members.map((member) => [member.id, member]));
+    // По кому группировать подряд идущие сообщения. Системная запись не группируется ни с чем:
+    // иначе реплика вошедшего прилипла бы к строчке о его входе и осталась без подписи.
+    const groupKey = (message: Message): string => (message.kind === 'system' ? message.id : message.memberId);
     // Цвет позывного выбирает сам участник, поэтому он лежит в его данных, а не считается здесь.
     const colorOf = (memberId: string): string => byId.get(memberId)?.color ?? 'var(--color-text-muted)';
 
@@ -38,12 +41,20 @@ export default function MessageList({ messages, members, myId, onReply }: Messag
         <div ref={listRef} className={styles.list}>
             {messages.length > 0 && <div className={styles.dateChip}>{formatDate(messages[0].sentAt)}</div>}
             {messages.map((message, index) => {
+                if (message.kind === 'system') {
+                    return (
+                        <div key={message.id} className={styles.systemChip}>
+                            {message.text}
+                        </div>
+                    );
+                }
+
                 const own = message.memberId === myId;
                 const author = byId.get(message.memberId);
                 const prev = messages[index - 1];
                 const next = messages[index + 1];
-                const firstOfGroup = prev?.memberId !== message.memberId;
-                const lastOfGroup = next?.memberId !== message.memberId;
+                const firstOfGroup = !prev || groupKey(prev) !== groupKey(message);
+                const lastOfGroup = !next || groupKey(next) !== groupKey(message);
                 const replyTo = message.threadId
                     ? messages.find((candidate) => candidate.id === message.threadId)
                     : undefined;

@@ -232,6 +232,18 @@ export function createLocalBackend(): ChannelBackend {
             };
             mutate(channelId, (current) => current.members.push(member));
             emit(channelId, { type: 'member-joined', member });
+            // Вход отмечается в ленте: корабль заплывает в кадр молча, и без строчки в чате
+            // непонятно, кто пришёл. Текст складывает бэкенд — тогда он останется прежним,
+            // даже если корабль потом сменит позывной.
+            const notice: Message = {
+                id: randomId('msg'),
+                memberId: member.id,
+                kind: 'system',
+                text: `«${member.name}» ${member.hullNumber} встал на рейд`,
+                sentAt: member.joinedAt,
+            };
+            mutate(channelId, (current) => current.messages.push(notice));
+            emit(channelId, { type: 'message-added', message: notice });
             return delay(member);
         },
 

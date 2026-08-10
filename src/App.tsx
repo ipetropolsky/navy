@@ -8,9 +8,11 @@ import MemberForm from '@/components/channel/MemberForm';
 import MembersSheet from '@/components/channel/MembersSheet';
 import Composer from '@/components/chat/Composer';
 import MessageList from '@/components/chat/MessageList';
+import { useSnackbar } from '@/components/ui/Snackbar';
 import { useChannel } from '@/hooks/useChannel';
-import { useRoute } from '@/routing';
+import { channelLink, useRoute } from '@/routing';
 import { Message, MorseFeed } from '@/types/channel';
+import { copyText } from '@/utils/clipboard';
 
 import styles from './App.module.less';
 
@@ -33,6 +35,7 @@ export default function App() {
     const [replyTo, setReplyTo] = useState<Message | null>(null);
     const [sheetOpen, setSheetOpen] = useState(false);
     const [editing, setEditing] = useState(false);
+    const notify = useSnackbar();
 
     const members = channel?.members ?? [];
     const me = members.find((member) => member.id === myId) ?? null;
@@ -68,9 +71,19 @@ export default function App() {
         setReplyTo(null);
     };
 
+    const handleCopyLink = () => {
+        if (channel) {
+            void copyText(channelLink(channel.slug)).then((done) =>
+                notify(done ? 'Ссылка на канал скопирована' : 'Не вышло скопировать ссылку')
+            );
+        }
+    };
+
     const status = (): string => {
         if (!channel) {
-            return route.channel ? 'канал не найден' : 'канал не выбран';
+            // На главной канала нет и статусу неоткуда взяться — там строчка работает
+            // подзаголовком сервиса.
+            return route.channel ? 'канал не найден' : 'Ночной морской чат';
         }
         if (typingMember) {
             return `«${typingMember.name}» передаёт…`;
@@ -95,42 +108,58 @@ export default function App() {
                 </div>
                 <div className={styles.headerBar}>
                     <div className={styles.headerInfo}>
-                        <div className={styles.chatTitle}>{channel?.title ?? 'Кильватер'}</div>
+                        {/* Название канала — это и кнопка «позвать остальных»: по нажатию
+                            ссылка уходит в буфер. Показывать сам адрес негде, он длинный. */}
+                        {channel ? (
+                            <button
+                                type="button"
+                                className={styles.chatTitleButton}
+                                onClick={handleCopyLink}
+                                title="Скопировать ссылку на канал"
+                            >
+                                {channel.title}
+                            </button>
+                        ) : (
+                            <div className={styles.chatTitle}>Кильватер</div>
+                        )}
                         <div className={styles.chatStatus}>{loading ? 'связь…' : status()}</div>
                     </div>
-                    {inChat && (
-                        <button
-                            type="button"
-                            className={styles.headerButton}
-                            onClick={() => setSheetOpen(true)}
-                            aria-label="Корабли на связи"
-                        >
-                            <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
-                                <path
-                                    d="M9 11a3.2 3.2 0 1 0 0-6.4A3.2 3.2 0 0 0 9 11zm7 .4a2.7 2.7 0 1 0 0-5.4 2.7 2.7 0 0 0 0 5.4zM9 13c-3 0-6 1.5-6 3.6V19h12v-2.4C15 14.5 12 13 9 13zm7 .8c-.5 0-1 .05-1.5.16 1.1.86 1.8 1.96 1.8 3.24V19H22v-2c0-1.8-2.6-3.2-6-3.2z"
-                                    fill="currentColor"
-                                />
-                            </svg>
-                        </button>
-                    )}
-                    {/* Плюс уводит на главную: там и создаётся следующий канал связи. */}
-                    {channel && (
-                        <button
-                            type="button"
-                            className={styles.headerButton}
-                            onClick={route.openHome}
-                            aria-label="Новый канал связи"
-                        >
-                            <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
-                                <path
-                                    d="M12 5v14M5 12h14"
-                                    stroke="currentColor"
-                                    strokeWidth="2.2"
-                                    strokeLinecap="round"
-                                />
-                            </svg>
-                        </button>
-                    )}
+                    {/* Кнопки идут вплотную: это один блок действий, а не два разных. */}
+                    <div className={styles.headerActions}>
+                        {inChat && (
+                            <button
+                                type="button"
+                                className={styles.headerButton}
+                                onClick={() => setSheetOpen(true)}
+                                aria-label="Корабли на связи"
+                            >
+                                <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+                                    <path
+                                        d="M9 11a3.2 3.2 0 1 0 0-6.4A3.2 3.2 0 0 0 9 11zm7 .4a2.7 2.7 0 1 0 0-5.4 2.7 2.7 0 0 0 0 5.4zM9 13c-3 0-6 1.5-6 3.6V19h12v-2.4C15 14.5 12 13 9 13zm7 .8c-.5 0-1 .05-1.5.16 1.1.86 1.8 1.96 1.8 3.24V19H22v-2c0-1.8-2.6-3.2-6-3.2z"
+                                        fill="currentColor"
+                                    />
+                                </svg>
+                            </button>
+                        )}
+                        {/* Плюс уводит на главную: там и создаётся следующий канал связи. */}
+                        {channel && (
+                            <button
+                                type="button"
+                                className={styles.headerButton}
+                                onClick={route.openHome}
+                                aria-label="Новый канал связи"
+                            >
+                                <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+                                    <path
+                                        d="M12 5v14M5 12h14"
+                                        stroke="currentColor"
+                                        strokeWidth="2.2"
+                                        strokeLinecap="round"
+                                    />
+                                </svg>
+                            </button>
+                        )}
+                    </div>
                 </div>
             </header>
             <main className={styles.panel}>

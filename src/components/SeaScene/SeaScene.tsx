@@ -1,4 +1,4 @@
-import { CSSProperties, useEffect, useReducer, useRef, useState } from 'react';
+import { CSSProperties, useEffect, useLayoutEffect, useReducer, useRef, useState } from 'react';
 
 import cloudFarUrl from '@/assets/scene/cloud-1.png';
 import cloudNearUrl from '@/assets/scene/cloud-2.png';
@@ -75,6 +75,13 @@ const preload = (url: string): Promise<void> =>
         image.onerror = () => resolve();
         image.src = url;
     });
+
+/** Класс с анимацией под каждый вид движения. У стоящего корабля движения нет. */
+const MOTION_CLASS: Record<string, string> = {
+    leaving: styles.shipLeaving,
+    entering: styles.shipEntering,
+    shifting: styles.shipShifting,
+};
 
 /**
  * Плитка воды: снимки ряби линейно перетекают друг в друга по кругу, сама сцена
@@ -251,6 +258,52 @@ export default function SeaScene({ members, myId, morseFeeds, ready, onMoveShip 
         }
     }
 
+    // Пока вкладка в фоне, браузер не рисует кадров, и анимации в ней стоят. Само событие
+    // доходит вовремя — useChannel применяет его сразу, — и разметка обновляется, а движение
+    // ждёт возвращения на вкладку и начинается с нуля. Поэтому каждому начатому ходу
+    // запоминаем момент старта и, вернувшись, подводим анимации по настоящему времени:
+    // корабль, вошедший минуту назад, должен уже стоять на рейде, а не заходить на глазах.
+    const sceneRef = useRef<HTMLDivElement>(null);
+    const motionStartedAt = useRef(new Map<string, { kind: string; at: number }>());
+
+    /** Все идущие сейчас корабли: id движения и элемент слота. */
+    const movingShips = (): { id: string; kind: string; element: HTMLElement }[] =>
+        [...(sceneRef.current?.querySelectorAll<HTMLElement>('[data-motion]') ?? [])].map((element) => ({
+            id: element.dataset.ship ?? '',
+            kind: element.dataset.motion ?? '',
+            element,
+        }));
+
+    // Отметку ставим в layout-эффекте, до кадра: он выполняется и в фоновой вкладке, поэтому
+    // момент старта запоминается настоящий, а не тот, в который на вкладку вернулись.
+    useLayoutEffect(() => {
+        const now = Date.now();
+        movingShips().forEach(({ id, kind }) => {
+            if (motionStartedAt.current.get(id)?.kind !== kind) {
+                motionStartedAt.current.set(id, { kind, at: now });
+            }
+        });
+    });
+
+    useEffect(() => {
+        const resync = (): void => {
+            if (document.visibilityState !== 'visible') {
+                return;
+            }
+            const now = Date.now();
+            movingShips().forEach(({ id, kind, element }) => {
+                const started = motionStartedAt.current.get(id);
+                if (started?.kind === kind) {
+                    element.getAnimations().forEach((animation) => {
+                        animation.currentTime = now - started.at;
+                    });
+                }
+            });
+        };
+        document.addEventListener('visibilitychange', resync);
+        return () => document.removeEventListener('visibilitychange', resync);
+    });
+
     /**
      * Движение отработало. Класс снимаем всегда — иначе следующее движение того же корабля
      * не запустится: одна и та же анимация повторно не стартует, пока класс висит на месте.
@@ -259,6 +312,7 @@ export default function SeaScene({ members, myId, morseFeeds, ready, onMoveShip 
      * то ждёт за кромкой паузу и появляется на новом месте — заходом, как новичок.
      */
     const finishMotion = (id: string): void => {
+        motionStartedAt.current.delete(id);
         enteringIds.current.delete(id);
         shiftById.current.delete(id);
         if (!leavingById.current.has(id)) {
@@ -299,7 +353,7 @@ export default function SeaScene({ members, myId, morseFeeds, ready, onMoveShip 
     };
 
     return (
-        <div className={painted ? `${styles.scene} ${styles.scenePainted}` : styles.scene}>
+        <div className={painted ? `${styles.scene} ${styles.scenePainted}` : styles.scene} ref={sceneRef}>
             <div className={styles.sky}>
                 {/* Небо-текстура: соседние плитки зеркальны друг другу, поэтому стыки незаметны. */}
                 <div className={styles.skyStrip}>
@@ -328,11 +382,11 @@ export default function SeaScene({ members, myId, morseFeeds, ready, onMoveShip 
                 const entering = !leaving && enteringIds.current.has(member.id);
                 // Откуда корабль пошёл, если он сейчас переходит в соседний коридор.
                 const shiftFrom = leaving ? undefined : shiftById.current.get(member.id);
-                const motion =
-                    (leaving && styles.shipLeaving) ||
-                    (entering && styles.shipEntering) ||
-                    (shiftFrom !== undefined && styles.shipShifting) ||
-                    '';
+                // Вид движения нужен и сам по себе, а не только как класс: по нему сцена
+                // помечает идущий корабль и понимает, что ход сменился на другой.
+                const motionKind =
+                    (leaving && 'leaving') || (entering && 'entering') || (shiftFrom !== undefined && 'shifting') || '';
+                const motion = motionKind ? MOTION_CLASS[motionKind] : '';
                 // Заход: с той стороны, откуда пришёл, ровно до кромки кадра и ни шагом дальше.
                 const enterLengths = lengthsToEdge(member.place.left, width, member.place.enterFrom);
                 // Уход: вперёд, а если нос смотрит в остров — задним ходом в другую сторону.
@@ -358,6 +412,8 @@ export default function SeaScene({ members, myId, morseFeeds, ready, onMoveShip 
                         onClick={canMove ? onMoveShip : undefined}
                         title={canMove ? 'Сменить место на рейде' : undefined}
                         onAnimationEnd={motion ? () => finishMotion(member.id) : undefined}
+                        data-ship={motionKind ? member.id : undefined}
+                        data-motion={motionKind || undefined}
                         style={
                             {
                                 ...slotStyle(member, width),

@@ -1,0 +1,54 @@
+// Уведомление внизу экрана. Ширина по содержимому, поэтому короткое сообщение не растягивается
+// в полосу через весь экран. Поднято над нижним краем на высоту поля ввода: под ним лента
+// и композер, и перекрывать их снекбару незачем.
+.snackbar {
+    position: fixed;
+    left: 50%;
+    bottom: 78px;
+    z-index: 20;
+    max-width: min(92vw, 420px);
+    padding: 10px 16px;
+    border-radius: 10px;
+    background: rgba(12, 30, 48, 0.96);
+    box-shadow:
+        0 0 0 1px var(--color-border),
+        0 8px 24px rgba(0, 0, 0, 0.45);
+    color: var(--color-text);
+    font-size: 14px;
+    line-height: 1.35;
+    text-align: center;
+    pointer-events: none;
+    // Смещение к центру живёт в анимации вместе с подъёмом, поэтому здесь его нет:
+    // иначе transform из ключевых кадров затёр бы центровку.
+    animation: snackbar-in 0.22s ease-out both;
+}
+
+.snackbarLeaving {
+    .snackbar();
+
+    animation: snackbar-out 0.22s ease-in both;
+}
+
+@keyframes snackbar-in {
+    from {
+        opacity: 0;
+        transform: translate(-50%, 12px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translate(-50%, 0);
+    }
+}
+
+@keyframes snackbar-out {
+    from {
+        opacity: 1;
+        transform: translate(-50%, 0);
+    }
+
+    to {
+        opacity: 0;
+        transform: translate(-50%, 8px);
+    }
+}

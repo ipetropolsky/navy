@@ -27,6 +27,13 @@ const routeToUrl = (slug: string | null): string => {
     return url.toString();
 };
 
+/**
+ * Ссылка на канал целиком — та, которой зовут остальных. Собирается тут же, где разбирается
+ * адрес: иначе однажды разъедутся.
+ */
+export const channelLink = (slug: string): string =>
+    `${window.location.origin}${window.location.pathname}?channel=${encodeURIComponent(slug)}`;
+
 /** Адрес и состояние всегда сходятся: назад в браузере работает сам собой. */
 export function useRoute(): Route & { openChannel: (slug: string) => void; openHome: () => void } {
     const [route, setRoute] = useState<Route>(readRoute);
