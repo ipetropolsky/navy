@@ -1,0 +1,429 @@
+[
+  {
+    "project": "201M",
+    "name": "Противолодочный катер проекта 201М",
+    "class": "противолодочный катер",
+    "country": "СССР",
+    "rank": 4,
+    "rankUncertain": true,
+    "dimensions": {
+      "lengthM": 42.0,
+      "beamM": 6.09,
+      "draftM": 1.86,
+      "sideHeightM": null,
+      "airDraftM": null
+    },
+    "displacementT": {
+      "standard": 191.0,
+      "full": 219.0
+    },
+    "crew": 27,
+    "maxSpeedKt": 27.0,
+    "production": {
+      "from": 1958,
+      "to": 1967
+    },
+    "service": {
+      "from": null,
+      "to": 1990,
+      "note": "Служили в 1980-х, отдельные корабли до начала 1990-х"
+    },
+    "roles": ["поиск подводных лодок", "противолодочная оборона", "патрулирование"],
+    "armament": [
+      "2 × 2 25-мм артиллерийские установки 2М-3М",
+      "4 × 5 реактивных бомбомётов РБУ-1200",
+      "глубинные бомбы",
+      "морские мины"
+    ],
+    "natoClass": "SO-1",
+    "caspianRelevant": true,
+    "modern": false,
+    "source": "https://russianships.info/boevye/201.htm"
+  },
+  {
+    "project": "1258",
+    "name": "Рейдовый тральщик проекта 1258 «Корунд»",
+    "class": "рейдовый тральщик",
+    "country": "СССР",
+    "rank": 4,
+    "rankUncertain": false,
+    "dimensions": {
+      "lengthM": 26.13,
+      "beamM": 5.4,
+      "draftM": 1.38,
+      "sideHeightM": null,
+      "airDraftM": null
+    },
+    "displacementT": {
+      "standard": 88.0,
+      "full": 91.0
+    },
+    "crew": 10,
+    "maxSpeedKt": 12.0,
+    "production": {
+      "from": 1967,
+      "to": 1985
+    },
+    "service": {
+      "from": null,
+      "to": null,
+      "note": "Широко использовались в 1970–1980-х"
+    },
+    "roles": ["поиск морских мин", "траление мин", "противоминная оборона рейдов и баз"],
+    "armament": ["14,5-мм или 25-мм артиллерийское вооружение", "контактные и неконтактные тралы"],
+    "natoClass": "Yevgenya",
+    "caspianRelevant": true,
+    "modern": false,
+    "source": "https://russianships.info/eng/warships/project_1258.htm"
+  },
+  {
+    "project": "1265",
+    "name": "Базовый тральщик проекта 1265 «Яхонт»",
+    "class": "базовый тральщик",
+    "country": "СССР",
+    "rank": 4,
+    "rankUncertain": false,
+    "rankHistory": [
+      {
+        "rank": 4,
+        "from": null,
+        "to": 1990
+      },
+      {
+        "rank": 3,
+        "from": 1990,
+        "to": null,
+        "note": "В начале 1990-х корабли проекта были переклассифицированы"
+      }
+    ],
+    "dimensions": {
+      "lengthM": 49.0,
+      "beamM": 8.8,
+      "draftM": 2.45,
+      "sideHeightM": null,
+      "airDraftM": null
+    },
+    "displacementT": {
+      "standard": 397.0,
+      "full": 430.0
+    },
+    "crew": 45,
+    "maxSpeedKt": 14.0,
+    "production": {
+      "from": null,
+      "to": null
+    },
+    "service": {
+      "from": 1970,
+      "to": null,
+      "note": "Массово служили в 1970–1990-х"
+    },
+    "roles": ["траление мин", "поиск мин", "противоминная оборона военно-морских баз"],
+    "armament": [
+      "30-мм артиллерийская установка АК-230М",
+      "25-мм артиллерийская установка 2М-3М",
+      "тральное оборудование",
+      "ПЗРК на части поздних кораблей"
+    ],
+    "natoClass": "Sonya",
+    "caspianRelevant": true,
+    "modern": false,
+    "source": "https://russianships.info/eng/warships/project_1265.htm"
+  },
+  {
+    "project": "1124",
+    "name": "Малый противолодочный корабль проекта 1124 «Альбатрос»",
+    "class": "малый противолодочный корабль",
+    "country": "СССР",
+    "rank": 3,
+    "rankUncertain": false,
+    "dimensions": {
+      "lengthM": 71.07,
+      "beamM": 10.15,
+      "draftM": 3.54,
+      "sideHeightM": null,
+      "airDraftM": null
+    },
+    "displacementT": {
+      "standard": 835.0,
+      "full": 990.0
+    },
+    "crew": 83,
+    "maxSpeedKt": 36.1,
+    "production": {
+      "from": null,
+      "to": null,
+      "note": "Проект 1124 строился с конца 1960-х; модернизированный 1124М серийно строился с начала 1980-х"
+    },
+    "service": {
+      "from": 1970,
+      "to": null
+    },
+    "roles": [
+      "поиск подводных лодок",
+      "уничтожение подводных лодок",
+      "охрана соединений кораблей",
+      "противолодочная оборона"
+    ],
+    "armament": [
+      "533-мм торпедные аппараты",
+      "РБУ-6000",
+      "ЗРК «Оса-М»",
+      "артиллерийская установка АК-725",
+      "на проекте 1124М: АК-176",
+      "на проекте 1124М: АК-630М"
+    ],
+    "natoClass": "Grisha",
+    "caspianRelevant": false,
+    "modern": false,
+    "source": "https://russianships.info/eng/warships/project_1124.htm"
+  },
+  {
+    "project": "12412",
+    "name": "Малый противолодочный корабль проекта 12412 «Молния-2»",
+    "class": "малый противолодочный корабль",
+    "alternativeClasses": ["пограничный сторожевой корабль"],
+    "country": "СССР",
+    "rank": 4,
+    "rankUncertain": true,
+    "dimensions": {
+      "lengthM": 56.4,
+      "beamM": 10.21,
+      "draftM": 2.1,
+      "sideHeightM": null,
+      "airDraftM": null
+    },
+    "displacementT": {
+      "standard": 399.0,
+      "full": 455.0
+    },
+    "crew": 43,
+    "maxSpeedKt": 32.9,
+    "production": {
+      "from": 1980,
+      "to": null,
+      "note": "Основная серия строилась в 1980-х"
+    },
+    "service": {
+      "from": 1980,
+      "to": null
+    },
+    "roles": ["противолодочная оборона", "патрулирование", "охрана морской границы"],
+    "armament": [
+      "76-мм артиллерийская установка АК-176М",
+      "30-мм артиллерийская установка АК-630М",
+      "4 × 400-мм противолодочных торпедных аппарата",
+      "2 × 5 РБУ-1200М"
+    ],
+    "natoClass": "Pauk",
+    "caspianRelevant": false,
+    "modern": false,
+    "source": "https://russianships.info/eng/warships/project_12412.htm"
+  },
+  {
+    "project": "1141",
+    "name": "Малый противолодочный корабль проекта 1141 «Сокол»",
+    "class": "малый противолодочный корабль на подводных крыльях",
+    "country": "СССР",
+    "rank": 4,
+    "rankUncertain": true,
+    "dimensions": {
+      "lengthM": 50.18,
+      "beamM": 9.76,
+      "draftM": 2.17,
+      "sideHeightM": null,
+      "airDraftM": null
+    },
+    "displacementT": {
+      "standard": 349.0,
+      "full": 465.0
+    },
+    "crew": 36,
+    "maxSpeedKt": 52.0,
+    "production": {
+      "from": null,
+      "to": null,
+      "note": "Экспериментальный проект"
+    },
+    "service": {
+      "from": 1977,
+      "to": 1994
+    },
+    "roles": [
+      "экспериментальная противолодочная платформа",
+      "поиск подводных лодок",
+      "испытания перспективного вооружения"
+    ],
+    "armament": [
+      "30-мм артиллерийские установки АК-630М",
+      "400-мм противолодочные торпеды",
+      "на испытаниях: противолодочный комплекс «Медведка»"
+    ],
+    "natoClass": "Babochka",
+    "caspianRelevant": false,
+    "modern": false,
+    "source": "https://russianships.info/eng/warships/project_1141.htm"
+  },
+  {
+    "project": "1234",
+    "name": "Малый ракетный корабль проекта 1234 «Овод»",
+    "class": "малый ракетный корабль",
+    "country": "СССР",
+    "rank": 3,
+    "rankUncertain": false,
+    "dimensions": {
+      "lengthM": 59.3,
+      "beamM": 11.8,
+      "draftM": 2.77,
+      "sideHeightM": null,
+      "airDraftM": null
+    },
+    "displacementT": {
+      "standard": 580.0,
+      "full": 699.0
+    },
+    "crew": 60,
+    "maxSpeedKt": 35.0,
+    "production": {
+      "from": 1967,
+      "to": 1992
+    },
+    "service": {
+      "from": null,
+      "to": null
+    },
+    "roles": ["нанесение ракетных ударов по надводным кораблям", "оборона прибрежной морской зоны"],
+    "armament": [
+      "6 противокорабельных ракет П-120 «Малахит»",
+      "ЗРК «Оса-М»",
+      "артиллерийская установка АК-725",
+      "на проекте 12341: АК-176",
+      "на проекте 12341: АК-630М"
+    ],
+    "natoClass": "Nanuchka",
+    "caspianRelevant": false,
+    "modern": false,
+    "source": "https://russianships.info/eng/warships/project_1234.htm"
+  },
+  {
+    "project": "205",
+    "name": "Ракетный катер проекта 205",
+    "class": "ракетный катер",
+    "country": "СССР",
+    "rank": 4,
+    "rankUncertain": true,
+    "dimensions": {
+      "lengthM": 38.6,
+      "beamM": 7.6,
+      "draftM": 1.73,
+      "sideHeightM": null,
+      "airDraftM": null
+    },
+    "displacementT": {
+      "standard": 172.0,
+      "full": 209.0
+    },
+    "crew": 28,
+    "maxSpeedKt": 38.5,
+    "maxSpeedKtVariants": {
+      "laterVersions": 42.0
+    },
+    "production": {
+      "from": null,
+      "to": null,
+      "note": "Основная серия построена до 1980-х, но корабли массово продолжали службу в 1980-х"
+    },
+    "service": {
+      "from": null,
+      "to": null
+    },
+    "roles": ["ракетная атака надводных кораблей", "оборона прибрежных районов"],
+    "armament": ["4 противокорабельные ракеты П-15", "2 × 2 30-мм артиллерийские установки АК-230"],
+    "natoClass": "Osa",
+    "caspianRelevant": false,
+    "modern": false,
+    "source": "https://russianships.info/eng/warfareboats/project_205.htm"
+  },
+  {
+    "project": "1204",
+    "name": "Артиллерийский катер проекта 1204 «Шмель»",
+    "class": "артиллерийский катер",
+    "country": "СССР",
+    "rank": 4,
+    "rankUncertain": false,
+    "dimensions": {
+      "lengthM": 27.4,
+      "beamM": 4.32,
+      "draftM": 0.85,
+      "sideHeightM": null,
+      "airDraftM": null
+    },
+    "displacementT": {
+      "standard": null,
+      "full": 77.0,
+      "range": {
+        "min": 71.0,
+        "max": 77.0
+      }
+    },
+    "crew": 14,
+    "maxSpeedKt": 24.0,
+    "production": {
+      "from": 1967,
+      "to": 1972
+    },
+    "service": {
+      "from": null,
+      "to": null,
+      "note": "Служба продолжалась после завершения производства"
+    },
+    "roles": ["патрулирование рек и мелководных акваторий", "огневая поддержка", "охрана государственной границы"],
+    "armament": [
+      "76-мм артиллерийское орудие",
+      "25-мм или 14,5-мм артиллерийская установка",
+      "на части катеров: реактивная установка БМ-14-17",
+      "гранатомёты",
+      "морские мины"
+    ],
+    "natoClass": "Shmel",
+    "caspianRelevant": true,
+    "modern": false,
+    "source": "https://russianships.info/eng/borderguard/project_1204.htm"
+  },
+  {
+    "project": "1400M",
+    "name": "Пограничный сторожевой катер проекта 1400М «Гриф»",
+    "class": "пограничный сторожевой катер",
+    "country": "СССР",
+    "rank": 4,
+    "rankUncertain": false,
+    "dimensions": {
+      "lengthM": 23.8,
+      "beamM": 5.15,
+      "draftM": 1.0,
+      "sideHeightM": null,
+      "airDraftM": null
+    },
+    "displacementT": {
+      "standard": 35.9,
+      "full": 39.7
+    },
+    "crew": 9,
+    "maxSpeedKt": 29.0,
+    "production": {
+      "from": 1976,
+      "to": 2000,
+      "note": "Проект 1400М строился с 1976 года; семейство продолжало производиться до 2000 года"
+    },
+    "service": {
+      "from": 1976,
+      "to": null
+    },
+    "roles": ["охрана государственной границы", "патрулирование", "охрана портов и акваторий"],
+    "armament": ["2 × 12,7-мм пулемёта установки «Утёс-2М»"],
+    "natoClass": "Zhuk",
+    "caspianRelevant": true,
+    "modern": false,
+    "source": "https://russianships.info/eng/borderguard/project_1400.htm"
+  }
+]
