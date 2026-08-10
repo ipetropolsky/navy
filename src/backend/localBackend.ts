@@ -216,7 +216,7 @@ export function createLocalBackend(): ChannelBackend {
         createChannel: async ({ slug, title }) => {
             const state = readState();
             if (!isValidSlug(slug)) {
-                throw new ChannelError('slug-invalid', 'В адресе только латинские буквы и дефис');
+                throw new ChannelError('slug-invalid', 'В адресе только латинские буквы, цифры и дефис');
             }
             if (!isSlugFree(state, slug)) {
                 throw new ChannelError('slug-taken', 'Канал с таким адресом уже есть');
@@ -238,7 +238,7 @@ export function createLocalBackend(): ChannelBackend {
         updateChannel: async (channelId, { slug, title }) => {
             const state = readState();
             if (!isValidSlug(slug)) {
-                throw new ChannelError('slug-invalid', 'В адресе только латинские буквы и дефис');
+                throw new ChannelError('slug-invalid', 'В адресе только латинские буквы, цифры и дефис');
             }
             if (!isSlugFree(state, slug, channelId)) {
                 throw new ChannelError('slug-taken', 'Канал с таким адресом уже есть');

@@ -91,7 +91,7 @@ export default function CreateChannel({ onCreate, demoHref, onOpenDemo }: Create
             </label>
 
             <label className={styles.field}>
-                <span className={styles.label}>Адрес канала — латинские буквы и дефис</span>
+                <span className={styles.label}>Адрес канала — латинские буквы, цифры и дефис</span>
                 {/* Кнопка прилеплена к полю: сам адрес показывать негде — ссылка длинная,
                     а нужна она целиком и в буфере, а не на экране. */}
                 <span className={styles.inputRow}>

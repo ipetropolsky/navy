@@ -7,9 +7,11 @@ import {
     MEMBER_COLORS,
     SHIP_KINDS,
     SHIP_KIND_LABELS,
+    SHIP_SPECS,
     ShipKind,
     isValidHullNumber,
 } from '@/types/channel';
+import { plural } from '@/utils/plural';
 
 import styles from './MemberForm.module.less';
 
@@ -31,6 +33,18 @@ const randomHullNumber = (): string => String(Math.floor(Math.random() * 900) + 
  * Корабль участника: силуэт, цвет, бортовой номер и позывной. Форма одна и та же
  * при входе и при переоснащении — меняется только заголовок и кнопка.
  */
+/**
+ * Строчка с характеристиками силуэта: длина, водоизмещение, полный ход. Числа не украшение —
+ * по ним считается ход корабля в сцене, и катер потому и уходит с рейда быстрее тральщика.
+ * Порядок тот же, что в справочниках: размер, масса, скорость.
+ */
+const shipSpecLine = (kind: ShipKind): string => {
+    const spec = SHIP_SPECS[kind];
+    const number = (value: number): string => value.toLocaleString('ru-RU');
+    const knots = `${number(spec.knots)} ${plural(spec.knots, ['узел', 'узла', 'узлов'])}`;
+    return `${number(spec.length)} м · ${number(spec.displacement)} т · ${knots}`;
+};
+
 export default function MemberForm({ mode, crew, takenColors, initial, onSubmit, onCancel }: MemberFormProps) {
     const [name, setName] = useState(initial?.name ?? '');
     const [hullNumber, setHullNumber] = useState(initial?.hullNumber ?? randomHullNumber);
@@ -128,6 +142,7 @@ export default function MemberForm({ mode, crew, takenColors, initial, onSubmit,
                         >
                             <img className={styles.kindImage} src={SHIP_SPRITES[kind].url} alt="" />
                             <span className={styles.kindLabel}>{SHIP_KIND_LABELS[kind]}</span>
+                            <span className={styles.kindSpec}>{shipSpecLine(kind)}</span>
                         </button>
                     ))}
                 </div>
