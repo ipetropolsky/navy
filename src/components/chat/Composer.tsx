@@ -1,6 +1,10 @@
 import { SyntheticEvent, useRef, useState } from 'react';
 
+import IconButton from '@/components/ui/IconButton';
+import Input from '@/components/ui/Input';
 import { MAX_MESSAGE_LENGTH, Member, Message } from '@/types/channel';
+
+import ReplyQuote from '@/components/chat/ReplyQuote';
 
 import styles from './Composer.module.less';
 
@@ -56,16 +60,8 @@ export default function Composer({ replyTo, replyToAuthor, onCancelReply, onSend
         <form className={styles.composer} onSubmit={handleSubmit}>
             {replyTo && (
                 <div className={styles.replyBar}>
-                    <div className={styles.replyInfo}>
-                        <span className={styles.replyAuthor}>Ответ: {replyToAuthor?.name}</span>
-                        <span className={styles.replyText}>{replyTo.text}</span>
-                    </div>
-                    <button
-                        type="button"
-                        className={styles.cancelReply}
-                        onClick={onCancelReply}
-                        aria-label="Отменить ответ"
-                    >
+                    <ReplyQuote author={replyToAuthor ?? undefined} text={replyTo.text} />
+                    <IconButton variant="muted" onClick={onCancelReply} aria-label="Отменить ответ">
                         <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
                             <path
                                 d="M6 6 L18 18 M18 6 L6 18"
@@ -74,24 +70,25 @@ export default function Composer({ replyTo, replyToAuthor, onCancelReply, onSend
                                 strokeLinecap="round"
                             />
                         </svg>
-                    </button>
+                    </IconButton>
                 </div>
             )}
             <div className={styles.inputRow}>
-                <input
+                <Input
                     ref={inputRef}
-                    className={tooLong ? styles.inputTooLong : styles.input}
-                    type="text"
                     value={value}
+                    invalid={tooLong}
                     placeholder="Сообщение"
                     autoComplete="off"
                     onChange={(event) => handleChange(event.target.value)}
                 />
-                <button type="submit" className={value.trim() ? styles.send : styles.sendHidden} aria-label="Отправить">
-                    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+                <IconButton variant="accent" type="submit" inactive={!value.trim()} aria-label="Отправить">
+                    {/* Начало окна сдвинуто: у стрелки центр тяжести слева, и в круге она
+                        смотрится съехавшей, если поставить её ровно по геометрии. */}
+                    <svg viewBox="-1.5 0 24 24" width="22" height="22" aria-hidden="true">
                         <path d="M3 11.6 20.5 4.2c.8-.34 1.6.46 1.27 1.26L14.4 21c-.37.9-1.67.83-1.95-.1l-1.9-6.3-6.4-1.9c-.94-.28-1-1.58-.15-2.1z" />
                     </svg>
-                </button>
+                </IconButton>
             </div>
         </form>
     );

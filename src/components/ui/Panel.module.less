@@ -1,0 +1,57 @@
+// Плашка формы. На широком экране это карточка по центру: без неё форма висела бы посреди
+// большого незалитого поля. На телефоне карточки нет — форма занимает экран целиком, как
+// отдельная страница, поэтому ни скруглений, ни полей по краям.
+//
+// Фон тот же, что у панели с полем ввода: всё поднятое над лентой в приложении одного цвета.
+.card {
+    flex: none;
+    width: 100%;
+    max-width: 460px;
+    margin: 18px auto;
+    padding: 32px 20px 22px;
+    border-radius: 16px;
+    background: var(--color-bg-raised);
+    text-align: left;
+}
+
+@media (max-width: @mobile-width) {
+    .card {
+        flex: 1 0 auto;
+        max-width: none;
+        margin: 0;
+        padding: 32px 16px calc(20px + env(safe-area-inset-bottom));
+        border-radius: 0;
+    }
+}
+
+.title {
+    margin: 0 0 6px;
+    font-family: 'Roboto Slab', serif;
+    font-size: var(--font-size-heading);
+    font-weight: 600;
+}
+
+// Подзаголовок: одна-две строки о том, что здесь происходит. Тише заголовка и текста полей.
+.hint {
+    margin: 0 0 18px;
+    color: var(--color-text-muted);
+}
+
+// Кнопки во всю ширину плашки: одна занимает её целиком, две делят пополам. Так действие
+// видно сразу и одинаково во всех формах, а выравнивать одинокую кнопку по краю не приходится.
+.actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 20px;
+
+    > * {
+        flex: 1;
+    }
+}
+
+// Приписка под кнопками: ссылка в сторону, а не действие.
+.footer {
+    margin: 16px 0 0;
+    color: var(--color-text-muted);
+    text-align: center;
+}

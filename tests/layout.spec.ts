@@ -1,5 +1,7 @@
 import { Page, expect, test } from '@playwright/test';
 
+import { MOBILE_MAX_WIDTH } from '@/config/layout';
+
 import { ALBATROS, DEMO, openChannel } from '@tests/helpers';
 
 /**
@@ -55,8 +57,27 @@ const expectSaneScene = (view: Geometry): void => {
     expect(view.farShipTop, 'дальний корабль оторвался от воды').toBeLessThan(view.scene.height);
 };
 
+/** Плашка формы: её ширина и скругление и отличают мобильный вид от десктопного. */
+const panelBox = (page: Page): Promise<{ width: number; radius: number; parentWidth: number }> =>
+    page.evaluate(() => {
+        const panel = document.querySelector('[class*="card"]')!;
+        return {
+            width: Math.round(panel.getBoundingClientRect().width),
+            radius: parseFloat(getComputedStyle(panel).borderTopLeftRadius),
+            parentWidth: Math.round(panel.parentElement!.getBoundingClientRect().width),
+        };
+    });
+
 test.describe('телефон', () => {
-    test.use({ viewport: { width: 390, height: 844 } });
+    // Ширина заведомо мобильная: точка перехода одна на стили и на код, и берём мы её оттуда же.
+    test.use({ viewport: { width: MOBILE_MAX_WIDTH - 90, height: 844 } });
+
+    test('форма занимает ширину целиком и без скруглений', async ({ page }) => {
+        await openChannel(page, DEMO);
+        const panel = await panelBox(page);
+        expect(panel.width, 'форма не дотянулась до краёв').toBe(panel.parentWidth);
+        expect(panel.radius, 'на всю ширину скругления не нужны').toBe(0);
+    });
 
     test('вода закрывает своё место, месяц не под текстом, корабли по всей воде', async ({ page }) => {
         await openChannel(page, DEMO, ALBATROS);
@@ -87,5 +108,12 @@ test.describe('десктоп', () => {
         expect(view.scene.width).toBeLessThanOrEqual(760);
         // На широком экране небо выше: воде отдано меньше половины сцены.
         expect(view.horizon / view.scene.height).toBeGreaterThan(0.5);
+    });
+
+    test('форма — карточка, а не полоса во всю панель', async ({ page }) => {
+        await openChannel(page, DEMO);
+        const panel = await panelBox(page);
+        expect(panel.width, 'карточка растеклась по всей панели').toBeLessThan(panel.parentWidth);
+        expect(panel.radius, 'у карточки должны быть скруглённые края').toBeGreaterThan(0);
     });
 });

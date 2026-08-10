@@ -1,0 +1,57 @@
+// Поле ввода — одно на всё приложение: и в ленте, и в формах. Скруглено в пилюлю и залито
+// цветом ленты: поле всегда лежит на поднятой плашке, и так оно читается вдавленным в неё.
+.input {
+    width: 100%;
+    min-width: 0;
+    padding: 10px 14px;
+    border: 1px solid var(--color-border);
+    border-radius: 20px;
+    background: var(--color-bg-chat);
+    color: var(--color-text);
+    font: inherit;
+    outline: none;
+
+    &::placeholder {
+        color: var(--color-text-muted);
+    }
+
+    &:focus {
+        border-color: var(--color-accent);
+    }
+}
+
+// Набрано не то: рамка краснеет, текст не трогаем — обрезать набранное человеком нельзя.
+.inputInvalid {
+    .input();
+
+    border-color: var(--color-danger-line);
+
+    &:focus {
+        border-color: var(--color-danger-line);
+    }
+}
+
+// Поле под несколько знаков — бортовой номер: во всю ширину оно выглядело бы полем для текста.
+.compact {
+    width: 96px;
+    letter-spacing: 0.16em;
+    text-align: center;
+}
+
+// Поле с кнопкой внутри: кнопка прижата к правому краю, текст под неё не заезжает.
+.withAction {
+    position: relative;
+    display: block;
+
+    .input,
+    .inputInvalid {
+        padding-right: 44px;
+    }
+}
+
+.action {
+    position: absolute;
+    top: 50%;
+    right: 6px;
+    transform: translateY(-50%);
+}

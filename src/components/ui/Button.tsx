@@ -18,8 +18,6 @@ export type ButtonVariant = 'primary' | 'secondary' | 'danger';
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
     variant?: ButtonVariant;
-    /** Во всю ширину родителя: для одинокого действия внизу формы. */
-    wide?: boolean;
 }
 
 const VARIANT_CLASS: Record<ButtonVariant, string> = {
@@ -28,7 +26,6 @@ const VARIANT_CLASS: Record<ButtonVariant, string> = {
     danger: styles.danger,
 };
 
-export default function Button({ variant = 'primary', wide = false, type = 'button', ...rest }: ButtonProps) {
-    const className = [styles.button, VARIANT_CLASS[variant], wide ? styles.wide : ''].filter(Boolean).join(' ');
-    return <button {...rest} type={type} className={className} />;
+export default function Button({ variant = 'primary', type = 'button', ...rest }: ButtonProps) {
+    return <button {...rest} type={type} className={`${styles.button} ${VARIANT_CLASS[variant]}`} />;
 }

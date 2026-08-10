@@ -1,7 +1,10 @@
 import { ReactNode, useEffect, useRef } from 'react';
 
-import HullBadge from '@/components/ships/HullBadge';
+import Avatar from '@/components/ships/Avatar';
+import MemberName from '@/components/ships/MemberName';
 import { Member, Message } from '@/types/channel';
+
+import ReplyQuote from '@/components/chat/ReplyQuote';
 
 import styles from './MessageList.module.less';
 
@@ -47,8 +50,6 @@ export default function MessageList({ messages, members, myId, onReply }: Messag
     // иначе реплика вошедшего прилипла бы к строчке о его входе и осталась без подписи.
     const groupKey = (message: Message): string =>
         message.kind === 'system' ? message.messageId : message.author.memberId;
-    // Цвет позывного выбирает сам участник, поэтому он лежит в его данных, а не считается здесь.
-    const colorOf = (memberId: string): string => byId.get(memberId)?.color ?? 'var(--color-text-muted)';
 
     return (
         <div ref={listRef} className={styles.list}>
@@ -77,11 +78,7 @@ export default function MessageList({ messages, members, myId, onReply }: Messag
                     <div key={message.messageId} className={own ? styles.rowOwn : styles.row}>
                         {!own && (
                             <div className={styles.avatarCell}>
-                                {lastOfGroup && author && (
-                                    <div className={styles.avatar} title={author.name}>
-                                        <HullBadge number={author.hullNumber} />
-                                    </div>
-                                )}
+                                {lastOfGroup && author && <Avatar number={author.hullNumber} name={author.name} />}
                             </div>
                         )}
                         <button
@@ -91,22 +88,13 @@ export default function MessageList({ messages, members, myId, onReply }: Messag
                             title="Ответить"
                         >
                             {!own && firstOfGroup && author && (
-                                <span className={styles.author} style={{ color: colorOf(author.memberId) }}>
-                                    {author.name}
+                                <span className={styles.author}>
+                                    <MemberName name={author.name} color={author.color} />
                                 </span>
                             )}
                             {replyTo && (
-                                <span
-                                    className={styles.replyQuote}
-                                    style={{ borderColor: colorOf(replyTo.author.memberId) }}
-                                >
-                                    <span
-                                        className={styles.replyAuthor}
-                                        style={{ color: colorOf(replyTo.author.memberId) }}
-                                    >
-                                        {byId.get(replyTo.author.memberId)?.name}
-                                    </span>
-                                    <span className={styles.replyText}>{replyTo.text}</span>
+                                <span className={styles.replyCell}>
+                                    <ReplyQuote author={byId.get(replyTo.author.memberId)} text={replyTo.text} />
                                 </span>
                             )}
                             <span className={styles.text}>

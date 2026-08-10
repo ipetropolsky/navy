@@ -2,8 +2,22 @@ import path from 'path';
 import react from '@vitejs/plugin-react-swc';
 import { defineConfig } from 'vite';
 
+// Путь относительный нарочно: конфиг собирается раньше, чем становится известен алиас '@',
+// который в нём же и объявлен.
+// eslint-disable-next-line no-restricted-imports
+import { MOBILE_MAX_WIDTH } from './src/config/layout';
+
 export default defineConfig({
     plugins: [react()],
+    css: {
+        preprocessorOptions: {
+            less: {
+                // Точка перехода в мобильный вид приезжает в стили из того же файла, откуда её
+                // берёт код: @mobile-width доступен в любом .less без импортов.
+                additionalData: `@mobile-width: ${MOBILE_MAX_WIDTH}px;\n`,
+            },
+        },
+    },
     // base: process.env.NODE_ENV === 'production' ? '/project-name/' : '/',
     base: './',
     resolve: {

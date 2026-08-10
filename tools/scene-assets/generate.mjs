@@ -2,7 +2,7 @@
 // Запуск: npx -y playwright-core@latest не нужен, если playwright-core уже доступен:
 //   node tools/scene-assets/generate.mjs
 // Требуется установленный Chromium; путь можно передать через CHROMIUM_PATH.
-/* eslint-disable no-await-in-loop, no-console, import/no-unresolved --
+/* eslint-disable no-await-in-loop, no-console --
    одноразовый генератор ассетов: скриншоты снимаются последовательно,
    playwright-core ставится ad hoc и в devDependencies не входит. */
 import path from 'path';

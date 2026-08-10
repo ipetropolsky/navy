@@ -107,22 +107,6 @@
     align-items: flex-start;
 }
 
-.headerButton {
-    flex: none;
-    display: flex;
-    padding: 8px;
-    border: 0;
-    border-radius: 50%;
-    background: transparent;
-    color: var(--color-text);
-    cursor: pointer;
-    transition: background 0.15s ease;
-
-    &:hover {
-        background: rgba(98, 174, 230, 0.12);
-    }
-}
-
 // Нижняя панель: под сценой живёт либо лента с полем ввода, либо форма — создание канала
 // или постановка корабля в строй. Раскладка от этого не меняется, поэтому море на месте.
 // Панель отчёркнута от сцены такой же линией, какой отделено поле ввода снизу: море сверху
@@ -140,16 +124,4 @@
     padding: 24px 16px;
     color: var(--color-text-muted);
     text-align: center;
-}
-
-.notFound {
-    padding: 28px 16px;
-    color: var(--color-text-muted);
-    text-align: center;
-}
-
-// Кнопка общая (components/ui/Button), здесь только её место в блоке.
-.notFoundAction {
-    display: inline-block;
-    margin-top: 12px;
 }

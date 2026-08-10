@@ -1,4 +1,5 @@
-import HullBadge from '@/components/ships/HullBadge';
+import Avatar from '@/components/ships/Avatar';
+import MemberName from '@/components/ships/MemberName';
 import Button from '@/components/ui/Button';
 import { Member, SHIP_KIND_LABELS } from '@/types/channel';
 
@@ -35,12 +36,10 @@ export default function MembersSheet({ open, members, myId, onEditMe, onLeave, o
                     const mine = member.memberId === myId;
                     return (
                         <div key={member.memberId} className={mine ? styles.rowActive : styles.row}>
-                            <span className={styles.avatar}>
-                                <HullBadge number={member.hullNumber} />
-                            </span>
+                            <Avatar number={member.hullNumber} large />
                             <span className={styles.info}>
-                                <span className={styles.name} style={{ color: member.color }}>
-                                    {member.name}
+                                <span>
+                                    <MemberName name={member.name} color={member.color} />
                                     {mine && <span className={styles.you}> — ты</span>}
                                 </span>
                                 <span className={styles.kind}>{SHIP_KIND_LABELS[member.shipKind]}</span>

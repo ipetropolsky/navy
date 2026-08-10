@@ -5,120 +5,16 @@
     background: var(--color-bg-raised);
 }
 
+// Над полем ввода: на что отвечаем и кнопка отказаться.
 .replyBar {
     display: flex;
     align-items: center;
     gap: 8px;
     margin-bottom: 8px;
-    padding: 4px 8px;
-    border-left: 2px solid var(--color-accent);
-    border-radius: 6px;
-    background: rgba(98, 174, 230, 0.08);
-}
-
-.replyInfo {
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-    flex: 1;
-    font-size: var(--font-size-base);
-}
-
-.replyAuthor {
-    color: var(--color-accent);
-    font-weight: 500;
-}
-
-.replyText {
-    overflow: hidden;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-    color: var(--color-text-muted);
-}
-
-.cancelReply {
-    flex: none;
-    display: flex;
-    padding: 6px;
-    border: 0;
-    border-radius: 50%;
-    background: transparent;
-    color: var(--color-text-muted);
-    cursor: pointer;
-
-    &:hover {
-        color: var(--color-text);
-    }
 }
 
 .inputRow {
     display: flex;
     align-items: center;
     gap: 8px;
-}
-
-.input {
-    flex: 1;
-    min-width: 0;
-    padding: 10px 14px;
-    border: 1px solid var(--color-border);
-    border-radius: 20px;
-    background: var(--color-bg-chat);
-    color: var(--color-text);
-    font: inherit;
-    outline: none;
-
-    &::placeholder {
-        color: var(--color-text-muted);
-    }
-
-    &:focus {
-        border-color: rgba(98, 174, 230, 0.45);
-    }
-}
-
-// Набрано больше, чем можно отправить. Текст не трогаем — только говорим рамкой,
-// что в таком виде оно не уйдёт.
-.inputTooLong {
-    .input();
-
-    border-color: #d66060;
-
-    &:focus {
-        border-color: #d66060;
-    }
-}
-
-.send {
-    flex: none;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 40px;
-    height: 40px;
-    border: 0;
-    border-radius: 50%;
-    background: var(--color-accent);
-    color: #06121f;
-    cursor: pointer;
-    transition:
-        transform 0.12s ease,
-        opacity 0.12s ease;
-
-    svg {
-        fill: currentColor;
-        margin-left: 2px;
-    }
-
-    &:active {
-        transform: scale(0.92);
-    }
-}
-
-.sendHidden {
-    .send();
-
-    transform: scale(0.5);
-    opacity: 0;
-    pointer-events: none;
 }

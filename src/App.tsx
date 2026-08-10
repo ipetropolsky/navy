@@ -9,6 +9,8 @@ import MembersSheet from '@/components/channel/MembersSheet';
 import Composer from '@/components/chat/Composer';
 import MessageList from '@/components/chat/MessageList';
 import Button from '@/components/ui/Button';
+import IconButton from '@/components/ui/IconButton';
+import Panel from '@/components/ui/Panel';
 import { useSnackbar } from '@/components/ui/Snackbar';
 import { useChannel } from '@/hooks/useChannel';
 import { channelLink, useRoute } from '@/routing';
@@ -133,28 +135,18 @@ export default function App() {
                     {/* Кнопки идут вплотную: это один блок действий, а не два разных. */}
                     <div className={styles.headerActions}>
                         {inChat && (
-                            <button
-                                type="button"
-                                className={styles.headerButton}
-                                onClick={() => setSheetOpen(true)}
-                                aria-label="Корабли на связи"
-                            >
+                            <IconButton onClick={() => setSheetOpen(true)} aria-label="Корабли на связи">
                                 <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
                                     <path
                                         d="M9 11a3.2 3.2 0 1 0 0-6.4A3.2 3.2 0 0 0 9 11zm7 .4a2.7 2.7 0 1 0 0-5.4 2.7 2.7 0 0 0 0 5.4zM9 13c-3 0-6 1.5-6 3.6V19h12v-2.4C15 14.5 12 13 9 13zm7 .8c-.5 0-1 .05-1.5.16 1.1.86 1.8 1.96 1.8 3.24V19H22v-2c0-1.8-2.6-3.2-6-3.2z"
                                         fill="currentColor"
                                     />
                                 </svg>
-                            </button>
+                            </IconButton>
                         )}
                         {/* Плюс уводит на главную: там и создаётся следующий канал связи. */}
                         {channel && (
-                            <button
-                                type="button"
-                                className={styles.headerButton}
-                                onClick={route.openHome}
-                                aria-label="Новый канал связи"
-                            >
+                            <IconButton onClick={route.openHome} aria-label="Новый канал связи">
                                 <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
                                     <path
                                         d="M12 5v14M5 12h14"
@@ -163,7 +155,7 @@ export default function App() {
                                         strokeLinecap="round"
                                     />
                                 </svg>
-                            </button>
+                            </IconButton>
                         )}
                     </div>
                 </div>
@@ -173,12 +165,11 @@ export default function App() {
                 {/* Адрес в ссылке есть, а канала по нему нет: ссылка устарела или в ней опечатка.
                     Показывать здесь форму создания нельзя — человек шёл не создавать, а войти. */}
                 {!loading && route.channel && !channel && (
-                    <div className={styles.notFound}>
-                        <p>Канала по адресу «{route.channel}» нет.</p>
-                        <span className={styles.notFoundAction}>
-                            <Button onClick={route.openHome}>Создать свой канал</Button>
-                        </span>
-                    </div>
+                    <Panel
+                        title="Канала нет"
+                        hint={`Канала по адресу «${route.channel}» нет: ссылка устарела или в ней опечатка.`}
+                        actions={<Button onClick={route.openHome}>Создать свой канал</Button>}
+                    />
                 )}
                 {!loading && !route.channel && (
                     <CreateChannel
@@ -190,8 +181,8 @@ export default function App() {
                 {!loading && channel && !inChat && (
                     <MemberForm
                         mode={editing ? 'edit' : 'join'}
-                        crew={members.map((member) => member.name)}
-                        takenColors={members.filter((member) => member.memberId !== myId).map((member) => member.color)}
+                        crew={members}
+                        myId={myId}
                         initial={me ?? undefined}
                         onSubmit={handleMemberSubmit}
                         onCancel={editing ? () => setEditing(false) : undefined}

@@ -10,7 +10,7 @@ import { ALBATROS, DEMO, bubbles, expectWayOut, join, openChannel, send } from '
 test('канала по адресу нет: сказано прямо и есть куда уйти', async ({ page }) => {
     await page.goto('/?channel=nesushchestvuyushchiy');
 
-    await expect(page.getByText('Канала по адресу «nesushchestvuyushchiy» нет.')).toBeVisible();
+    await expect(page.getByText('Канала по адресу «nesushchestvuyushchiy» нет')).toBeVisible();
     await expectWayOut(page);
 
     // Кнопка и правда уводит на главную, где канал заводится заново.
