@@ -433,11 +433,11 @@ export default function SeaScene({ members, myId, morseFeeds, ready, onMoveShip 
                                 '--enter-from': `${member.place.enterFrom === 'right' ? '' : '-'}${(
                                     enterLengths * 100
                                 ).toFixed(0)}%`,
-                                '--enter-seconds': `${sailSeconds(enterLengths, false).toFixed(1)}s`,
+                                '--enter-seconds': `${sailSeconds(enterLengths, member.place.slot, member.shipKind, false).toFixed(1)}s`,
                                 '--leave-to': `${leave.side === 'right' ? '' : '-'}${(leaveLengths * 100).toFixed(0)}%`,
                                 // Задний ход отличается только длительностью: кривая та же,
                                 // а скорость ниже — иначе замер пиковой скорости под неё не подходит.
-                                '--leave-seconds': `${sailSeconds(leaveLengths, leave.astern).toFixed(1)}s`,
+                                '--leave-seconds': `${sailSeconds(leaveLengths, member.place.slot, member.shipKind, leave.astern).toFixed(1)}s`,
                                 // Ход поперёк кадра: откуда корабль пошёл и сколько ему идти.
                                 // Здесь именно положение в кадре, а не сдвиг: стили доводят
                                 // корабль до нынешнего --slot-left, и промежуточные значения
@@ -446,7 +446,7 @@ export default function SeaScene({ members, myId, morseFeeds, ready, onMoveShip 
                                 // а её ограничивает max-width, отчего в начале хода корабль
                                 // прыгал на десяток пикселей.
                                 '--shift-from': `${(shiftFrom ?? member.place.left).toFixed(2)}%`,
-                                '--shift-seconds': `${sailSeconds(shiftLengths, shiftAstern).toFixed(1)}s`,
+                                '--shift-seconds': `${sailSeconds(shiftLengths, member.place.slot, member.shipKind, shiftAstern).toFixed(1)}s`,
                             } as CSSProperties
                         }
                     >

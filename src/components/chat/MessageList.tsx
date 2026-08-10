@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { ReactNode, useEffect, useRef } from 'react';
 
 import HullBadge from '@/components/ships/HullBadge';
 import { Member, Message } from '@/types/channel';
@@ -10,6 +10,18 @@ const formatTime = (at: number): string =>
     new Date(at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
 
 const formatDate = (at: number): string => new Date(at).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
+
+/**
+ * Выделение в системной строчке. Бэкенд помечает изменившееся двумя звёздочками — тем же
+ * знаком, что и markdown, — а лента превращает пометку в жирное. Разметка нарочно сведена
+ * к одному приёму: полноценный markdown в служебной строке не нужен, а текст без разбора
+ * всё равно читается.
+ */
+const emphasise = (text: string): ReactNode[] =>
+    text.split('**').map((part, index) =>
+        // Ключ по порядку тут и есть тождество: куски различаются только местом в строке.
+        index % 2 ? <strong key={index}>{part}</strong> : part
+    );
 
 interface MessageListProps {
     messages: Message[];
@@ -44,7 +56,7 @@ export default function MessageList({ messages, members, myId, onReply }: Messag
                 if (message.kind === 'system') {
                     return (
                         <div key={message.id} className={styles.systemChip}>
-                            {message.text}
+                            {emphasise(message.text)}
                         </div>
                     );
                 }

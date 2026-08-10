@@ -101,47 +101,40 @@ const writeState = (state: ServerState): void => {
 const randomId = (prefix: string): string =>
     `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
-/** Название силуэта со строчной буквы: в строчке о переоснащении оно идёт не первым словом. */
+/** Название силуэта со строчной буквы: в строчке оно идёт не первым словом. */
 const kindLabel = (kind: ShipKind): string => {
     const label = SHIP_KIND_LABELS[kind];
     return label.charAt(0).toLowerCase() + label.slice(1);
 };
 
 /**
- * Как назвать смену позывного и номера. Три случая, и они правда разные: неизменившееся
- * повторять не надо — «„Буран“ 042 теперь „Буран“ 517» читается как оговорка, а не как новость.
+ * Как корабль зовут целиком: тип, позывной, бортовой номер. Именно в таком порядке его
+ * и называют — «сторожевой катер „Гром“ 111», — и с этого начинается любая системная строчка,
+ * иначе по одному позывному не понять, о ком речь.
  */
-const renameNotice = (before: Member, after: Member): string | null => {
-    const nameChanged = before.name !== after.name;
-    const hullChanged = before.hullNumber !== after.hullNumber;
-    if (nameChanged && hullChanged) {
-        return `«${before.name}» ${before.hullNumber} теперь «${after.name}» ${after.hullNumber}`;
-    }
-    if (nameChanged) {
-        return `«${before.name}» ${before.hullNumber} теперь «${after.name}»`;
-    }
-    if (hullChanged) {
-        return `«${after.name}» сменил бортовой номер: ${before.hullNumber} → ${after.hullNumber}`;
-    }
-    return null;
-};
+const shipTitle = (member: Member): string =>
+    `${SHIP_KIND_LABELS[member.shipKind]} «${member.name}» ${member.hullNumber}`;
 
 /**
- * Строчка о переоснащении: что было и что стало. Складывается из того, что человек и правда
- * поменял, — молчаливая подмена корабля выглядела бы сменой участника, а сообщение обо всех
- * полях подряд каждый раз ничего не сообщало бы.
+ * Строчка о переоснащении: кем корабль был и что в нём поменялось. Перечисляем только
+ * изменившееся — «„Буран“ 042 теперь „Буран“ 517» читается как оговорка, а не как новость.
+ * Новые значения выделены жирным: глазу нужно за что-то зацепиться, а искать отличие
+ * между двумя почти одинаковыми строчками он не должен.
  *
- * Имя и облик идут порознь: позывной с номером — это то, как корабль зовут, а силуэт — то,
- * как он выглядит, и в одну фразу они складываются плохо. Цвет позывного не отмечаем: он
- * не меняет ни имени, ни облика.
+ * Цвет позывного не отмечаем: он не меняет ни имени, ни облика.
  */
 const refitNotice = (before: Member, after: Member): string | null => {
-    const renamed = renameNotice(before, after);
-    if (before.shipKind === after.shipKind) {
-        return renamed;
+    const changes: string[] = [];
+    if (before.shipKind !== after.shipKind) {
+        changes.push(kindLabel(after.shipKind));
     }
-    const silhouette = `силуэт: ${kindLabel(before.shipKind)} → ${kindLabel(after.shipKind)}`;
-    return renamed ? `${renamed}, ${silhouette}` : `«${after.name}» ${after.hullNumber} сменил ${silhouette}`;
+    if (before.name !== after.name) {
+        changes.push(`«${after.name}»`);
+    }
+    if (before.hullNumber !== after.hullNumber) {
+        changes.push(after.hullNumber);
+    }
+    return changes.length ? `${shipTitle(before)} теперь **${changes.join(' ')}**` : null;
 };
 
 /** Адрес свободен, если его не занял другой канал. Сам себя канал не блокирует. */
@@ -186,6 +179,13 @@ export function createLocalBackend(): ChannelBackend {
         const event = { ...payload, id: randomId('e'), channelId, at: Date.now() } as ChannelEvent;
         wire?.postMessage(event);
         deliver(event);
+    };
+
+    /** Записать в ленту строчку от самого канала и разослать её как обычное сообщение. */
+    const postNotice = (channelId: string, memberId: string, text: string, sentAt: number): void => {
+        const notice: Message = { id: randomId('msg'), memberId, kind: 'system', text, sentAt };
+        mutate(channelId, (current) => current.messages.push(notice));
+        emit(channelId, { type: 'message-added', message: notice });
     };
 
     const requireChannel = (channelId: string): ChannelSnapshot => {
@@ -278,15 +278,7 @@ export function createLocalBackend(): ChannelBackend {
             // Вход отмечается в ленте: корабль заплывает в кадр молча, и без строчки в чате
             // непонятно, кто пришёл. Текст складывает бэкенд — тогда он останется прежним,
             // даже если корабль потом сменит позывной.
-            const notice: Message = {
-                id: randomId('msg'),
-                memberId: member.id,
-                kind: 'system',
-                text: `«${member.name}» ${member.hullNumber} встал на рейд`,
-                sentAt: member.joinedAt,
-            };
-            mutate(channelId, (current) => current.messages.push(notice));
-            emit(channelId, { type: 'message-added', message: notice });
+            postNotice(channelId, member.id, `${shipTitle(member)} встал на рейд`, member.joinedAt);
             return delay(member);
         },
 
@@ -309,15 +301,7 @@ export function createLocalBackend(): ChannelBackend {
             emit(channelId, { type: 'member-updated', member: updated });
             const text = before && refitNotice(before, updated);
             if (text) {
-                const notice: Message = {
-                    id: randomId('msg'),
-                    memberId: updated.id,
-                    kind: 'system',
-                    text,
-                    sentAt: Date.now(),
-                };
-                mutate(channelId, (current) => current.messages.push(notice));
-                emit(channelId, { type: 'message-added', message: notice });
+                postNotice(channelId, updated.id, text, Date.now());
             }
             return delay(updated);
         },
@@ -342,10 +326,19 @@ export function createLocalBackend(): ChannelBackend {
         },
 
         leave: async (channelId, memberId) => {
-            mutate(channelId, (snapshot) => {
-                snapshot.members = snapshot.members.filter((member) => member.id !== memberId);
+            // Кем корабль был, узнаём до того, как вычеркнем его: после вычёркивания
+            // называть в строчке будет нечего.
+            const gone = mutate(channelId, (snapshot) => {
+                const member = snapshot.members.find((item) => item.id === memberId) ?? null;
+                snapshot.members = snapshot.members.filter((item) => item.id !== memberId);
+                return member;
             });
             emit(channelId, { type: 'member-left', memberId });
+            if (gone) {
+                // «Сняться с рейда» — это и значит покинуть якорную стоянку: подняли якорь
+                // и пошли. Ровно то, что происходит в кадре, и ровно так об этом и говорят.
+                postNotice(channelId, memberId, `${shipTitle(gone)} снялся с рейда`, Date.now());
+            }
             return delay(undefined);
         },
 
