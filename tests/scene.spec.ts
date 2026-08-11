@@ -1,6 +1,6 @@
 import { Page, expect, test } from '@playwright/test';
 
-import { ALBATROS, DEMO, join, openChannel, openNewChannel, ships, waitForCalm } from '@tests/helpers';
+import { ALBATROS, DEMO, join, openChannel, openNewChannel, ships } from '@tests/helpers';
 
 /**
  * Сцена: то, на чём уже наступали. Свой корабль однажды вставал на место без анимации,
@@ -33,6 +33,20 @@ test('свой корабль заплывает в кадр, а не возни
 
     const running = await entering.evaluate((element) => element.getAnimations().length);
     expect(running, 'анимация захода не запустилась').toBeGreaterThan(0);
+
+    // И начинает он ход целиком за кромкой кадра. Иначе из-за края торчит нос стоящего
+    // корабля, а трогается он у зрителя на глазах — разгон должен оставаться за кадром.
+    const hidden = await page.evaluate(() => {
+        const scene = document.querySelector('[class*="_scene_"]')!.getBoundingClientRect();
+        const ship = document.querySelector('[data-motion="entering"]')!;
+        ship.getAnimations().forEach((animation) => {
+            animation.pause();
+            animation.currentTime = 0;
+        });
+        const box = ship.getBoundingClientRect();
+        return Math.min(box.right - scene.left, scene.right - box.left);
+    });
+    expect(hidden, 'в начале захода корабль виден в кадре').toBeLessThan(0);
 });
 
 test('ход корабля идёт с правдоподобной скоростью и зависит от корабля', async ({ browser }) => {
@@ -53,14 +67,14 @@ test('ход корабля идёт с правдоподобной скоро�
     const patrol = await seconds('Сторожевой катер');
     const minesweeper = await seconds('Тральщик');
 
-    // Пределы широкие нарочно: важно, что счёт идёт от узлов и метров, а не что вышло
-    // ровно столько-то. Мгновенных прыжков и получасовых прогонов быть не должно. Нижний
-    // предел низкий не зря: место на рейде выбирается случайно, и самому быстрому катеру,
-    // вставшему у самой кромки кадра, идти всего секунды три.
-    expect(patrol).toBeGreaterThan(2);
-    expect(minesweeper).toBeLessThanOrEqual(15);
-    // Катер вдвое короче тральщика и втрое быстрее его по паспорту — это должно быть видно.
-    expect(patrol).toBeLessThan(minesweeper);
+    // Скорость манёвра теперь одна на всех — на рейде маневрируют самым малым независимо
+    // от паспорта, — поэтому корабли между собой уже не сравниваем. Проверяем другое:
+    // что длительность вообще считается, а не берётся из воздуха. Мгновенных прыжков
+    // и получасовых прогонов быть не должно.
+    for (const value of [patrol, minesweeper]) {
+        expect(value).toBeGreaterThan(2);
+        expect(value).toBeLessThanOrEqual(30);
+    }
 });
 
 test('вода замыкает круг без скачка', async ({ page }) => {
@@ -98,9 +112,6 @@ test('вода замыкает круг без скачка', async ({ page }) 
 test('корабль уходит за кромку и пропадает из кадра', async ({ page }) => {
     await openChannel(page, DEMO, ALBATROS);
     await expect(ships(page)).toHaveCount(3);
-    // Уход смотрим с рейда, а не посреди показа: иначе корабль снимался бы с места,
-    // ещё не дойдя до него.
-    await waitForCalm(page);
 
     await page.getByLabel('Корабли на связи').click();
     await page.getByRole('button', { name: 'Выйти из канала' }).click();
@@ -108,13 +119,11 @@ test('корабль уходит за кромку и пропадает из �
     // Сразу после выхода корабль ещё в кадре: он выбирается за кромку своим ходом.
     await expect(page.locator('[data-motion="leaving"]')).toHaveCount(1);
     // И через отведённое ему время исчезает — иначе уходящие копились бы в разметке.
-    await expect(ships(page)).toHaveCount(2, { timeout: 25_000 });
+    await expect(ships(page)).toHaveCount(2, { timeout: 40_000 });
 });
 
 test('огни на рейде якорные, на ходу ходовые, и от 50 метров их по два', async ({ page }) => {
     await openChannel(page, DEMO, ALBATROS);
-    // Демо открывается показом: эскадра выходит на рейд. Огни смотрим, когда все встали.
-    await waitForCalm(page);
 
     // В демо-канале три корабля, и только «Вымпел» длиннее 50 метров: ему положены
     // два якорных огня, носовой выше кормового, остальным хватает одного.

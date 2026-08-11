@@ -112,9 +112,6 @@ export default function App() {
                         morseFeeds={morseFeeds}
                         onMoveShip={() => void channelState.moveShip()}
                         ready={!loading && Boolean(channel)}
-                        // В демо эскадра выходит на рейд у нас на глазах: там никто не входит
-                        // и не выходит, и без показа не увидеть ни захода, ни швартовки.
-                        playIntro={route.channel === DEMO_CHANNEL_SLUG}
                     />
                 </div>
                 <div className={styles.headerBar}>
