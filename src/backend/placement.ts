@@ -6,10 +6,11 @@
  * в одну и ту же сторону во всех вкладках, а не разъезжается у каждого по-своему.
  *
  * Мест на рейде десять — это «слоты», различаются они дальностью от наблюдателя. Слот
- * занимает один корабль, и выбирается слот случайно: строй не должен выглядеть построенным.
+ * занимает один корабль, и выбирается место случайно: строй не должен выглядеть построенным.
  * Свободная случайность, впрочем, быстро собирает корабли в кучу, поэтому её ограничивают
- * два правила: коридоры разводят соседей по ширине кадра, а размер корабля задаёт, в какой
- * части рейда он скорее встанет.
+ * три правила: коридоры разводят соседей по ширине кадра, размер корабля задаёт, в какой
+ * части рейда он скорее встанет, а из оставшегося берётся самое свободное — как место
+ * в автобусе, где сперва садятся подальше от всех.
  *
  * Коридор — вертикальная полоса, в которую попадает центр корабля. Кадр поделён на три:
  * центры на 20%, 50% и 80% ширины, ширина коридора — шестая часть кадра. То есть на экране
@@ -62,6 +63,17 @@ const ISLAND_CORRIDOR: Corridor = 'left';
 const SLOT_CHOICE = 4;
 
 /**
+ * Из скольких самых свободных мест выбираем в итоге. Рейд занимается как автобус: сначала
+ * места подальше от всех, и только когда таких не осталось — те, что ближе к соседям.
+ * Не одно самое дальнее, а несколько лучших: иначе расстановка стала бы алгоритмом,
+ * который на одних и тех же кораблях каждый раз выдаёт одну и ту же картинку.
+ */
+const SPOT_CHOICE = 3;
+
+/** Наибольшее расстояние между центрами коридоров, % ширины сцены: от левого до правого. */
+const CORRIDOR_SPAN = CORRIDOR_CENTERS.right - CORRIDOR_CENTERS.left;
+
+/**
  * Куда тянет корабль этого размера: самый длинный — к дальнему краю рейда, самый мелкий —
  * к переднему плану. Так сцена уравновешивается сама: крупные не загораживают собой весь кадр,
  * а катера не теряются у горизонта точками.
@@ -103,14 +115,49 @@ const freeCorridors = (slot: number, taken: ShipPlacement[]): Corridor[] => {
     return shuffled(CORRIDORS).filter((corridor) => !blocked.has(corridor));
 };
 
+/**
+ * Насколько место далеко от чужого корабля. Обе разницы приведены к долям своего размаха
+ * и сложены: 0 — тот же слот и тот же коридор, 2 — противоположный угол рейда. Дальность
+ * и ширина считаются наравне, потому что в кадре они и выглядят наравне: сосед через
+ * два слота разнесён с тобой примерно так же, как сосед в другом коридоре.
+ */
+const distanceTo = (slot: number, corridor: Corridor, other: ShipPlacement): number =>
+    Math.abs(slot - other.slot) / (SLOT_COUNT - 1) +
+    Math.abs(CORRIDOR_CENTERS[corridor] - CORRIDOR_CENTERS[other.corridor]) / CORRIDOR_SPAN;
+
+/** Насколько место свободно: расстояние до ближайшего соседа. Пустой рейд — свободно всё. */
+const loneliness = (slot: number, corridor: Corridor, taken: ShipPlacement[]): number =>
+    taken.length === 0 ? Infinity : Math.min(...taken.map((other) => distanceTo(slot, corridor, other)));
+
 /** Точка внутри коридора. Место любое: строй не должен выглядеть расчерченным по линейке. */
 const leftInside = (corridor: Corridor): number => CORRIDOR_CENTERS[corridor] + (Math.random() - 0.5) * CORRIDOR_WIDTH;
 
+/**
+ * С какой стороны корабль заходит на рейд.
+ *
+ * На дальних слотах выбора нет: с той стороны остров, и корабль прошёл бы прямо по нему.
+ * А там, где выбор есть, он не честная монетка, а противовес: чем больше кораблей уже пришло
+ * с одной стороны, тем вероятнее следующий придёт с другой. Иначе рейд заполнялся бы
+ * в основном справа — дальние слоты вынужденно правые, а крупные корабли тянутся именно туда.
+ *
+ * Перевес считается по квадратам, а не напрямую: перекос надо не смягчать, а выправлять.
+ * Дальние слоты все правые, и крупные корабли тянутся именно туда, так что вольную половину
+ * рейда приходится уводить влево заметно сильнее, чем «чуть чаще». Единица в каждой скобке —
+ * обычное сглаживание: на пустом рейде выходит ровно половина, и правая сторона не запрещена
+ * никогда.
+ */
+const enterSide = (slot: number, taken: ShipPlacement[]): Side => {
+    if (slot < ISLAND_FREE_SLOT) {
+        return otherSide(ISLAND_SIDE);
+    }
+    const fromLeft = (taken.filter((placement) => placement.enterFrom === 'left').length + 1) ** 2;
+    const fromRight = (taken.filter((placement) => placement.enterFrom === 'right').length + 1) ** 2;
+    return Math.random() < fromRight / (fromLeft + fromRight) ? 'left' : 'right';
+};
+
 /** Полное место на выбранном слоте: коридор, точка в нём, сторона захода и куда смотрит нос. */
-const placeAt = (slot: number, corridor: Corridor): ShipPlacement => {
-    // Заходить сквозь остров нельзя — на дальних слотах корабль прошёл бы прямо по нему.
-    // Туда идут только с чистой стороны; ближе к переднему плану сторона любая.
-    const enterFrom = slot < ISLAND_FREE_SLOT ? otherSide(ISLAND_SIDE) : pick<Side>(['left', 'right']);
+const placeAt = (slot: number, corridor: Corridor, taken: ShipPlacement[]): ShipPlacement => {
+    const enterFrom = enterSide(slot, taken);
     return {
         slot,
         corridor,
@@ -122,21 +169,52 @@ const placeAt = (slot: number, corridor: Corridor): ShipPlacement => {
     };
 };
 
+/** Свободное место на рейде: дальность и коридор. Точку внутри коридора выберет placeAt. */
+interface Spot {
+    slot: number;
+    corridor: Corridor;
+}
+
 /**
- * Слоты, куда этот корабль может встать, — ближайшие по дальности к его «своей» части рейда.
- * Сначала берём свободные слоты, годные по коридорам, и сортируем по удалённости от желаемого;
- * из первых SLOT_CHOICE и выбираем. Если желаемые заняты, набор сам собой сдвигается дальше:
- * порядок-то по удалённости, — но выбор внутри набора остаётся случайным.
+ * Куда этот корабль может встать. Сначала отбираем слоты по дальности — ближайшие к «своей»
+ * части рейда, — а потом раскладываем их по свободным коридорам: получается набор мест,
+ * из которого и выбираем.
  */
-const slotChoices = (kind: ShipKind, taken: ShipPlacement[], exclude?: number): number[] => {
+const freeSpots = (kind: ShipKind, taken: ShipPlacement[], exclude?: number): Spot[] => {
     const wanted = preferredSlot(kind);
-    const free = allSlots().filter(
-        (slot) =>
-            slot !== exclude &&
-            !taken.some((placement) => placement.slot === slot) &&
-            freeCorridors(slot, taken).length > 0
-    );
-    return free.sort((a, b) => Math.abs(a - wanted) - Math.abs(b - wanted)).slice(0, SLOT_CHOICE);
+    return allSlots()
+        .filter(
+            (slot) =>
+                slot !== exclude &&
+                !taken.some((placement) => placement.slot === slot) &&
+                freeCorridors(slot, taken).length > 0
+        )
+        .sort((a, b) => Math.abs(a - wanted) - Math.abs(b - wanted))
+        .slice(0, SLOT_CHOICE)
+        .flatMap((slot) => freeCorridors(slot, taken).map((corridor) => ({ slot, corridor })));
+};
+
+/**
+ * Место для корабля — как место в автобусе: сперва подальше от всех, и только когда таких
+ * не осталось, поближе к соседям. Считается это одинаково для обоих случаев: свободные места
+ * сортируются по расстоянию до ближайшего соседа, и выбор идёт из нескольких самых свободных.
+ *
+ * Случайность нужна: без неё расстановка превратилась бы в алгоритм, который на одном
+ * и том же составе каждый раз рисует одну и ту же картинку.
+ */
+const pickSpot = (kind: ShipKind, taken: ShipPlacement[], exclude?: number): Spot | null => {
+    const spots = freeSpots(kind, taken, exclude);
+    if (spots.length === 0) {
+        return null;
+    }
+    // Перемешиваем до сортировки: сортировка устойчива, поэтому одинаково свободные места
+    // сохранят случайный порядок. Без этого на пустом рейде, где свободно всё, в набор
+    // попадали бы три коридора одного и того же слота — и первый корабль всегда вставал бы
+    // на одно и то же место.
+    const roomiest = shuffled(spots)
+        .sort((a, b) => loneliness(b.slot, b.corridor, taken) - loneliness(a.slot, a.corridor, taken))
+        .slice(0, SPOT_CHOICE);
+    return pick(roomiest);
 };
 
 /**
@@ -145,12 +223,8 @@ const slotChoices = (kind: ShipKind, taken: ShipPlacement[], exclude?: number): 
  * разбирательство, если однажды станет возможно.
  */
 export const placeShip = (kind: ShipKind, taken: ShipPlacement[]): ShipPlacement | null => {
-    const choices = slotChoices(kind, taken);
-    if (choices.length === 0) {
-        return null;
-    }
-    const slot = pick(choices);
-    return placeAt(slot, freeCorridors(slot, taken)[0]);
+    const spot = pickSpot(kind, taken);
+    return spot && placeAt(spot.slot, spot.corridor, taken);
 };
 
 /**
@@ -169,11 +243,7 @@ export const moveShip = (kind: ShipKind, place: ShipPlacement, others: ShipPlace
     }
 
     // На свой слот не возвращаемся, иначе перестановка ходила бы по кругу; в остальном
-    // дальность выбирается так же, как при входе, — от размера корабля.
-    const choices = slotChoices(kind, others, place.slot);
-    if (choices.length === 0) {
-        return null;
-    }
-    const slot = pick(choices);
-    return placeAt(slot, freeCorridors(slot, others)[0]);
+    // место выбирается так же, как при входе.
+    const spot = pickSpot(kind, others, place.slot);
+    return spot && placeAt(spot.slot, spot.corridor, others);
 };
