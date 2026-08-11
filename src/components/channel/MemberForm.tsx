@@ -38,10 +38,12 @@ interface MemberFormProps {
 const randomHullNumber = (): string => String(Math.floor(Math.random() * 900) + 100);
 
 /**
- * Масштаб в списке один на всех: самый длинный корабль занимает всю ширину кнопки, остальные —
- * свою долю от него. Катер рядом с корветом и выглядит катером, сравнивать их можно прямо
- * глазами, а линейка внизу говорит, сколько это в метрах: она у всех одна и та же, десять
- * метров.
+ * Размер силуэта в списке. Строго по длине не годится: катер выходил бы втрое мельче корабля
+ * и разглядеть его было бы нечего. Поэтому размеры поджаты — самый длинный занимает всю ширину
+ * кнопки, самый короткий половину, остальные распределены по длине между этими краями.
+ *
+ * Масштаб от этого у каждого свой, и сравнивать силуэты между собой на глаз уже нельзя —
+ * зато под каждым стоит его собственная линейка на десять метров, и по ней разница видна сразу.
  *
  * Всё считается долями ширины кнопки, ни одного числа в пикселях: на любом экране и при любом
  * изменении окна и линейка, и силуэт тянутся вместе, а соотношение между ними не меняется.
@@ -49,14 +51,23 @@ const randomHullNumber = (): string => String(Math.floor(Math.random() * 900) + 
 const SCALE_METRES = 10;
 const SCALE_SEGMENTS = [0, 1, 2, 3, 4];
 
-/** Самый длинный корабль в справочнике: по нему и построен масштаб. */
+/** Доля ширины кнопки у самого короткого корабля. У самого длинного — вся ширина. */
+const SMALLEST_SHARE = 0.5;
+
 const LONGEST_SHIP = Math.max(...SHIP_KINDS.map((kind) => SHIP_SPECS[kind].length));
+const SHORTEST_SHIP = Math.min(...SHIP_KINDS.map((kind) => SHIP_SPECS[kind].length));
 
 /** Ширина силуэта в долях ширины кнопки. */
-const shipWidth = (kind: ShipKind): number => SHIP_SPECS[kind].length / LONGEST_SHIP;
+const shipWidth = (kind: ShipKind): number => {
+    const place = (SHIP_SPECS[kind].length - SHORTEST_SHIP) / (LONGEST_SHIP - SHORTEST_SHIP);
+    return SMALLEST_SHARE + (1 - SMALLEST_SHARE) * place;
+};
 
-/** Ширина линейки в тех же долях: десять метров в том же масштабе. */
-const SCALE_WIDTH = SCALE_METRES / LONGEST_SHIP;
+/**
+ * Ширина линейки: десять метров в масштабе именно этого силуэта. У мелкого корабля масштаб
+ * крупнее — и линейка длиннее. Толщина и подпись у всех одинаковые: меняется только длина.
+ */
+const scaleWidth = (kind: ShipKind): number => (SCALE_METRES * shipWidth(kind)) / SHIP_SPECS[kind].length;
 
 /** Высота силуэта в долях ширины кнопки: ширина, делённая на пропорции его рисунка. */
 const shipHeight = (kind: ShipKind): number =>
@@ -220,7 +231,7 @@ export default function MemberForm({ mode, crew, myId, initial, onSubmit, onCanc
                                 />
                             </span>
                             <span className={styles.scaleRow}>
-                                <span className={styles.scaleBar} style={{ width: percent(SCALE_WIDTH) }}>
+                                <span className={styles.scaleBar} style={{ width: percent(scaleWidth(kind)) }}>
                                     {SCALE_SEGMENTS.map((step) => (
                                         <span key={step} className={step % 2 ? styles.scaleDark : styles.scaleLight} />
                                     ))}

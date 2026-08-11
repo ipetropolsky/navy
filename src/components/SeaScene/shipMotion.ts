@@ -55,11 +55,19 @@ const MAX_SAIL_SECONDS = 15;
 const EDGE_MARGIN = 10;
 
 /** Ширина корабля в кадре, % ширины сцены: от дальности и от размера силуэта. */
+/**
+ * Ширина слота, % ширины сцены: столько занял бы самый длинный корабль справочника,
+ * стоя на этой дальности. Дальний слот вдвое уже ближнего — это и есть перспектива.
+ * Числа общие для размера корабля и для мерки моря ниже: сделай их больше, и корабли
+ * станут крупнее, а кадр — уже в метрах, что одно и то же.
+ */
+const slotWidthPercent = (slot: number): number => 24 + slotDepth(slot) * 36;
+
 export const shipWidthPercent = (slot: number, kind: ShipKind): number =>
-    (20 + slotDepth(slot) * 30) * SHIP_SPRITES[kind].scale;
+    slotWidthPercent(slot) * SHIP_SPRITES[kind].scale;
 
 /** Сколько метров моря приходится на процент ширины кадра на этой дальности. */
-const metresPerPercent = (slot: number): number => SCENE_SCALE_LENGTH / (20 + slotDepth(slot) * 30);
+const metresPerPercent = (slot: number): number => SCENE_SCALE_LENGTH / slotWidthPercent(slot);
 
 /** Сколько своих длин кораблю идти от стоянки до края кадра. */
 export const lengthsToEdge = (leftPercent: number, widthPercent: number, side: 'left' | 'right'): number => {

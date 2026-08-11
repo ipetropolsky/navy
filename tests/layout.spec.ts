@@ -126,20 +126,29 @@ test.describe('десктоп', () => {
         );
 
         expect(drawings.length).toBeGreaterThan(1);
-        // Масштаб в списке один на всех: и метр линейки, и метр корабля везде одной длины,
-        // а самый длинный корабль занимает кнопку целиком.
-        const scales = drawings.map((drawing) => drawing.scaleMetres / drawing.scaleWidth);
+        // У каждого корабля масштаб свой — размеры в списке поджаты, чтобы катер было видно, —
+        // и линейка под ним обязана быть в этом же масштабе. Точность до третьего знака:
+        // доли процента съедают округление процентов в разметке и пиксельная сетка браузера.
         for (const drawing of drawings) {
-            // Точность до третьего знака: доли процента съедают округление процентов
-            // в разметке и пиксельная сетка браузера.
             expect(drawing.shipMetres / drawing.shipWidth, 'линейка и корабль в разных масштабах').toBeCloseTo(
-                scales[0],
+                drawing.scaleMetres / drawing.scaleWidth,
                 3
             );
             expect(drawing.shipWidth).toBeLessThanOrEqual(drawing.buttonWidth);
         }
-        expect(Math.max(...scales), 'масштаб у кораблей разный').toBeCloseTo(Math.min(...scales), 3);
-        expect(Math.max(...drawings.map((drawing) => drawing.shipWidth))).toBeCloseTo(drawings[0].buttonWidth, 0);
+
+        // Поджато, но не перевёрнуто: длиннее корабль — шире силуэт, а самый короткий занимает
+        // не меньше половины кнопки, иначе его не разглядеть.
+        const bySize = [...drawings].sort((a, b) => a.shipMetres - b.shipMetres);
+        for (let i = 1; i < bySize.length; i++) {
+            expect(bySize[i].shipWidth, 'корабль длиннее, а нарисован уже').toBeGreaterThanOrEqual(
+                bySize[i - 1].shipWidth
+            );
+        }
+        expect(bySize[0].shipWidth / bySize[0].buttonWidth, 'самый маленький корабль потерялся').toBeGreaterThanOrEqual(
+            0.5
+        );
+        expect(bySize.at(-1)!.shipWidth).toBeCloseTo(bySize.at(-1)!.buttonWidth, 0);
     });
 
     test('форма — карточка, а не полоса во всю панель', async ({ page }) => {

@@ -65,8 +65,26 @@ export interface ShipSprite {
  */
 export const SCENE_SCALE_LENGTH = Math.max(...SHIP_KINDS.map((kind) => SHIP_SPECS[kind].length));
 
-/** Размер в сцене по длине корабля: настоящий корвет вдвое длиннее катера — вдвое и рисуем. */
-const scaleByLength = (kind: ShipKind): number => Number((SHIP_SPECS[kind].length / SCENE_SCALE_LENGTH).toFixed(3));
+const SHORTEST_SHIP_LENGTH = Math.min(...SHIP_KINDS.map((kind) => SHIP_SPECS[kind].length));
+
+/**
+ * Насколько мельче самого длинного корабля выходит в кадре самый короткий. Строго по длине
+ * катер оказывался бы втрое мельче — точка на воде, в которой ничего не разобрать, — поэтому
+ * размеры поджаты: порядок сохраняется, крупный всегда крупнее, но разрыв не такой злой.
+ */
+const SMALLEST_SHARE = 0.5;
+
+/**
+ * Показатель поджатия. Не подобран на глаз: это решение уравнения
+ * (самый короткий / самый длинный) ^ k = SMALLEST_SHARE, то есть единственное k, при котором
+ * края справочника встают ровно туда, куда решено. Появится корабль короче или длиннее —
+ * показатель пересчитается сам.
+ */
+const SCALE_POWER = Math.log(SMALLEST_SHARE) / Math.log(SHORTEST_SHIP_LENGTH / SCENE_SCALE_LENGTH);
+
+/** Размер в сцене: доля от самого длинного корабля, поджатая к более ровному разбросу. */
+const scaleByLength = (kind: ShipKind): number =>
+    Number(((SHIP_SPECS[kind].length / SCENE_SCALE_LENGTH) ** SCALE_POWER).toFixed(3));
 
 /**
  * Спрайты нарисованы носом влево; в сцене отражаем по горизонтали, если нужно наоборот.
