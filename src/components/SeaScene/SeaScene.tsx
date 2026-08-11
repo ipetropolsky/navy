@@ -8,7 +8,9 @@ import seaUrl from '@/assets/scene/sea.png';
 import skyUrl from '@/assets/scene/sky.png';
 import Ship from '@/components/ships/Ship';
 import { SHIP_SPRITES } from '@/components/ships/shipSprites';
+import { MOBILE_SHIP_ZOOM } from '@/config/layout';
 import { Member, MorseFeed, ShipPlacement, slotDepth } from '@/types/channel';
+import { useIsMobile } from '@/utils/viewport';
 
 import { leaveCourse, lengthsToEdge, sailSeconds, shipWidthPercent } from '@/components/SeaScene/shipMotion';
 
@@ -63,6 +65,10 @@ const SCENE_IMAGES = [skyUrl, moonUrl, cloudFarUrl, cloudNearUrl, islandUrl, sea
 // и заход читались как два разных манёвра, а не как рывок из одного края кадра в другой.
 const RELOCATE_PAUSE_MS = 3000;
 
+// Промежуток между заходами в показе выхода эскадры. Полторы секунды: корабли идут по одному,
+// но зритель не успевает заскучать между ними.
+const INTRO_STEP_SECONDS = 1.5;
+
 /** Ждёт загрузки картинки. Не сложилось — тоже ответ: сцену показываем в любом случае. */
 const preload = (url: string): Promise<void> =>
     new Promise((resolve) => {
@@ -104,10 +110,16 @@ interface SeaSceneProps {
      * заплывёт ли следующий корабль в кадр или просто окажется на месте.
      */
     ready: boolean;
+    /**
+     * Показать выход эскадры на рейд: корабли, которые уже стоят в канале, заплывают в кадр
+     * по очереди, а не оказываются на местах. Так открывается демо-канал — там иначе не увидеть
+     * ни захода, ни того, как корабль подходит к месту.
+     */
+    playIntro?: boolean;
 }
 
 /** Ночное море: слои неба, месяца, облаков, острова и воды с кораблями-участниками. */
-export default function SeaScene({ members, myId, morseFeeds, ready, onMoveShip }: SeaSceneProps) {
+export default function SeaScene({ members, myId, morseFeeds, ready, playIntro = false, onMoveShip }: SeaSceneProps) {
     // Кто уже был в кадре. Заплывает только тот, кто вошёл при нас; те, что стояли на рейде
     // до нашего прихода, просто оказываются на месте — въезжать им неоткуда, мы пришли к ним.
     //
@@ -139,6 +151,9 @@ export default function SeaScene({ members, myId, morseFeeds, ready, onMoveShip 
     const [, redraw] = useReducer((count: number) => count + 1, 0);
     // Какой момент старта качки закреплён за каким кораблём: индекс в WAVE_STARTS.
     const waveStartById = useRef(new Map<string, number>());
+    // На сколько секунд задержан заход корабля в показе выхода эскадры. Пусто во всех
+    // остальных случаях: обычный заход начинается сразу.
+    const introDelay = useRef(new Map<string, number>());
     // Отложенные заходы после перезахода: id → таймер паузы. Чистим их при размонтировании.
     const pauseTimers = useRef(new Map<string, number>());
     useEffect(
@@ -147,6 +162,10 @@ export default function SeaScene({ members, myId, morseFeeds, ready, onMoveShip 
         },
         []
     );
+
+    // На телефоне корабли растянуты, и путь у них в метрах длиннее — длительность хода
+    // это учитывает, иначе на узком экране флот ходил бы быстрее, чем на широком.
+    const zoom = useIsMobile() ? MOBILE_SHIP_ZOOM : 1;
 
     // Задники готовы — сцену можно показывать.
     const [painted, setPainted] = useState(false);
@@ -166,6 +185,16 @@ export default function SeaScene({ members, myId, morseFeeds, ready, onMoveShip 
     if (ready && seenIds.current === null) {
         seenIds.current = new Set(members.map((member) => member.memberId));
         members.forEach((member) => shownById.current.set(member.memberId, member.place));
+        if (playIntro) {
+            // Показ: те же корабли, но заплывают. Очередь — от дальнего к ближнему, как будто
+            // эскадра подходит к рейду строем, и с промежутком, чтобы заходы не слились в один.
+            [...members]
+                .sort((a, b) => a.place.slot - b.place.slot)
+                .forEach((member, index) => {
+                    enteringIds.current.add(member.memberId);
+                    introDelay.current.set(member.memberId, index * INTRO_STEP_SECONDS);
+                });
+        }
     } else if (seenIds.current) {
         for (const member of members) {
             if (!seenIds.current.has(member.memberId)) {
@@ -423,11 +452,12 @@ export default function SeaScene({ members, myId, morseFeeds, ready, onMoveShip 
                                 '--enter-from': `${member.place.enterFrom === 'right' ? '' : '-'}${(
                                     enterLengths * 100
                                 ).toFixed(0)}%`,
-                                '--enter-seconds': `${sailSeconds(enterLengths, member.place.slot, member.shipKind, false).toFixed(1)}s`,
+                                '--enter-seconds': `${sailSeconds(enterLengths, member.place.slot, member.shipKind, false, zoom).toFixed(1)}s`,
+                                '--enter-delay': `${introDelay.current.get(member.memberId) ?? 0}s`,
                                 '--leave-to': `${leave.side === 'right' ? '' : '-'}${(leaveLengths * 100).toFixed(0)}%`,
                                 // Задний ход отличается только длительностью: кривая та же,
                                 // а скорость ниже — иначе замер пиковой скорости под неё не подходит.
-                                '--leave-seconds': `${sailSeconds(leaveLengths, member.place.slot, member.shipKind, leave.astern).toFixed(1)}s`,
+                                '--leave-seconds': `${sailSeconds(leaveLengths, member.place.slot, member.shipKind, leave.astern, zoom).toFixed(1)}s`,
                                 // Ход поперёк кадра: откуда корабль пошёл и сколько ему идти.
                                 // Здесь именно положение в кадре, а не сдвиг: стили доводят
                                 // корабль до нынешнего --slot-left, и промежуточные значения
@@ -436,7 +466,7 @@ export default function SeaScene({ members, myId, morseFeeds, ready, onMoveShip 
                                 // а её ограничивает max-width, отчего в начале хода корабль
                                 // прыгал на десяток пикселей.
                                 '--shift-from': `${(shiftFrom ?? member.place.left).toFixed(2)}%`,
-                                '--shift-seconds': `${sailSeconds(shiftLengths, member.place.slot, member.shipKind, shiftAstern).toFixed(1)}s`,
+                                '--shift-seconds': `${sailSeconds(shiftLengths, member.place.slot, member.shipKind, shiftAstern, zoom).toFixed(1)}s`,
                             } as CSSProperties
                         }
                     >

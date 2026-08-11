@@ -47,7 +47,7 @@ export interface ShipSprite {
     url: string;
     /** Размер картинки в пикселях: в нём же заданы все отметки. */
     size: { width: number; height: number };
-    /** Относительный размер в сцене (крупный корабль = 1). */
+    /** Какую долю ширины слота занимает силуэт в сцене: см. shipSizeShare. */
     scale: number;
     /** Центр бортового номера. */
     hullNumber: SpritePoint;
@@ -68,23 +68,28 @@ export const SCENE_SCALE_LENGTH = Math.max(...SHIP_KINDS.map((kind) => SHIP_SPEC
 const SHORTEST_SHIP_LENGTH = Math.min(...SHIP_KINDS.map((kind) => SHIP_SPECS[kind].length));
 
 /**
- * Насколько мельче самого длинного корабля выходит в кадре самый короткий. Строго по длине
- * катер оказывался бы втрое мельче — точка на воде, в которой ничего не разобрать, — поэтому
- * размеры поджаты: порядок сохраняется, крупный всегда крупнее, но разрыв не такой злой.
+ * Пределы размера силуэта: доля от отведённого ему места у самого короткого корабля
+ * справочника и у самого длинного. Строго по длине катер выходил бы втрое мельче корабля —
+ * точкой на воде, в которой ничего не разобрать, — поэтому разброс поджат. Порядок при этом
+ * сохраняется: крупный всегда крупнее мелкого.
+ *
+ * Правило одно на всё приложение: и на сцену, где место — это слот, и на список кораблей,
+ * где место — ширина кнопки.
  */
-const SMALLEST_SHARE = 0.5;
+export const SHIP_SIZE_MIN = 0.5;
+export const SHIP_SIZE_MAX = 1;
 
 /**
  * Показатель поджатия. Не подобран на глаз: это решение уравнения
- * (самый короткий / самый длинный) ^ k = SMALLEST_SHARE, то есть единственное k, при котором
- * края справочника встают ровно туда, куда решено. Появится корабль короче или длиннее —
- * показатель пересчитается сам.
+ * (самый короткий / самый длинный) ^ k = SHIP_SIZE_MIN / SHIP_SIZE_MAX, то есть единственное k,
+ * при котором края справочника встают ровно туда, куда решено. Появится корабль короче
+ * или длиннее — показатель пересчитается сам.
  */
-const SCALE_POWER = Math.log(SMALLEST_SHARE) / Math.log(SHORTEST_SHIP_LENGTH / SCENE_SCALE_LENGTH);
+const SIZE_POWER = Math.log(SHIP_SIZE_MIN / SHIP_SIZE_MAX) / Math.log(SHORTEST_SHIP_LENGTH / SCENE_SCALE_LENGTH);
 
-/** Размер в сцене: доля от самого длинного корабля, поджатая к более ровному разбросу. */
-const scaleByLength = (kind: ShipKind): number =>
-    Number(((SHIP_SPECS[kind].length / SCENE_SCALE_LENGTH) ** SCALE_POWER).toFixed(3));
+/** Какую долю отведённого места занимает силуэт этого корабля. */
+export const shipSizeShare = (kind: ShipKind): number =>
+    Number((SHIP_SIZE_MAX * (SHIP_SPECS[kind].length / SCENE_SCALE_LENGTH) ** SIZE_POWER).toFixed(4));
 
 /**
  * Спрайты нарисованы носом влево; в сцене отражаем по горизонтали, если нужно наоборот.
@@ -105,7 +110,7 @@ export const SHIP_SPRITES: Record<ShipKind, ShipSprite> = {
     pr1234: {
         url: pr1234Url,
         size: { width: 1100, height: 393 },
-        scale: scaleByLength('pr1234'),
+        scale: shipSizeShare('pr1234'),
         hullNumber: { x: 242, y: 342 },
         lights: {
             signal: { x: 594, y: 6 },
@@ -120,7 +125,7 @@ export const SHIP_SPRITES: Record<ShipKind, ShipSprite> = {
     pr12412: {
         url: pr12412Url,
         size: { width: 1100, height: 387 },
-        scale: scaleByLength('pr12412'),
+        scale: shipSizeShare('pr12412'),
         hullNumber: { x: 242, y: 337 },
         lights: {
             signal: { x: 598, y: 6 },
@@ -135,7 +140,7 @@ export const SHIP_SPRITES: Record<ShipKind, ShipSprite> = {
     pr1141: {
         url: pr1141Url,
         size: { width: 1100, height: 385 },
-        scale: scaleByLength('pr1141'),
+        scale: shipSizeShare('pr1141'),
         hullNumber: { x: 242, y: 335 },
         lights: {
             signal: { x: 407, y: 5 },
@@ -150,7 +155,7 @@ export const SHIP_SPRITES: Record<ShipKind, ShipSprite> = {
     pr201: {
         url: pr201Url,
         size: { width: 1100, height: 351 },
-        scale: scaleByLength('pr201'),
+        scale: shipSizeShare('pr201'),
         hullNumber: { x: 242, y: 305 },
         lights: {
             signal: { x: 564, y: 5 },
@@ -165,7 +170,7 @@ export const SHIP_SPRITES: Record<ShipKind, ShipSprite> = {
     pr205: {
         url: pr205Url,
         size: { width: 1100, height: 356 },
-        scale: scaleByLength('pr205'),
+        scale: shipSizeShare('pr205'),
         hullNumber: { x: 242, y: 310 },
         lights: {
             signal: { x: 518, y: 5 },
@@ -180,7 +185,7 @@ export const SHIP_SPRITES: Record<ShipKind, ShipSprite> = {
     pr1258: {
         url: pr1258Url,
         size: { width: 1100, height: 542 },
-        scale: scaleByLength('pr1258'),
+        scale: shipSizeShare('pr1258'),
         hullNumber: { x: 242, y: 488 },
         lights: {
             signal: { x: 576, y: 9 },
@@ -195,7 +200,7 @@ export const SHIP_SPRITES: Record<ShipKind, ShipSprite> = {
     pr1400: {
         url: pr1400Url,
         size: { width: 1100, height: 450 },
-        scale: scaleByLength('pr1400'),
+        scale: shipSizeShare('pr1400'),
         hullNumber: { x: 242, y: 401 },
         lights: {
             signal: { x: 688, y: 7 },
@@ -210,7 +215,7 @@ export const SHIP_SPRITES: Record<ShipKind, ShipSprite> = {
     corvette: {
         url: corvetteUrl,
         size: { width: 1100, height: 366 },
-        scale: scaleByLength('corvette'),
+        scale: shipSizeShare('corvette'),
         hullNumber: { x: 242, y: 318 },
         lights: {
             signal: { x: 614, y: 6 },
@@ -225,7 +230,7 @@ export const SHIP_SPRITES: Record<ShipKind, ShipSprite> = {
     missile: {
         url: frigateUrl,
         size: { width: 1100, height: 337 },
-        scale: scaleByLength('missile'),
+        scale: shipSizeShare('missile'),
         hullNumber: { x: 253, y: 293 },
         lights: {
             signal: { x: 587, y: 6 },
@@ -240,7 +245,7 @@ export const SHIP_SPRITES: Record<ShipKind, ShipSprite> = {
     patrol: {
         url: patrolUrl,
         size: { width: 1100, height: 355 },
-        scale: scaleByLength('patrol'),
+        scale: shipSizeShare('patrol'),
         hullNumber: { x: 242, y: 305 },
         lights: {
             signal: { x: 610, y: 6 },
@@ -255,7 +260,7 @@ export const SHIP_SPRITES: Record<ShipKind, ShipSprite> = {
     minesweeper: {
         url: patrolUrl,
         size: { width: 1100, height: 355 },
-        scale: scaleByLength('minesweeper'),
+        scale: shipSizeShare('minesweeper'),
         hullNumber: { x: 242, y: 305 },
         lights: {
             signal: { x: 610, y: 6 },
@@ -270,7 +275,7 @@ export const SHIP_SPRITES: Record<ShipKind, ShipSprite> = {
     torpedo: {
         url: frigateUrl,
         size: { width: 1100, height: 337 },
-        scale: scaleByLength('torpedo'),
+        scale: shipSizeShare('torpedo'),
         hullNumber: { x: 253, y: 293 },
         lights: {
             signal: { x: 587, y: 6 },

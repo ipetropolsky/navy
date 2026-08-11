@@ -26,6 +26,23 @@ export const openChannel = async (page: Page, slug = DEMO, memberId?: string): P
     await page.waitForTimeout(SCENE_READY_MS);
 };
 
+/**
+ * Завести свой канал и остаться в нём. Нужен там, где важен ровно один корабль в кадре:
+ * в демо-канале при открытии эскадра выходит на рейд, и идущих кораблей там сразу несколько.
+ */
+export const openNewChannel = async (page: Page, slug: string): Promise<void> => {
+    await page.goto('/', { waitUntil: 'networkidle' });
+    await page.getByPlaceholder('Эскадра «Полночь»').fill(slug);
+    await page.locator('input[placeholder="eskadra-polnoch"]').fill(slug);
+    await page.locator('button[type=submit]').click();
+    await page.waitForTimeout(SCENE_READY_MS);
+};
+
+/** Дождаться, пока в кадре не останется идущих кораблей: показ выхода эскадры отыгран. */
+export const waitForCalm = async (page: Page): Promise<void> => {
+    await expect(page.locator('[data-motion]')).toHaveCount(0, { timeout: 30_000 });
+};
+
 /** Заполнить форму постановки в строй и отправить её. */
 export const join = async (page: Page, name: string, hullNumber: string, shipKind?: string): Promise<void> => {
     await page.getByPlaceholder('Гром').fill(name);

@@ -1,6 +1,6 @@
 import { Page, expect, test } from '@playwright/test';
 
-import { ALBATROS, DEMO, join, openChannel, ships } from '@tests/helpers';
+import { ALBATROS, DEMO, join, openChannel, openNewChannel, ships, waitForCalm } from '@tests/helpers';
 
 /**
  * Сцена: то, на чём уже наступали. Свой корабль однажды вставал на место без анимации,
@@ -22,7 +22,8 @@ const lights = (page: Page, within = '[class*="shipSlot"]'): Promise<{ kind: str
     );
 
 test('свой корабль заплывает в кадр, а не возникает на месте', async ({ page }) => {
-    await openChannel(page, DEMO);
+    // Свой канал, а не демо: там в кадре только наш корабль и путать его не с кем.
+    await openNewChannel(page, 'zahod');
     await join(page, 'Гроза', '777');
 
     // Своя вкладка узнаёт о корабле дважды: сначала приходит участник, потом myId.
@@ -40,7 +41,7 @@ test('ход корабля идёт с правдоподобной скоро�
     const seconds = async (kind: string): Promise<number> => {
         const context = await browser.newContext();
         const page = await context.newPage();
-        await openChannel(page, DEMO);
+        await openNewChannel(page, `hod${kind.length}`);
         await join(page, `Гость${kind.length}`, String(100 + kind.length), kind);
         const slot = page.locator('[data-motion="entering"]');
         await expect(slot).toHaveCount(1);
@@ -53,8 +54,10 @@ test('ход корабля идёт с правдоподобной скоро�
     const minesweeper = await seconds('Тральщик');
 
     // Пределы широкие нарочно: важно, что счёт идёт от узлов и метров, а не что вышло
-    // ровно столько-то. Мгновенных прыжков и получасовых прогонов быть не должно.
-    expect(patrol).toBeGreaterThan(3);
+    // ровно столько-то. Мгновенных прыжков и получасовых прогонов быть не должно. Нижний
+    // предел низкий не зря: место на рейде выбирается случайно, и самому быстрому катеру,
+    // вставшему у самой кромки кадра, идти всего секунды три.
+    expect(patrol).toBeGreaterThan(2);
     expect(minesweeper).toBeLessThanOrEqual(15);
     // Катер вдвое короче тральщика и втрое быстрее его по паспорту — это должно быть видно.
     expect(patrol).toBeLessThan(minesweeper);
@@ -95,6 +98,9 @@ test('вода замыкает круг без скачка', async ({ page }) 
 test('корабль уходит за кромку и пропадает из кадра', async ({ page }) => {
     await openChannel(page, DEMO, ALBATROS);
     await expect(ships(page)).toHaveCount(3);
+    // Уход смотрим с рейда, а не посреди показа: иначе корабль снимался бы с места,
+    // ещё не дойдя до него.
+    await waitForCalm(page);
 
     await page.getByLabel('Корабли на связи').click();
     await page.getByRole('button', { name: 'Выйти из канала' }).click();
@@ -107,6 +113,8 @@ test('корабль уходит за кромку и пропадает из �
 
 test('огни на рейде якорные, на ходу ходовые, и от 50 метров их по два', async ({ page }) => {
     await openChannel(page, DEMO, ALBATROS);
+    // Демо открывается показом: эскадра выходит на рейд. Огни смотрим, когда все встали.
+    await waitForCalm(page);
 
     // В демо-канале три корабля, и только «Вымпел» длиннее 50 метров: ему положены
     // два якорных огня, носовой выше кормового, остальным хватает одного.

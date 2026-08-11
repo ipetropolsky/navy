@@ -39,7 +39,7 @@ const KNOT_MPS = 1852 / 3600;
  * снимаются малым: рядом соседи, и разводить волну на весь рейд незачем. Заодно и смотреть
  * на манёвр приятнее — полным ходом малый противолодочный пересекал бы кадр за семь секунд.
  */
-const ROADSTEAD_SPEED_RATIO = 0.6;
+const ROADSTEAD_SPEED_RATIO = 0.55;
 
 /** Задним ходом корабль идёт медленнее переднего: винт и обводы работают не в свою сторону. */
 const ASTERN_SPEED_RATIO = 0.7;
@@ -54,7 +54,6 @@ const MAX_SAIL_SECONDS = 15;
 /** Запас за кромкой кадра, % ширины сцены: корабль должен уйти целиком, с оглядкой на max-width. */
 const EDGE_MARGIN = 10;
 
-/** Ширина корабля в кадре, % ширины сцены: от дальности и от размера силуэта. */
 /**
  * Ширина слота, % ширины сцены: столько занял бы самый длинный корабль справочника,
  * стоя на этой дальности. Дальний слот вдвое уже ближнего — это и есть перспектива.
@@ -83,8 +82,20 @@ export const lengthsToEdge = (leftPercent: number, widthPercent: number, side: '
  * приходит, поэтому «столько-то метров за столько-то секунд» — честная мерка, а как скорость
  * распределится внутри прогона, решает кривая в стилях.
  */
-export const sailSeconds = (lengths: number, slot: number, kind: ShipKind, astern: boolean): number => {
-    const metres = lengths * shipWidthPercent(slot, kind) * metresPerPercent(slot);
+export const sailSeconds = (
+    lengths: number,
+    slot: number,
+    kind: ShipKind,
+    astern: boolean,
+    /**
+     * Во сколько раз корабли в кадре растянуты сверх расчётного размера — на телефоне это
+     * MOBILE_SHIP_ZOOM. Путь-то считается в длинах корпуса, а корпус растянут вместе со всем
+     * остальным: без поправки корабль проходил бы за то же время больше метров, то есть
+     * на узком экране шёл бы быстрее, чем на широком.
+     */
+    zoom = 1
+): number => {
+    const metres = lengths * shipWidthPercent(slot, kind) * zoom * metresPerPercent(slot);
     const knots = SHIP_SPECS[kind].knots * ROADSTEAD_SPEED_RATIO * (astern ? ASTERN_SPEED_RATIO : 1);
     return Math.min(metres / (knots * KNOT_MPS), MAX_SAIL_SECONDS);
 };

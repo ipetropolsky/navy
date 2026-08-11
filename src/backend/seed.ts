@@ -1,3 +1,6 @@
+import { Member, ShipKind, ShipPlacement } from '@/types/channel';
+
+import { placeShip } from '@/backend/placement';
 import { ChannelSnapshot } from '@/backend/types';
 
 /**
@@ -12,9 +15,10 @@ import { ChannelSnapshot } from '@/backend/types';
  * Время у сообщений считается от полуночи сегодняшнего дня, а не хранится числом:
  * иначе демо-переписка со временем уезжала бы всё дальше в прошлое.
  *
- * Места на рейде заданы руками, по одному кораблю в каждом коридоре и на разной дальности:
- * так сразу видно и перспективу, и то, что корабли не толпятся. Левый коридор занят только
- * с четвёртого слота — ближе к горизонту там остров.
+ * Места на рейде не заданы руками, а выбираются той же расстановкой, что и для всех
+ * остальных: три корабля разного размера встают по её правилам — крупный дальше, мелкий
+ * ближе, — и каждый раз по-новому. Заодно это и проверка расстановки: демо открывают чаще,
+ * чем читают тесты.
  */
 
 export const DEMO_CHANNEL_ID = 'ch-demo';
@@ -26,6 +30,48 @@ const minutesAfterMidnight = (hours: number, minutes: number): number => {
     return midnight.getTime();
 };
 
+/**
+ * Корабли демо-канала: крупный, средний и малый — чтобы в кадре была видна разница в размере,
+ * а расстановка развела их по дальности. Места раздаются по очереди, как при настоящем входе.
+ */
+const DEMO_CREW: (Omit<Member, 'place'> & { shipKind: ShipKind })[] = [
+    {
+        memberId: 'm-albatros',
+        name: 'Альбатрос',
+        hullNumber: '317',
+        shipKind: 'patrol',
+        color: '#8ecae6',
+        joinedAt: minutesAfterMidnight(21, 30),
+    },
+    {
+        memberId: 'm-vympel',
+        name: 'Вымпел',
+        hullNumber: '561',
+        shipKind: 'pr1234',
+        color: '#f2cc8f',
+        joinedAt: minutesAfterMidnight(21, 32),
+    },
+    {
+        memberId: 'm-rezvy',
+        name: 'Резвый',
+        hullNumber: '208',
+        shipKind: 'pr205',
+        color: '#95d5b2',
+        joinedAt: minutesAfterMidnight(21, 34),
+    },
+];
+
+const placeDemoCrew = (): Member[] => {
+    const taken: ShipPlacement[] = [];
+    return DEMO_CREW.map((member) => {
+        // Место найдётся всегда: три корабля на десять слотов. Пустого места ради типов
+        // хватит и первого слота — до него дело не дойдёт.
+        const place = placeShip(member.shipKind, taken) ?? { ...taken[0] };
+        taken.push(place);
+        return { ...member, place };
+    });
+};
+
 export const createDemoChannel = (): ChannelSnapshot => ({
     channel: {
         channelId: DEMO_CHANNEL_ID,
@@ -33,35 +79,7 @@ export const createDemoChannel = (): ChannelSnapshot => ({
         title: 'Эскадра «Полночь»',
         createdAt: minutesAfterMidnight(21, 30),
     },
-    members: [
-        {
-            memberId: 'm-albatros',
-            name: 'Альбатрос',
-            hullNumber: '317',
-            shipKind: 'patrol',
-            color: '#8ecae6',
-            place: { slot: 9, corridor: 'center', left: 52, facing: 'left', enterFrom: 'right', tried: ['center'] },
-            joinedAt: minutesAfterMidnight(21, 30),
-        },
-        {
-            memberId: 'm-vympel',
-            name: 'Вымпел',
-            hullNumber: '561',
-            shipKind: 'pr1234',
-            color: '#f2cc8f',
-            place: { slot: 4, corridor: 'right', left: 79, facing: 'right', enterFrom: 'left', tried: ['right'] },
-            joinedAt: minutesAfterMidnight(21, 32),
-        },
-        {
-            memberId: 'm-rezvy',
-            name: 'Резвый',
-            hullNumber: '208',
-            shipKind: 'pr205',
-            color: '#95d5b2',
-            place: { slot: 6, corridor: 'left', left: 21, facing: 'left', enterFrom: 'right', tried: ['left'] },
-            joinedAt: minutesAfterMidnight(21, 34),
-        },
-    ],
+    members: placeDemoCrew(),
     messages: [
         {
             messageId: 'msg-1',

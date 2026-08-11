@@ -2,7 +2,7 @@ import { Fragment, useState } from 'react';
 
 import { ChannelError, MemberDraft } from '@/backend';
 import MemberName from '@/components/ships/MemberName';
-import { SHIP_SPRITES } from '@/components/ships/shipSprites';
+import { SHIP_SPRITES, shipSizeShare } from '@/components/ships/shipSprites';
 import Button from '@/components/ui/Button';
 import Field from '@/components/ui/Field';
 import Input from '@/components/ui/Input';
@@ -38,9 +38,9 @@ interface MemberFormProps {
 const randomHullNumber = (): string => String(Math.floor(Math.random() * 900) + 100);
 
 /**
- * Размер силуэта в списке. Строго по длине не годится: катер выходил бы втрое мельче корабля
- * и разглядеть его было бы нечего. Поэтому размеры поджаты — самый длинный занимает всю ширину
- * кнопки, самый короткий половину, остальные распределены по длине между этими краями.
+ * Размер силуэта в списке — тем же правилом, что и в сцене (shipSizeShare): самый длинный
+ * корабль занимает всю ширину кнопки, самый короткий — SHIP_SIZE_MIN от неё, остальные между.
+ * Строго по длине катер выходил бы втрое мельче корабля, и разглядеть его было бы нечего.
  *
  * Масштаб от этого у каждого свой, и сравнивать силуэты между собой на глаз уже нельзя —
  * зато под каждым стоит его собственная линейка на десять метров, и по ней разница видна сразу.
@@ -51,17 +51,8 @@ const randomHullNumber = (): string => String(Math.floor(Math.random() * 900) + 
 const SCALE_METRES = 10;
 const SCALE_SEGMENTS = [0, 1, 2, 3, 4];
 
-/** Доля ширины кнопки у самого короткого корабля. У самого длинного — вся ширина. */
-const SMALLEST_SHARE = 0.5;
-
-const LONGEST_SHIP = Math.max(...SHIP_KINDS.map((kind) => SHIP_SPECS[kind].length));
-const SHORTEST_SHIP = Math.min(...SHIP_KINDS.map((kind) => SHIP_SPECS[kind].length));
-
-/** Ширина силуэта в долях ширины кнопки. */
-const shipWidth = (kind: ShipKind): number => {
-    const place = (SHIP_SPECS[kind].length - SHORTEST_SHIP) / (LONGEST_SHIP - SHORTEST_SHIP);
-    return SMALLEST_SHARE + (1 - SMALLEST_SHARE) * place;
-};
+/** Ширина силуэта в долях ширины кнопки — по тому же правилу, что и размер корабля в сцене. */
+const shipWidth = (kind: ShipKind): number => shipSizeShare(kind);
 
 /**
  * Ширина линейки: десять метров в масштабе именно этого силуэта. У мелкого корабля масштаб
