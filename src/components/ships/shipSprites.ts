@@ -54,12 +54,15 @@ export interface ShipSprite {
     lights: ShipLights;
 }
 
-/** Корабль, по которому меряются все остальные: у него в сцене масштаб 1. */
-const SCALE_REFERENCE: ShipKind = 'corvette';
+/**
+ * Сколько метров в единице масштаба сцены: корабль такой длины занимает в кадре ширину,
+ * посчитанную для его слота один в один. Это мерка, а не корабль, — привязывать её к чьей-то
+ * длине нельзя: стоит поправить справочник, и вся сцена поедет вместе со скоростями.
+ */
+export const SCENE_SCALE_LENGTH = 71.2;
 
 /** Размер в сцене по длине корабля: настоящий корвет вдвое длиннее катера — вдвое и рисуем. */
-const scaleByLength = (kind: ShipKind): number =>
-    Number((SHIP_SPECS[kind].length / SHIP_SPECS[SCALE_REFERENCE].length).toFixed(3));
+const scaleByLength = (kind: ShipKind): number => Number((SHIP_SPECS[kind].length / SCENE_SCALE_LENGTH).toFixed(3));
 
 /**
  * Спрайты нарисованы носом влево; в сцене отражаем по горизонтали, если нужно наоборот.
@@ -184,7 +187,7 @@ export const SHIP_SPRITES: Record<ShipKind, ShipSprite> = {
     corvette: {
         url: corvetteUrl,
         size: { width: 1100, height: 366 },
-        scale: 1,
+        scale: scaleByLength('corvette'),
         hullNumber: { x: 242, y: 318 },
         lights: {
             signal: { x: 614, y: 6 },
@@ -199,7 +202,7 @@ export const SHIP_SPRITES: Record<ShipKind, ShipSprite> = {
     missile: {
         url: frigateUrl,
         size: { width: 1100, height: 337 },
-        scale: 0.82,
+        scale: scaleByLength('missile'),
         hullNumber: { x: 253, y: 293 },
         lights: {
             signal: { x: 587, y: 6 },
@@ -214,7 +217,7 @@ export const SHIP_SPRITES: Record<ShipKind, ShipSprite> = {
     patrol: {
         url: patrolUrl,
         size: { width: 1100, height: 355 },
-        scale: 0.68,
+        scale: scaleByLength('patrol'),
         hullNumber: { x: 242, y: 305 },
         lights: {
             signal: { x: 610, y: 6 },
@@ -229,7 +232,7 @@ export const SHIP_SPRITES: Record<ShipKind, ShipSprite> = {
     minesweeper: {
         url: patrolUrl,
         size: { width: 1100, height: 355 },
-        scale: 0.78,
+        scale: scaleByLength('minesweeper'),
         hullNumber: { x: 242, y: 305 },
         lights: {
             signal: { x: 610, y: 6 },
@@ -244,7 +247,7 @@ export const SHIP_SPRITES: Record<ShipKind, ShipSprite> = {
     torpedo: {
         url: frigateUrl,
         size: { width: 1100, height: 337 },
-        scale: 0.55,
+        scale: scaleByLength('torpedo'),
         hullNumber: { x: 253, y: 293 },
         lights: {
             signal: { x: 587, y: 6 },

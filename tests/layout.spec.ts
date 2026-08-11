@@ -110,8 +110,8 @@ test.describe('десктоп', () => {
         expect(view.horizon / view.scene.height).toBeGreaterThan(0.5);
     });
 
-    // Линейка под силуэтом — единственное, по чему в списке виден размер корабля: сами силуэты
-    // нарисованы каждый в своём масштабе. Ошибись тут на шаг — и катер молча станет корветом.
+    // Масштаб в списке один на всех, и линейка — единственное, что переводит его в метры.
+    // Ошибись тут на шаг — и катер молча станет корветом.
     test('масштабная линейка не врёт: метр на ней и метр корабля — один и тот же', async ({ page }) => {
         await openChannel(page, DEMO);
         const drawings = await page.evaluate(() =>
@@ -126,16 +126,20 @@ test.describe('десктоп', () => {
         );
 
         expect(drawings.length).toBeGreaterThan(1);
+        // Масштаб в списке один на всех: и метр линейки, и метр корабля везде одной длины,
+        // а самый длинный корабль занимает кнопку целиком.
+        const scales = drawings.map((drawing) => drawing.scaleMetres / drawing.scaleWidth);
         for (const drawing of drawings) {
-            const metrePerPixel = drawing.scaleMetres / drawing.scaleWidth;
+            // Точность до третьего знака: доли процента съедают округление процентов
+            // в разметке и пиксельная сетка браузера.
             expect(drawing.shipMetres / drawing.shipWidth, 'линейка и корабль в разных масштабах').toBeCloseTo(
-                metrePerPixel,
-                4
+                scales[0],
+                3
             );
-            // Линейка у всех одной длины — четверть кнопки, — а силуэт в кнопку помещается.
-            expect(drawing.scaleWidth).toBeCloseTo(drawing.buttonWidth / 4, 1);
             expect(drawing.shipWidth).toBeLessThanOrEqual(drawing.buttonWidth);
         }
+        expect(Math.max(...scales), 'масштаб у кораблей разный').toBeCloseTo(Math.min(...scales), 3);
+        expect(Math.max(...drawings.map((drawing) => drawing.shipWidth))).toBeCloseTo(drawings[0].buttonWidth, 0);
     });
 
     test('форма — карточка, а не полоса во всю панель', async ({ page }) => {

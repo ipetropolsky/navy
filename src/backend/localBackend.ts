@@ -43,7 +43,7 @@ const BROADCAST_NAME = 'kilvater';
  * Здесь должна появиться миграция раньше, чем в канале заведётся первый неигрушечный разговор.
  * Подробно — в docs/BACKEND-API.md, раздел «К чужим данным — бережно».
  */
-const STORAGE_VERSION = 6;
+const STORAGE_VERSION = 7;
 
 /** Ключ, под которым состояние лежало до появления версии. Чистим, чтобы не мусорить. */
 const LEGACY_STORAGE_KEY = 'kilvater.v1';
@@ -260,7 +260,10 @@ export function createLocalBackend(): ChannelBackend {
             checkDraftIsFree(snapshot, draft);
             // Место на рейде назначаем здесь, а не в сцене: тогда оно уедет вместе с участником
             // во все вкладки, и корабль у всех окажется в одном и том же месте.
-            const place = placeShip(snapshot.members.map((item) => item.place));
+            const place = placeShip(
+                draft.shipKind,
+                snapshot.members.map((item) => item.place)
+            );
             if (!place) {
                 throw new ChannelError('channel-full', 'На рейде не осталось свободного места');
             }
@@ -313,7 +316,7 @@ export function createLocalBackend(): ChannelBackend {
                     throw new ChannelError('member-not-found', 'Такого корабля в канале нет');
                 }
                 const others = current.members.filter((item) => item.memberId !== memberId).map((item) => item.place);
-                const place = moveShip(member.place, others);
+                const place = moveShip(member.shipKind, member.place, others);
                 if (place) {
                     member.place = place;
                 }

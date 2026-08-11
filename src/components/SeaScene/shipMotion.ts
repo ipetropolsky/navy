@@ -1,4 +1,4 @@
-import { SHIP_SPRITES } from '@/components/ships/shipSprites';
+import { SCENE_SCALE_LENGTH, SHIP_SPRITES } from '@/components/ships/shipSprites';
 import {
     ISLAND_FREE_SLOT,
     ISLAND_SIDE,
@@ -24,14 +24,12 @@ import {
 /** Узел — морская миля в час. */
 const KNOT_MPS = 1852 / 3600;
 
-/**
- * Линейка сцены: по какому кораблю меряем море в метрах. Мерка нужна общая для всех — море
- * одно, и катер не может идти по нему в других метрах, чем тральщик. Взят самый крупный
- * силуэт: его спрайт занимает известную долю кадра, настоящая длина известна, отсюда и масштаб.
- * На ближнем плане получается кадр шириной около 140 м, у горизонта — около 300 м:
- * это и есть перспектива, выраженная в метрах.
+/*
+ * Линейка сцены — SCENE_SCALE_LENGTH из shipSprites: сколько метров в единице масштаба.
+ * Мерка нужна общая для всех: море одно, и катер не может идти по нему в других метрах,
+ * чем тральщик. На ближнем плане получается кадр шириной около 140 м, у горизонта —
+ * около 300 м: это и есть перспектива, выраженная в метрах.
  */
-const SCALE_REFERENCE: ShipKind = 'corvette';
 
 /**
  * Какой долей полного хода корабль идёт на рейде. Это и есть общий для всех коэффициент:
@@ -61,8 +59,7 @@ export const shipWidthPercent = (slot: number, kind: ShipKind): number =>
     (20 + slotDepth(slot) * 30) * SHIP_SPRITES[kind].scale;
 
 /** Сколько метров моря приходится на процент ширины кадра на этой дальности. */
-const metresPerPercent = (slot: number): number =>
-    SHIP_SPECS[SCALE_REFERENCE].length / shipWidthPercent(slot, SCALE_REFERENCE);
+const metresPerPercent = (slot: number): number => SCENE_SCALE_LENGTH / (20 + slotDepth(slot) * 30);
 
 /** Сколько своих длин кораблю идти от стоянки до края кадра. */
 export const lengthsToEdge = (leftPercent: number, widthPercent: number, side: 'left' | 'right'): number => {

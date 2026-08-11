@@ -38,33 +38,25 @@ interface MemberFormProps {
 const randomHullNumber = (): string => String(Math.floor(Math.random() * 900) + 100);
 
 /**
- * Масштабная линейка под силуэтом — как на чертеже. Считается она от линейки, а не от корабля:
- * линейка у всех одна и та же по длине на экране — ровно четверть ширины кнопки, всегда пять
- * делений, — а вот метров в ней столько, сколько нужно, чтобы корабль в эту мерку поместился.
- * Уже из цены деления и получается ширина силуэта: сколько в нём таких четвертинок, столько
- * и ширины. Поэтому катер выходит нарисованным крупнее корвета — и это видно по линейке:
- * у катера в ней пять метров, у корвета двадцать.
+ * Масштаб в списке один на всех: самый длинный корабль занимает всю ширину кнопки, остальные —
+ * свою долю от него. Катер рядом с корветом и выглядит катером, сравнивать их можно прямо
+ * глазами, а линейка внизу говорит, сколько это в метрах: она у всех одна и та же, десять
+ * метров.
  *
  * Всё считается долями ширины кнопки, ни одного числа в пикселях: на любом экране и при любом
  * изменении окна и линейка, и силуэт тянутся вместе, а соотношение между ними не меняется.
  */
+const SCALE_METRES = 10;
 const SCALE_SEGMENTS = [0, 1, 2, 3, 4];
 
-/** Какую долю ширины кнопки занимает линейка. */
-const SCALE_SHARE = 0.25;
+/** Самый длинный корабль в справочнике: по нему и построен масштаб. */
+const LONGEST_SHIP = Math.max(...SHIP_KINDS.map((kind) => SHIP_SPECS[kind].length));
 
-/** Цена деления и длина линейки кратны этому: круглые числа читаются с одного взгляда. */
-const SCALE_ROUND_TO = 5;
+/** Ширина силуэта в долях ширины кнопки. */
+const shipWidth = (kind: ShipKind): number => SHIP_SPECS[kind].length / LONGEST_SHIP;
 
-/**
- * Сколько метров в линейке у этого корабля. Наименьшее круглое число, при котором корабль
- * в четыре линейки укладывается, — то есть силуэт гарантированно не шире кнопки.
- */
-const scaleMetres = (kind: ShipKind): number =>
-    Math.ceil((SHIP_SPECS[kind].length * SCALE_SHARE) / SCALE_ROUND_TO) * SCALE_ROUND_TO;
-
-/** Ширина силуэта в долях ширины кнопки: сколько в корабле линеек. */
-const shipWidth = (kind: ShipKind): number => (SHIP_SPECS[kind].length * SCALE_SHARE) / scaleMetres(kind);
+/** Ширина линейки в тех же долях: десять метров в том же масштабе. */
+const SCALE_WIDTH = SCALE_METRES / LONGEST_SHIP;
 
 /** Высота силуэта в долях ширины кнопки: ширина, делённая на пропорции его рисунка. */
 const shipHeight = (kind: ShipKind): number =>
@@ -218,7 +210,7 @@ export default function MemberForm({ mode, crew, myId, initial, onSubmit, onCanc
                             onClick={() => setShipKind(kind)}
                         >
                             {/* Место под силуэт одно на всех, а сам силуэт в нём той ширины,
-                                какую даёт его масштаб; корма прижата к левому краю. */}
+                                какую даёт его длина. */}
                             <span className={styles.kindImageBox} style={{ aspectRatio: IMAGE_BOX_ASPECT }}>
                                 <img
                                     className={styles.kindImage}
@@ -227,15 +219,13 @@ export default function MemberForm({ mode, crew, myId, initial, onSubmit, onCanc
                                     alt=""
                                 />
                             </span>
-                            {/* Линейка начинается от того же края, что и корма: длину корабля
-                                меряют от неё, и обе отметки стоят на одной линии. */}
                             <span className={styles.scaleRow}>
-                                <span className={styles.scaleBar} style={{ width: percent(SCALE_SHARE) }}>
+                                <span className={styles.scaleBar} style={{ width: percent(SCALE_WIDTH) }}>
                                     {SCALE_SEGMENTS.map((step) => (
                                         <span key={step} className={step % 2 ? styles.scaleDark : styles.scaleLight} />
                                     ))}
                                 </span>
-                                <span className={styles.scaleLabel}>{scaleMetres(kind)} м</span>
+                                <span className={styles.scaleLabel}>{SCALE_METRES} м</span>
                             </span>
                             <span className={styles.kindLabel}>{SHIP_KIND_LABELS[kind]}</span>
                             <span className={styles.kindSpec}>{shipSpecLine(kind)}</span>
