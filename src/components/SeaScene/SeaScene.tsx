@@ -9,7 +9,7 @@ import skyUrl from '@/assets/scene/sky.png';
 import Ship from '@/components/ships/Ship';
 import { SHIP_SPRITES } from '@/components/ships/shipSprites';
 import { MOBILE_SHIP_ZOOM } from '@/config/layout';
-import { Member, MorseFeed, ShipPlacement, slotDepth } from '@/types/channel';
+import { Member, MorseFeed, ShipPlacement, otherSide, slotDepth } from '@/types/channel';
 import { useIsMobile } from '@/utils/viewport';
 
 import {
@@ -18,6 +18,7 @@ import {
     leaveCourse,
     pathToEdge,
     sailSeconds,
+    sailTrim,
     shipWidthPercent,
     shownLeft,
 } from '@/components/SeaScene/shipMotion';
@@ -82,12 +83,21 @@ const preload = (url: string): Promise<void> =>
         image.src = url;
     });
 
-/** Класс с анимацией под каждый вид движения. У стоящего корабля движения нет. */
+/** Класс с переходом под каждый вид движения. У стоящего корабля движения нет. */
 const MOTION_CLASS: Record<string, string> = {
     leaving: styles.shipLeaving,
     entering: styles.shipEntering,
     shifting: styles.shipShifting,
 };
+
+/**
+ * Сколько ждать конца хода сверх его длительности, прежде чем считать корабль пришедшим
+ * без спросу. Ход заканчивается событием перехода, но события может и не быть: переходы
+ * отключены у тех, кому движение мешает (prefers-reduced-motion), да и вкладка в фоне
+ * их не отыгрывает. Без страховки такой корабль остался бы «идущим» навсегда — с ходовыми
+ * огнями и без права сняться с места, — а уходящий навсегда остался бы в разметке.
+ */
+const MOTION_GRACE_MS = 1500;
 
 /**
  * Склеенная полоса воды: три плитки шириной с кадр, соседние зеркальны друг другу — поэтому
@@ -149,11 +159,14 @@ export default function SeaScene({ members, myId, morseFeeds, ready, onMoveShip 
     const [, redraw] = useReducer((count: number) => count + 1, 0);
     // Какой момент старта качки закреплён за каким кораблём: индекс в WAVE_STARTS.
     const waveStartById = useRef(new Map<string, number>());
-    // Отложенные заходы после перезахода: id → таймер паузы. Чистим их при размонтировании.
+    // Отложенные заходы после перезахода: id → таймер паузы. Рядом — страховочные таймеры конца
+    // хода, см. MOTION_GRACE_MS. И те и другие чистим при размонтировании.
     const pauseTimers = useRef(new Map<string, number>());
+    const motionTimers = useRef(new Map<string, number>());
     useEffect(
         () => () => {
             pauseTimers.current.forEach((timer) => window.clearTimeout(timer));
+            motionTimers.current.forEach((timer) => window.clearTimeout(timer));
         },
         []
     );
@@ -274,13 +287,56 @@ export default function SeaScene({ members, myId, morseFeeds, ready, onMoveShip 
             element,
         }));
 
+    /**
+     * Движение отработало. Класс снимаем всегда — иначе следующее движение того же корабля
+     * не начнётся: переход запускается сменой значения, а у оставшегося класса оно уже своё.
+     *
+     * Уходящий на этом пропадает из кадра. А если он не вышел из канала, а перезаходит,
+     * то ждёт паузу — уже вне разметки, за кромкой его всё равно не видно, — и появляется
+     * на новом месте заново, заходом, как новичок.
+     */
+    const finishMotion = (id: string): void => {
+        window.clearTimeout(motionTimers.current.get(id));
+        motionTimers.current.delete(id);
+        motionStartedAt.current.delete(id);
+        enteringIds.current.delete(id);
+        shiftById.current.delete(id);
+        if (!leavingById.current.has(id)) {
+            redraw();
+            return;
+        }
+        leavingById.current.delete(id);
+        if (!relocatingIds.current.has(id)) {
+            redraw();
+            return;
+        }
+        pauseTimers.current.set(
+            id,
+            window.setTimeout(() => {
+                pauseTimers.current.delete(id);
+                relocatingIds.current.delete(id);
+                enteringIds.current.add(id);
+                redraw();
+            }, RELOCATE_PAUSE_MS)
+        );
+        redraw();
+    };
+
     // Отметку ставим в layout-эффекте, до кадра: он выполняется и в фоновой вкладке, поэтому
     // момент старта запоминается настоящий, а не тот, в который на вкладку вернулись.
+    // Тогда же заводим страховку на случай, что события конца перехода не будет вовсе:
+    // длительность берём с самого элемента, чтобы не разойтись со стилями.
     useLayoutEffect(() => {
         const now = Date.now();
-        movingShips().forEach(({ id, kind }) => {
+        movingShips().forEach(({ id, kind, element }) => {
             if (motionStartedAt.current.get(id)?.kind !== kind) {
                 motionStartedAt.current.set(id, { kind, at: now });
+                const seconds = Number.parseFloat(getComputedStyle(element).transitionDuration) || 0;
+                window.clearTimeout(motionTimers.current.get(id));
+                motionTimers.current.set(
+                    id,
+                    window.setTimeout(() => finishMotion(id), seconds * 1000 + MOTION_GRACE_MS)
+                );
             }
         });
     });
@@ -304,40 +360,7 @@ export default function SeaScene({ members, myId, morseFeeds, ready, onMoveShip 
         return () => document.removeEventListener('visibilitychange', resync);
     });
 
-    /**
-     * Движение отработало. Класс снимаем всегда — иначе следующее движение того же корабля
-     * не запустится: одна и та же анимация повторно не стартует, пока класс висит на месте.
-     *
-     * Уходящий на этом пропадает из кадра. А если он не вышел из канала, а перезаходит,
-     * то ждёт за кромкой паузу и появляется на новом месте — заходом, как новичок.
-     */
-    const finishMotion = (id: string): void => {
-        motionStartedAt.current.delete(id);
-        enteringIds.current.delete(id);
-        shiftById.current.delete(id);
-        if (!leavingById.current.has(id)) {
-            redraw();
-            return;
-        }
-        if (!relocatingIds.current.has(id)) {
-            leavingById.current.delete(id);
-            redraw();
-            return;
-        }
-        pauseTimers.current.set(
-            id,
-            window.setTimeout(() => {
-                pauseTimers.current.delete(id);
-                leavingById.current.delete(id);
-                relocatingIds.current.delete(id);
-                enteringIds.current.add(id);
-                redraw();
-            }, RELOCATE_PAUSE_MS)
-        );
-    };
-
-    const slotStyle = (member: Member, width: number): CSSProperties => {
-        const shipScale = SHIP_SPRITES[member.shipKind].scale;
+    const laneStyle = (member: Member, width: number): CSSProperties => {
         const depth = slotDepth(member.place.slot);
         return {
             // Ширину и кламп «не подходить к краям кадра» досчитывает CSS: там же живёт
@@ -352,9 +375,16 @@ export default function SeaScene({ members, myId, morseFeeds, ready, onMoveShip 
             // --sea-depth-span) и на телефоне шире: там воды больше, и флоту надо разойтись
             // по всей её высоте, а не толпиться в середине.
             bottom: `calc((100% - var(--horizon)) * (var(--sea-near-edge) + ${(1 - depth).toFixed(4)} * var(--sea-depth-span)))`,
-            maxWidth: (150 + depth * 200) * shipScale,
         } as CSSProperties;
     };
+
+    /**
+     * Предел ширины корабля, px. Нужен на широком экране: доли кадра там оборачиваются
+     * такими пикселями, что ближний корабль занимает половину рейда. У дальнего предел ниже —
+     * перспектива, — и у мелкого корабля тоже: его доля от предела та же, что и в кадре.
+     */
+    const maxShipWidth = (member: Member): number =>
+        (150 + slotDepth(member.place.slot) * 200) * SHIP_SPRITES[member.shipKind].scale;
 
     return (
         <div className={painted ? `${styles.scene} ${styles.scenePainted}` : styles.scene} ref={sceneRef}>
@@ -411,83 +441,113 @@ export default function SeaScene({ members, myId, morseFeeds, ready, onMoveShip 
                 const shiftPath = shiftFrom === undefined ? 0 : Math.abs(shiftFrom - member.place.left);
                 const shiftAstern =
                     shiftFrom !== undefined && shiftFrom > member.place.left !== (member.place.facing === 'left');
-                // Корабль на ходу приказов не принимает: щелчок посреди манёвра сорвал бы анимацию
+                const enterSeconds = sailSeconds(enterPath, member.place.slot, member.shipKind, false, zoom);
+                // Задний ход отличается только длительностью: кривая та же, а скорость ниже.
+                const leaveSeconds = sailSeconds(leavePath, member.place.slot, member.shipKind, leave.astern, zoom);
+                const shiftSeconds = sailSeconds(shiftPath, member.place.slot, member.shipKind, shiftAstern, zoom);
+                // Куда корабль идёт прямо сейчас: заходящий — от своей кромки внутрь кадра,
+                // уходящий — к своей, переставляющийся — туда, где его новое место.
+                const heading =
+                    (leaving && leave.side) ||
+                    (entering && otherSide(member.place.enterFrom)) ||
+                    (shiftFrom !== undefined && (shiftFrom > member.place.left ? 'left' : 'right')) ||
+                    '';
+                // Дифферент: приподнята та оконечность, которой корабль идёт вперёд. Положительный
+                // угол поднимает левый край, поэтому идущему влево он и достаётся.
+                const trim =
+                    sailTrim(
+                        (leaving && leavePath) || (entering && enterPath) || shiftPath,
+                        (leaving && leaveSeconds) || (entering && enterSeconds) || shiftSeconds,
+                        member.place.slot,
+                        zoom
+                    ) * (heading === 'left' ? 1 : -1);
+                // Корабль на ходу приказов не принимает: щелчок посреди манёвра сорвал бы ход
                 // и швырнул корабль в конечную точку, откуда тот пошёл бы заново.
                 const canMove = member.memberId === myId && !leaving && !motion;
                 return (
+                    // Дорожка во всю ширину кадра: она и возит корабль. Ход и место на рейде
+                    // считаются в долях кадра, поэтому и блок нужен шириной с кадр — см. стили.
                     <div
                         key={member.memberId}
-                        className={
-                            [styles.shipSlot, motion, canMove ? styles.shipMine : ''].filter(Boolean).join(' ') ||
-                            undefined
+                        className={[styles.shipLane, motion].filter(Boolean).join(' ') || undefined}
+                        // Конец хода. Событие приходит и от дифферента на вложенном блоке, поэтому
+                        // спрашиваем и свойство, и элемент: чужой конец за свой принимать нельзя.
+                        onTransitionEnd={
+                            motion
+                                ? (event) => {
+                                      if (event.propertyName === 'translate' && event.target === event.currentTarget) {
+                                          finishMotion(member.memberId);
+                                      }
+                                  }
+                                : undefined
                         }
-                        // Свой корабль по щелчку снимается с места. Чужие не трогаем: рейд общий,
-                        // но распоряжаться там можно только собой.
-                        onClick={canMove ? onMoveShip : undefined}
-                        title={canMove ? 'Сменить место на рейде' : undefined}
-                        onAnimationEnd={motion ? () => finishMotion(member.memberId) : undefined}
                         data-ship={motionKind ? member.memberId : undefined}
                         data-motion={motionKind || undefined}
                         style={
                             {
-                                ...slotStyle(member, width),
+                                ...laneStyle(member, width),
                                 // Ближний перекрывает дальнего: порядок наложения идёт от слота.
                                 zIndex: member.place.slot + 1,
-                                // Ход в процентах ширины сцены: столько корабль смещён от своего
+                                // Ход в процентах ширины кадра: столько корабль смещён от своего
                                 // места, когда только появляется из-за кромки. Знак — сторона,
                                 // с которой он приходит.
                                 '--enter-from': `${member.place.enterFrom === 'right' ? '' : '-'}${enterPath.toFixed(1)}%`,
-                                '--enter-seconds': `${sailSeconds(enterPath, member.place.slot, member.shipKind, false, zoom).toFixed(1)}s`,
+                                '--enter-seconds': `${enterSeconds.toFixed(1)}s`,
                                 '--leave-to': `${leave.side === 'right' ? '' : '-'}${leavePath.toFixed(1)}%`,
-                                // Задний ход отличается только длительностью: кривая та же,
-                                // а скорость ниже — иначе замер пиковой скорости под неё не подходит.
-                                '--leave-seconds': `${sailSeconds(leavePath, member.place.slot, member.shipKind, leave.astern, zoom).toFixed(1)}s`,
-                                // Ход поперёк кадра: откуда корабль пошёл и сколько ему идти.
-                                // Здесь именно положение в кадре, а не сдвиг: стили доводят
-                                // корабль до нынешнего --slot-left, и промежуточные значения
-                                // проходят через тот же кламп, что и конечное.
-                                '--shift-from': `${(shiftFrom ?? member.place.left).toFixed(2)}%`,
-                                '--shift-seconds': `${sailSeconds(shiftPath, member.place.slot, member.shipKind, shiftAstern, zoom).toFixed(1)}s`,
+                                '--leave-seconds': `${leaveSeconds.toFixed(1)}s`,
+                                // У хода поперёк кадра своей точки нет: корабль идёт к новому
+                                // --slot-left, и стилям нужно знать только время.
+                                '--shift-seconds': `${shiftSeconds.toFixed(1)}s`,
+                                '--sail-trim': `${trim.toFixed(2)}deg`,
                             } as CSSProperties
                         }
                     >
-                        {/* Корабль, номер, огни и тень на воде качаются как единое целое: обе анимации
-                        висят на одном блоке, потому что двигают разные свойства — translate и rotate. */}
                         <div
-                            className={styles.shipRock}
-                            style={
-                                {
-                                    // Минус — момент старта в прошлом: корабль появляется уже качающимся.
-                                    // Отсюда же CSS считает задержку тангажа, отняв четверть цикла.
-                                    '--wave-start': `-${WAVE_STARTS[waveStarts.get(member.memberId) ?? 0].toFixed(2)}s`,
-                                    '--heave': `${heaveAmplitude(depth).toFixed(2)}px`,
-                                    // Крутизна волны идёт от её высоты, поэтому угол считаем из неё,
-                                    // а не из хода корпуса: осадка корабля уклон воды не меняет.
-                                    // Знак зависит от того, куда смотрит корабль: положительный
-                                    // поворот поднимает левый край, отрицательный — правый, а вверх
-                                    // вместе с корпусом должен идти нос, а не корма.
-                                    '--pitch-angle': `${(
-                                        waveAmplitude(depth) *
-                                        PITCH_PER_PX *
-                                        (member.place.facing === 'left' ? 1 : -1)
-                                    ).toFixed(2)}deg`,
-                                } as CSSProperties
-                            }
+                            className={[styles.shipSlot, canMove ? styles.shipMine : ''].filter(Boolean).join(' ')}
+                            // Свой корабль по щелчку снимается с места. Чужие не трогаем: рейд общий,
+                            // но распоряжаться там можно только собой.
+                            onClick={canMove ? onMoveShip : undefined}
+                            title={canMove ? 'Сменить место на рейде' : undefined}
+                            style={{ maxWidth: maxShipWidth(member) }}
                         >
-                            {/* Тень идёт перед кораблём в разметке, поэтому корпус её перекрывает. */}
-                            <div className={styles.shipShadow} />
-                            <Ship
-                                kind={member.shipKind}
-                                name={member.name}
-                                hullNumber={member.hullNumber}
-                                facing={member.place.facing}
-                                // Идёт — ходовые огни, стоит на рейде — якорные. Это про всех
-                                // в кадре, а не только про свой корабль: огни у корабля не зависят
-                                // от того, из чьей вкладки на него смотрят.
-                                mode={motionKind ? 'underway' : 'anchored'}
-                                depth={depth}
-                                morseFeed={morseFeeds[member.memberId] ?? null}
-                            />
+                            {/* Корабль, номер, огни и тень на воде качаются как единое целое: обе анимации
+                            висят на одном блоке, потому что двигают разные свойства — translate и rotate. */}
+                            <div
+                                className={styles.shipRock}
+                                style={
+                                    {
+                                        // Минус — момент старта в прошлом: корабль появляется уже качающимся.
+                                        // Отсюда же CSS считает задержку тангажа, отняв четверть цикла.
+                                        '--wave-start': `-${WAVE_STARTS[waveStarts.get(member.memberId) ?? 0].toFixed(2)}s`,
+                                        '--heave': `${heaveAmplitude(depth).toFixed(2)}px`,
+                                        // Крутизна волны идёт от её высоты, поэтому угол считаем из неё,
+                                        // а не из хода корпуса: осадка корабля уклон воды не меняет.
+                                        // Знак зависит от того, куда смотрит корабль: положительный
+                                        // поворот поднимает левый край, отрицательный — правый, а вверх
+                                        // вместе с корпусом должен идти нос, а не корма.
+                                        '--pitch-angle': `${(
+                                            waveAmplitude(depth) *
+                                            PITCH_PER_PX *
+                                            (member.place.facing === 'left' ? 1 : -1)
+                                        ).toFixed(2)}deg`,
+                                    } as CSSProperties
+                                }
+                            >
+                                {/* Тень идёт перед кораблём в разметке, поэтому корпус её перекрывает. */}
+                                <div className={styles.shipShadow} />
+                                <Ship
+                                    kind={member.shipKind}
+                                    name={member.name}
+                                    hullNumber={member.hullNumber}
+                                    facing={member.place.facing}
+                                    // Идёт — ходовые огни, стоит на рейде — якорные. Это про всех
+                                    // в кадре, а не только про свой корабль: огни у корабля не зависят
+                                    // от того, из чьей вкладки на него смотрят.
+                                    mode={motionKind ? 'underway' : 'anchored'}
+                                    depth={depth}
+                                    morseFeed={morseFeeds[member.memberId] ?? null}
+                                />
+                            </div>
                         </div>
                     </div>
                 );

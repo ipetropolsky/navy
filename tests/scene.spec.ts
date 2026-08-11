@@ -32,18 +32,19 @@ test('свой корабль заплывает в кадр, а не возни
     await expect(entering).toHaveCount(1);
 
     const running = await entering.evaluate((element) => element.getAnimations().length);
-    expect(running, 'анимация захода не запустилась').toBeGreaterThan(0);
+    expect(running, 'ход захода не начался').toBeGreaterThan(0);
 
     // И начинает он ход целиком за кромкой кадра. Иначе из-за края торчит нос стоящего
     // корабля, а трогается он у зрителя на глазах — разгон должен оставаться за кадром.
+    // Меряем сам корабль, а не его дорожку: дорожка шириной с кадр, она за кромку не уходит.
     const hidden = await page.evaluate(() => {
         const scene = document.querySelector('[class*="_scene_"]')!.getBoundingClientRect();
-        const ship = document.querySelector('[data-motion="entering"]')!;
-        ship.getAnimations().forEach((animation) => {
+        const lane = document.querySelector('[data-motion="entering"]')!;
+        lane.getAnimations().forEach((animation) => {
             animation.pause();
             animation.currentTime = 0;
         });
-        const box = ship.getBoundingClientRect();
+        const box = lane.querySelector('[class*="shipSlot"]')!.getBoundingClientRect();
         return Math.min(box.right - scene.left, scene.right - box.left);
     });
     expect(hidden, 'в начале захода корабль виден в кадре').toBeLessThan(0);
