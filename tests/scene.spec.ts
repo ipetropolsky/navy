@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { Page, expect, test } from '@playwright/test';
 
 import { ALBATROS, DEMO, join, openChannel, ships } from '@tests/helpers';
 
@@ -7,6 +7,19 @@ import { ALBATROS, DEMO, join, openChannel, ships } from '@tests/helpers';
  * ход считался в «длинах корпуса в секунду» и выходил в сотню узлов, а вода на стыке цикла
  * дёргалась. Проверки ниже — ровно про эти три места.
  */
+
+/** Огни каждого корабля в кадре: чем является каждый и где он стоит по вертикали. */
+const lights = (page: Page, within = '[class*="shipSlot"]'): Promise<{ kind: string; top: number }[][]> =>
+    page.evaluate(
+        (selector) =>
+            [...document.querySelectorAll(selector)].map((slot) =>
+                [...slot.querySelectorAll<HTMLElement>('[data-light]')].map((light) => ({
+                    kind: light.dataset.light ?? '',
+                    top: light.getBoundingClientRect().top,
+                }))
+            ),
+        within
+    );
 
 test('свой корабль заплывает в кадр, а не возникает на месте', async ({ page }) => {
     await openChannel(page, DEMO);
@@ -90,4 +103,28 @@ test('корабль уходит за кромку и пропадает из �
     await expect(page.locator('[data-motion="leaving"]')).toHaveCount(1);
     // И через отведённое ему время исчезает — иначе уходящие копились бы в разметке.
     await expect(ships(page)).toHaveCount(2, { timeout: 25_000 });
+});
+
+test('огни на рейде якорные, на ходу ходовые, и от 50 метров их по два', async ({ page }) => {
+    await openChannel(page, DEMO, ALBATROS);
+
+    // В демо-канале три корабля, и только «Вымпел» длиннее 50 метров: ему положены
+    // два якорных огня, носовой выше кормового, остальным хватает одного.
+    const anchored = await lights(page);
+    expect(anchored.every((ship) => ship.every((light) => light.kind.startsWith('anchor')))).toBe(true);
+    const pairs = anchored.filter((ship) => ship.length === 2);
+    expect(pairs, 'два якорных огня должны быть ровно у одного корабля').toHaveLength(1);
+    const [fore, aft] = pairs[0];
+    expect(fore.kind).toBe('anchor-fore');
+    expect(fore.top, 'носовой якорный должен быть выше кормового').toBeLessThan(aft.top);
+
+    // Тронулись — якорные погасли, зажглись ходовые. Идём влево, значит виден левый борт.
+    await page.locator('[class*="shipMine"]').click();
+    await expect(page.locator('[data-motion]')).toHaveCount(1);
+    const underway = await lights(page, '[data-motion]');
+    const kinds = underway[0].map((light) => light.kind);
+    expect(kinds).toContain('stern');
+    expect(kinds.filter((kind) => kind.startsWith('masthead'))).toHaveLength(1);
+    expect(kinds.some((kind) => kind === 'port' || kind === 'starboard')).toBe(true);
+    expect(kinds.some((kind) => kind.startsWith('anchor'))).toBe(false);
 });

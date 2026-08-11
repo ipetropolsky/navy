@@ -470,7 +470,10 @@ export default function SeaScene({ members, myId, morseFeeds, ready, onMoveShip 
                                 name={member.name}
                                 hullNumber={member.hullNumber}
                                 facing={member.place.facing}
-                                active={member.memberId === myId}
+                                // Идёт — ходовые огни, стоит на рейде — якорные. Это про всех
+                                // в кадре, а не только про свой корабль: огни у корабля не зависят
+                                // от того, из чьей вкладки на него смотрят.
+                                mode={motionKind ? 'underway' : 'anchored'}
                                 depth={depth}
                                 morseFeed={morseFeeds[member.memberId] ?? null}
                             />

@@ -53,26 +53,59 @@
         0 0 3cqw 1.1cqw rgba(255, 233, 168, 0.25);
 }
 
-.bowLight {
+// Навигационный огонь: сама лампочка и её свет. Свет вынесен в ::after, потому что у топового
+// и кормового он идёт не во все стороны, а только вперёд или только назад, — а обрезать
+// box-shadow нельзя.
+.light {
     position: absolute;
-    width: max(1.2px, 0.8cqw);
-    height: max(1.2px, 0.8cqw);
+    width: max(1.2px, 0.7cqw);
+    height: max(1.2px, 0.7cqw);
     transform: translate(-50%, -50%);
     border-radius: 50%;
-    background: #7be3a2;
-    opacity: 0.12;
-    transition: opacity 0.4s ease;
+    background: currentcolor;
+
+    &::after {
+        content: '';
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 5cqw;
+        height: 5cqw;
+        transform: translate(-50%, -50%);
+        border-radius: 50%;
+        background: radial-gradient(circle, currentcolor 0%, transparent 62%);
+        opacity: 0.5;
+    }
 }
 
-.sternLight {
-    .bowLight();
+// Белый — топовые, кормовой и якорные. Чуть тёплый: ночью холодный белый выглядит светодиодом
+// из другого века.
+.white {
+    .light();
 
-    background: #f0a48a;
+    color: var(--color-light-white);
 }
 
-.lightOn {
-    opacity: 0.95;
-    box-shadow: 0 0 1cqw 0.2cqw currentcolor;
+.red {
+    .light();
+
+    color: var(--color-light-red);
+}
+
+.green {
+    .light();
+
+    color: var(--color-light-green);
+}
+
+// Направленный свет: половина свечения срезана, и огонь видно только с той стороны, куда
+// он светит. Круговым такой огонь не считается — потому на якоре и зажигают отдельные.
+.glowLeft::after {
+    clip-path: inset(0 50% 0 0);
+}
+
+.glowRight::after {
+    clip-path: inset(0 0 0 50%);
 }
 
 // Бортовой номер вместо аватарки участника.
