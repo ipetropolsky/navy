@@ -70,7 +70,7 @@ interface StoredMember {
     name: string;
     hullNumber: string;
     shipKind: string;
-    place: { slot: number; corridor: string; left: number; facing: string; enterFrom: string; tried: string[] };
+    place: { slot: number; corridor: string; left: number; facing: string; enterFrom: string };
 }
 
 interface StoredMessage {
@@ -101,6 +101,9 @@ export const bubbles = (page: Page) => page.locator('[class*="bubble"]');
 
 /** Корабли в кадре — вместе с теми, кто как раз уходит за кромку. */
 export const ships = (page: Page) => page.locator('[class*="shipSlot"]');
+
+/** Свободные места на рейде: овалы на воде, пока открыта форма корабля. */
+export const berths = (page: Page) => page.locator('[data-berth]');
 
 /** Убедиться, что из состояния есть выход: на экране видна кнопка, которая куда-то ведёт. */
 export const expectWayOut = async (page: Page): Promise<void> => {

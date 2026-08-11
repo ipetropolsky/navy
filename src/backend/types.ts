@@ -1,4 +1,4 @@
-import { Channel, Member, MemberRef, Message, MessageRef, ShipKind } from '@/types/channel';
+import { Berth, Channel, Member, MemberRef, Message, MessageRef, ShipKind } from '@/types/channel';
 
 /**
  * Контракт бэкенда. Фронтенд знает только его и ничего — про то, где лежат данные:
@@ -31,6 +31,12 @@ export interface MemberDraft {
     hullNumber: string;
     shipKind: ShipKind;
     color: string;
+    /**
+     * Выбранное место на рейде. Пожелание, а не приказ: пока человек заполнял форму, туда мог
+     * встать кто-то другой, и тогда бэкенд поставит корабль на случайное свободное. Не указано —
+     * место выбирается целиком бэкендом; у стоящего в строю корабля оно при этом не меняется.
+     */
+    berth?: Berth;
 }
 
 /** Что у канала можно задать и потом поменять: адрес и человеческое название. */
@@ -132,12 +138,6 @@ export interface ChannelBackend {
 
     join(request: ChannelAddress & { member: MemberDraft }): Promise<{ member: Member }>;
     updateMember(request: MemberAddress & { member: MemberDraft }): Promise<{ member: Member }>;
-    /**
-     * Переставить корабль на другое место: в другой коридор своего слота, а когда слот
-     * обойдён весь — на другой слот. Куда именно, решает бэкенд: место корабля общее
-     * для всех вкладок, и придумывать его на клиенте нельзя.
-     */
-    moveShip(request: MemberAddress): Promise<{ member: Member }>;
     leave(request: MemberAddress): Promise<void>;
 
     sendMessage(request: MemberAddress & { message: MessageDraft }): Promise<{ message: Message }>;

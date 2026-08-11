@@ -1,7 +1,7 @@
-import { Channel, MAX_MESSAGE_LENGTH, Member, Message, SHIP_KIND_LABELS, ShipKind } from '@/types/channel';
+import { Channel, MAX_MESSAGE_LENGTH, Member, Message, SHIP_KIND_LABELS, ShipKind, isSameBerth } from '@/types/channel';
 import { isValidSlug } from '@/utils/slug';
 
-import { moveShip, placeShip } from '@/backend/placement';
+import { placeShip } from '@/backend/placement';
 import { DEMO_CHANNEL_ID, createDemoChannel } from '@/backend/seed';
 import { localStore } from '@/backend/storage';
 import {
@@ -43,7 +43,7 @@ const BROADCAST_NAME = 'kilvater';
  * Здесь должна появиться миграция раньше, чем в канале заведётся первый неигрушечный разговор.
  * Подробно — в docs/BACKEND-API.md, раздел «К чужим данным — бережно».
  */
-const STORAGE_VERSION = 8;
+const STORAGE_VERSION = 9;
 
 /** Ключ, под которым состояние лежало до появления версии. Чистим, чтобы не мусорить. */
 const LEGACY_STORAGE_KEY = 'kilvater.v1';
@@ -259,10 +259,12 @@ export function createLocalBackend(): ChannelBackend {
             }
             checkDraftIsFree(snapshot, draft);
             // Место на рейде назначаем здесь, а не в сцене: тогда оно уедет вместе с участником
-            // во все вкладки, и корабль у всех окажется в одном и том же месте.
+            // во все вкладки, и корабль у всех окажется в одном и том же месте. Выбранное
+            // в форме место — пожелание: занято, значит корабль встанет на свободное.
             const place = placeShip(
                 draft.shipKind,
-                snapshot.members.map((item) => item.place)
+                snapshot.members.map((item) => item.place),
+                draft.berth
             );
             if (!place) {
                 throw new ChannelError('channel-full', 'На рейде не осталось свободного места');
@@ -299,6 +301,14 @@ export function createLocalBackend(): ChannelBackend {
                 member.hullNumber = draft.hullNumber.trim();
                 member.shipKind = draft.shipKind;
                 member.color = draft.color;
+                // Место меняем, только если выбрали другое: у оставшегося на своём месте корабля
+                // не должна заново разыгрываться сторона захода — он никуда не идёт.
+                if (draft.berth && !isSameBerth(member.place, draft.berth)) {
+                    const others = current.members
+                        .filter((item) => item.memberId !== memberId)
+                        .map((item) => item.place);
+                    member.place = placeShip(draft.shipKind, others, draft.berth) ?? member.place;
+                }
                 return { ...member };
             });
             emit(channelId, { type: 'member-updated', member: updated });
@@ -306,25 +316,6 @@ export function createLocalBackend(): ChannelBackend {
             if (text) {
                 postNotice(channelId, updated.memberId, text, Date.now());
             }
-            return delay({ member: updated });
-        },
-
-        moveShip: async ({ channelId, memberId }) => {
-            const updated = mutate(channelId, (current) => {
-                const member = current.members.find((item) => item.memberId === memberId);
-                if (!member) {
-                    throw new ChannelError('member-not-found', 'Такого корабля в канале нет');
-                }
-                const others = current.members.filter((item) => item.memberId !== memberId).map((item) => item.place);
-                const place = moveShip(member.shipKind, member.place, others);
-                if (place) {
-                    member.place = place;
-                }
-                return { ...member };
-            });
-            // Событие шлём всегда, даже если места не нашлось: у всех вкладок сцена одна,
-            // и решать, было движение или нет, они должны по данным, а не по молчанию.
-            emit(channelId, { type: 'member-updated', member: updated });
             return delay({ member: updated });
         },
 

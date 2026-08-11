@@ -1,6 +1,6 @@
 import { Page, expect, test } from '@playwright/test';
 
-import { ALBATROS, DEMO, join, openChannel, openNewChannel, ships } from '@tests/helpers';
+import { ALBATROS, DEMO, berths, join, openChannel, openNewChannel, readState, ships } from '@tests/helpers';
 
 /**
  * Сцена: то, на чём уже наступали. Свой корабль однажды вставал на место без анимации,
@@ -48,6 +48,27 @@ test('свой корабль заплывает в кадр, а не возни
         return Math.min(box.right - scene.left, scene.right - box.left);
     });
     expect(hidden, 'в начале захода корабль виден в кадре').toBeLessThan(0);
+});
+
+test('место на рейде выбирается овалом, и корабль встаёт на выбранное', async ({ page }) => {
+    await openNewChannel(page, 'mesto');
+
+    // Свободные места показаны, и одно из них выбрано заранее: человек, который ничего
+    // не трогал, всё равно должен видеть, куда встанет его корабль.
+    await expect(berths(page).first()).toBeVisible();
+    await expect(page.locator('[aria-pressed="true"][data-berth]')).toHaveCount(1);
+
+    // Выбираем другое место — не то, что предложили, — и встаём в строй.
+    const free = page.locator('[data-berth][aria-pressed="false"]').last();
+    const chosen = await free.getAttribute('data-berth');
+    await free.click();
+    await expect(page.locator(`[data-berth="${chosen}"][aria-pressed="true"]`)).toHaveCount(1);
+    await join(page, 'Гроза', '777');
+
+    // И корабль оказывается ровно там: место выбирает человек, а не расстановка.
+    const state = await readState(page);
+    const [member] = Object.values(state.channels).find((item) => item.channel.slug === 'mesto')!.members;
+    expect(`${member.place.slot}-${member.place.corridor}`).toBe(chosen);
 });
 
 test('ход корабля идёт с правдоподобной скоростью и зависит от корабля', async ({ browser }) => {
@@ -136,8 +157,11 @@ test('огни на рейде якорные, на ходу ходовые, и 
     expect(fore.kind).toBe('anchor-fore');
     expect(fore.top, 'носовой якорный должен быть выше кормового').toBeLessThan(aft.top);
 
-    // Тронулись — якорные погасли, зажглись ходовые. Идём влево, значит виден левый борт.
+    // Тронулись — якорные погасли, зажглись ходовые. Снимает корабль с места смена стоянки:
+    // щелчок по своему кораблю открывает форму, там выбирается другое место, и корабль уходит.
     await page.locator('[class*="shipMine"]').click();
+    await berths(page).last().click();
+    await page.locator('button[type=submit]').click();
     await expect(page.locator('[data-motion]')).toHaveCount(1);
     const underway = await lights(page, '[data-motion]');
     const kinds = underway[0].map((light) => light.kind);

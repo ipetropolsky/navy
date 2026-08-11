@@ -101,6 +101,17 @@ const slotWidthPercent = (slot: number): number => 24 + slotDepth(slot) * 36;
 export const shipWidthPercent = (slot: number, kind: ShipKind): number =>
     slotWidthPercent(slot) * SHIP_SPRITES[kind].scale;
 
+/**
+ * Ширина овала свободного места, % ширины сцены. Считается от той же ширины слота, что
+ * и корабль, поэтому дальние места мельче ближних — овалы лежат на воде и подчиняются
+ * той же перспективе. Доля меньше единицы: место на рейде не должно казаться шире корабля,
+ * который на него встанет, а соседние коридоры разнесены на треть кадра и налезать друг
+ * на друга овалам нельзя.
+ */
+const BERTH_WIDTH_SHARE = 0.5;
+
+export const berthWidthPercent = (slot: number): number => slotWidthPercent(slot) * BERTH_WIDTH_SHARE;
+
 /** Сколько метров моря приходится на процент ширины кадра на этой дальности. */
 const metresPerPercent = (slot: number): number => SCENE_SCALE_LENGTH / slotWidthPercent(slot);
 

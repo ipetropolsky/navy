@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 
-import { ChannelDraft, ChannelError, MemberDraft, backend } from '@/backend';
+import { ChannelDraft, ChannelError, MemberDraft, backend, freeBerths } from '@/backend';
 import { DEMO_CHANNEL_SLUG } from '@/backend/seed';
 import SeaScene from '@/components/SeaScene/SeaScene';
 import CreateChannel from '@/components/channel/CreateChannel';
@@ -14,7 +14,7 @@ import Panel from '@/components/ui/Panel';
 import { useSnackbar } from '@/components/ui/Snackbar';
 import { useChannel } from '@/hooks/useChannel';
 import { channelLink, useRoute } from '@/routing';
-import { MAX_MESSAGE_LENGTH, Message, MorseFeed } from '@/types/channel';
+import { Berth, MAX_MESSAGE_LENGTH, Message, MorseFeed, isSameBerth } from '@/types/channel';
 import { copyText } from '@/utils/clipboard';
 
 import styles from './App.module.less';
@@ -40,9 +40,40 @@ export default function App() {
     const [editing, setEditing] = useState(false);
     const notify = useSnackbar();
 
-    const members = channel?.members ?? [];
+    // Пустой список — тоже список, но новый на каждой отрисовке: без useMemo он менял бы
+    // ссылку каждый раз и заставлял пересчитывать всё, что от него зависит.
+    const members = useMemo(() => channel?.members ?? [], [channel]);
     const me = members.find((member) => member.memberId === myId) ?? null;
     const inChat = Boolean(channel && me && !editing);
+
+    // Свободные места на рейде: их показывает сцена, пока открыта форма корабля. Своё место
+    // считается свободным — иначе, открыв форму, человек не видел бы, где он стоит сейчас.
+    const berthOptions = useMemo(
+        () =>
+            inChat ? [] : freeBerths(members.filter((member) => member.memberId !== myId).map((item) => item.place)),
+        [inChat, members, myId]
+    );
+    const [pickedBerth, setPickedBerth] = useState<Berth | null>(null);
+    // Своё место выбрано заранее: у стоящего в строю — то, на котором он стоит, у входящего —
+    // случайное свободное. Пустым оно не остаётся никогда: человек, ничего не трогавший
+    // в форме, всё равно должен понимать, куда встанет его корабль.
+    //
+    // Пока он думает, на выбранное место мог встать кто-то другой. Тогда молча берём другое
+    // случайное: заставлять человека выбирать заново из-за чужого хода незачем, а бэкенд
+    // при отправке проверит это ещё раз.
+    const berthIsFree = pickedBerth && berthOptions.some((berth) => isSameBerth(berth, pickedBerth));
+    if (inChat) {
+        // Форма закрыта: выбор больше ничей. Оставить его — значит однажды переставить
+        // корабль на место, которое человек выбирал в прошлый раз и с тех пор забыл.
+        if (pickedBerth) {
+            setPickedBerth(null);
+        }
+    } else if (berthOptions.length > 0 && !berthIsFree) {
+        setPickedBerth(
+            (me && berthOptions.find((berth) => isSameBerth(berth, me.place))) ??
+                berthOptions[Math.floor(Math.random() * berthOptions.length)]
+        );
+    }
 
     const handleCreate = async (draft: ChannelDraft) => {
         const { channel: created } = await backend.createChannel({ channel: draft });
@@ -50,11 +81,12 @@ export default function App() {
     };
 
     const handleMemberSubmit = async (draft: MemberDraft) => {
+        const withBerth = { ...draft, berth: pickedBerth ?? undefined };
         if (editing) {
-            await channelState.updateMe(draft);
+            await channelState.updateMe(withBerth);
             setEditing(false);
         } else {
-            await channelState.join(draft);
+            await channelState.join(withBerth);
         }
     };
 
@@ -110,8 +142,13 @@ export default function App() {
                         members={members}
                         myId={myId ?? ''}
                         morseFeeds={morseFeeds}
-                        onMoveShip={() => void channelState.moveShip()}
                         ready={!loading && Boolean(channel)}
+                        // Щелчок по своему кораблю открывает ту же форму, что и переоснащение:
+                        // и корабль, и место на рейде меняются в одном месте.
+                        onEditShip={() => setEditing(true)}
+                        berths={
+                            inChat ? undefined : { options: berthOptions, picked: pickedBerth, onPick: setPickedBerth }
+                        }
                     />
                 </div>
                 <div className={styles.headerBar}>

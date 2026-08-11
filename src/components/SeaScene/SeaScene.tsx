@@ -9,12 +9,13 @@ import skyUrl from '@/assets/scene/sky.png';
 import Ship from '@/components/ships/Ship';
 import { SHIP_SPRITES } from '@/components/ships/shipSprites';
 import { MOBILE_SHIP_ZOOM } from '@/config/layout';
-import { Member, MorseFeed, ShipPlacement, otherSide, slotDepth } from '@/types/channel';
+import { Berth, Corridor, Member, MorseFeed, ShipPlacement, isSameBerth, otherSide, slotDepth } from '@/types/channel';
 import { useIsMobile } from '@/utils/viewport';
 
 import {
     ENTER_GUARD,
     LEAVE_GUARD,
+    berthWidthPercent,
     leaveCourse,
     pathToEdge,
     sailSeconds,
@@ -87,7 +88,6 @@ const preload = (url: string): Promise<void> =>
 const MOTION_CLASS: Record<string, string> = {
     leaving: styles.shipLeaving,
     entering: styles.shipEntering,
-    shifting: styles.shipShifting,
 };
 
 /**
@@ -98,6 +98,16 @@ const MOTION_CLASS: Record<string, string> = {
  * огнями и без права сняться с места, — а уходящий навсегда остался бы в разметке.
  */
 const MOTION_GRACE_MS = 1500;
+
+/**
+ * Как называется место на рейде вслух. Овалы различимы глазом, но не голосом: тому, кто
+ * слушает страницу читалкой, нужно словами — в какой стороне кадра место и какая это линия.
+ */
+const BERTH_LABELS: Record<Corridor, string> = {
+    left: 'слева',
+    center: 'по центру',
+    right: 'справа',
+};
 
 /**
  * Склеенная полоса воды: три плитки шириной с кадр, соседние зеркальны друг другу — поэтому
@@ -112,12 +122,25 @@ const seaTiles = (
     </>
 );
 
+/**
+ * Выбор места на рейде: что показать овалами, что из этого выбрано и куда сообщать о нажатии.
+ * Живёт, пока открыта форма корабля; в самом чате мест не показываем — там уже всё занято теми,
+ * кто на связи.
+ */
+export interface BerthChoice {
+    /** Свободные места. Их и рисуем пунктирными овалами прямо на воде. */
+    options: Berth[];
+    picked: Berth | null;
+    onPick: (berth: Berth) => void;
+}
+
 interface SeaSceneProps {
     members: Member[];
     myId: string;
     morseFeeds: Partial<Record<string, MorseFeed>>;
-    /** Щелчок по своему кораблю: попросить бэкенд переставить его. */
-    onMoveShip?: () => void;
+    berths?: BerthChoice;
+    /** Щелчок по своему кораблю: открыть форму корабля, где меняется и место. */
+    onEditShip?: () => void;
     /**
      * Канал загружен и список кораблей окончательный. Нужен, чтобы отличить «пока пусто,
      * потому что ещё грузимся» от «пусто, потому что на рейде никого»: от этого зависит,
@@ -127,7 +150,7 @@ interface SeaSceneProps {
 }
 
 /** Ночное море: слои неба, месяца, облаков, острова и воды с кораблями-участниками. */
-export default function SeaScene({ members, myId, morseFeeds, ready, onMoveShip }: SeaSceneProps) {
+export default function SeaScene({ members, myId, morseFeeds, ready, berths, onEditShip }: SeaSceneProps) {
     // Кто уже был в кадре. Заплывает только тот, кто вошёл при нас; те, что стояли на рейде
     // до нашего прихода, просто оказываются на месте — въезжать им неоткуда, мы пришли к ним.
     //
@@ -148,8 +171,6 @@ export default function SeaScene({ members, myId, morseFeeds, ready, onMoveShip 
     // Кто сейчас перезаходит: ушёл со старого места и ещё не появился на новом. Пока он в этом
     // списке, живого участника не рисуем — в кадре только его уходящий двойник из leavingById.
     const relocatingIds = useRef(new Set<string>());
-    // Кто переставляется внутри своего слота, и на сколько своих длин ему идти. Знак — сторона.
-    const shiftById = useRef(new Map<string, number>());
     // Где корабль нарисован сейчас. Сравнение с местом из канала и говорит, что произошло:
     // сменился слот — перезаход, сменилась только точка — ход поперёк кадра.
     const shownById = useRef(new Map<string, ShipPlacement>());
@@ -210,25 +231,19 @@ export default function SeaScene({ members, myId, morseFeeds, ready, onMoveShip 
                 }
             }
         }
-        // Место сменилось — значит корабль попросили переставить. Перезаходящих пропускаем:
-        // у них новое место уже принято, они его отыгрывают.
+        // Место сменилось — значит корабль встал на другое. На новое место он не переползает,
+        // а перезаходит: уходит со старого, пропадает на паузу и заново заплывает на новое.
+        // Перезаходящих пропускаем: у них новое место уже принято, они его отыгрывают.
         const relocated = members.filter((member) => {
             const shown = shownById.current.get(member.memberId);
-            return shown && !relocatingIds.current.has(member.memberId) && shown.left !== member.place.left;
+            return shown && !relocatingIds.current.has(member.memberId) && !isSameBerth(shown, member.place);
         });
         for (const member of relocated) {
             // Место в списке заведомо есть: по нему этот корабль в список и попал.
             const shown = shownById.current.get(member.memberId)!;
             shownById.current.set(member.memberId, member.place);
-            if (shown.slot === member.place.slot) {
-                // Свой слот, другой коридор: короткий ход поперёк кадра. Запоминаем, откуда
-                // корабль пошёл, — дальше стили доведут его до нынешней точки.
-                shiftById.current.set(member.memberId, shown.left);
-            } else {
-                // Другой слот: туда не переползают, туда перезаходят — уход, пауза, вход.
-                leavingById.current.set(member.memberId, { ...member, place: shown });
-                relocatingIds.current.add(member.memberId);
-            }
+            leavingById.current.set(member.memberId, { ...member, place: shown });
+            relocatingIds.current.add(member.memberId);
         }
     }
     known.current = members;
@@ -300,7 +315,6 @@ export default function SeaScene({ members, myId, morseFeeds, ready, onMoveShip 
         motionTimers.current.delete(id);
         motionStartedAt.current.delete(id);
         enteringIds.current.delete(id);
-        shiftById.current.delete(id);
         if (!leavingById.current.has(id)) {
             redraw();
             return;
@@ -360,12 +374,17 @@ export default function SeaScene({ members, myId, morseFeeds, ready, onMoveShip 
         return () => document.removeEventListener('visibilitychange', resync);
     });
 
-    const laneStyle = (member: Member, width: number): CSSProperties => {
-        const depth = slotDepth(member.place.slot);
+    /**
+     * Дорожка: где она стоит по кадру и какой ширины то, что по ней ездит. Одна и та же
+     * и для корабля, и для овала свободного места — оттого место и оказывается ровно там,
+     * где потом встанет корабль, включая отступ от края кадра.
+     */
+    const laneStyle = (place: Berth, width: number): CSSProperties => {
+        const depth = slotDepth(place.slot);
         return {
             // Ширину и кламп «не подходить к краям кадра» досчитывает CSS: там же живёт
             // масштаб для телефонов и отступ от краёв.
-            '--slot-left': `${member.place.left.toFixed(2)}%`,
+            '--slot-left': `${place.left.toFixed(2)}%`,
             '--slot-width': `${width}%`,
             '--slot-half': `${width / 2}%`,
             // Чем дальше корабль, тем выше он стоит в кадре — это и создаёт перспективу.
@@ -407,17 +426,37 @@ export default function SeaScene({ members, myId, morseFeeds, ready, onMoveShip 
             </div>
             {/* Остров стоит на воде ниже горизонта, за ним видно море. Отражение уже есть в картинке. */}
             <img className={styles.island} src={islandUrl} alt="" />
+            {/* Свободные места на рейде — пунктирные овалы прямо на воде, как разметка стоянки.
+                Показываются, только пока человек выбирает, куда встать. Идут перед кораблями
+                и с тем же zIndex: при равном порядке наложения решает разметка, поэтому ближний
+                корабль накрывает собой овалы своей дальности, а не наоборот. */}
+            {berths?.options.map((berth) => {
+                const picked = berths.picked && isSameBerth(berth, berths.picked);
+                return (
+                    <div
+                        key={`${berth.slot}-${berth.corridor}`}
+                        className={styles.shipLane}
+                        style={{ ...laneStyle(berth, berthWidthPercent(berth.slot)), zIndex: berth.slot + 1 }}
+                    >
+                        <button
+                            type="button"
+                            className={picked ? styles.berthPicked : styles.berth}
+                            data-berth={`${berth.slot}-${berth.corridor}`}
+                            aria-pressed={Boolean(picked)}
+                            aria-label={`Место на рейде: ${BERTH_LABELS[berth.corridor]}, ${berth.slot + 1}-я линия`}
+                            onClick={() => berths.onPick(berth)}
+                        />
+                    </div>
+                );
+            })}
             {placed.map((member) => {
                 const depth = slotDepth(member.place.slot);
                 const width = shipWidthPercent(member.place.slot, member.shipKind);
                 const leaving = leavingById.current.has(member.memberId);
                 const entering = !leaving && enteringIds.current.has(member.memberId);
-                // Откуда корабль пошёл, если он сейчас переходит в соседний коридор.
-                const shiftFrom = leaving ? undefined : shiftById.current.get(member.memberId);
                 // Вид движения нужен и сам по себе, а не только как класс: по нему сцена
                 // помечает идущий корабль и понимает, что ход сменился на другой.
-                const motionKind =
-                    (leaving && 'leaving') || (entering && 'entering') || (shiftFrom !== undefined && 'shifting') || '';
+                const motionKind = (leaving && 'leaving') || (entering && 'entering') || '';
                 const motion = motionKind ? MOTION_CLASS[motionKind] : '';
                 // Заход: с той стороны, откуда пришёл, ровно до кромки кадра и ни шагом дальше.
                 // Считаем от того места, где корабль на самом деле стоит: стили не дают ему
@@ -436,34 +475,24 @@ export default function SeaScene({ members, myId, morseFeeds, ready, onMoveShip 
                         .map((other) => other.place)
                 );
                 const leavePath = pathToEdge(shown, width, zoom, leave.side, LEAVE_GUARD);
-                // Ход поперёк кадра: вперёд, если идти туда же, куда смотрит нос, иначе задним.
-                // Старт правее нынешнего места — корабль идёт влево.
-                const shiftPath = shiftFrom === undefined ? 0 : Math.abs(shiftFrom - member.place.left);
-                const shiftAstern =
-                    shiftFrom !== undefined && shiftFrom > member.place.left !== (member.place.facing === 'left');
                 const enterSeconds = sailSeconds(enterPath, member.place.slot, member.shipKind, false, zoom);
                 // Задний ход отличается только длительностью: кривая та же, а скорость ниже.
                 const leaveSeconds = sailSeconds(leavePath, member.place.slot, member.shipKind, leave.astern, zoom);
-                const shiftSeconds = sailSeconds(shiftPath, member.place.slot, member.shipKind, shiftAstern, zoom);
                 // Куда корабль идёт прямо сейчас: заходящий — от своей кромки внутрь кадра,
-                // уходящий — к своей, переставляющийся — туда, где его новое место.
-                const heading =
-                    (leaving && leave.side) ||
-                    (entering && otherSide(member.place.enterFrom)) ||
-                    (shiftFrom !== undefined && (shiftFrom > member.place.left ? 'left' : 'right')) ||
-                    '';
+                // уходящий — к своей.
+                const heading = (leaving && leave.side) || (entering && otherSide(member.place.enterFrom)) || '';
                 // Дифферент: приподнята та оконечность, которой корабль идёт вперёд. Положительный
                 // угол поднимает левый край, поэтому идущему влево он и достаётся.
                 const trim =
                     sailTrim(
-                        (leaving && leavePath) || (entering && enterPath) || shiftPath,
-                        (leaving && leaveSeconds) || (entering && enterSeconds) || shiftSeconds,
+                        leaving ? leavePath : enterPath,
+                        leaving ? leaveSeconds : enterSeconds,
                         member.place.slot,
                         zoom
                     ) * (heading === 'left' ? 1 : -1);
-                // Корабль на ходу приказов не принимает: щелчок посреди манёвра сорвал бы ход
-                // и швырнул корабль в конечную точку, откуда тот пошёл бы заново.
-                const canMove = member.memberId === myId && !leaving && !motion;
+                // Свой корабль открывает форму: там меняются и корабль, и место на рейде.
+                // Идущий не открывает: он ещё не пришёл туда, откуда его будут переставлять.
+                const canEdit = Boolean(onEditShip) && member.memberId === myId && !leaving && !motion;
                 return (
                     // Дорожка во всю ширину кадра: она и возит корабль. Ход и место на рейде
                     // считаются в долях кадра, поэтому и блок нужен шириной с кадр — см. стили.
@@ -485,7 +514,7 @@ export default function SeaScene({ members, myId, morseFeeds, ready, onMoveShip 
                         data-motion={motionKind || undefined}
                         style={
                             {
-                                ...laneStyle(member, width),
+                                ...laneStyle(member.place, width),
                                 // Ближний перекрывает дальнего: порядок наложения идёт от слота.
                                 zIndex: member.place.slot + 1,
                                 // Ход в процентах ширины кадра: столько корабль смещён от своего
@@ -495,19 +524,16 @@ export default function SeaScene({ members, myId, morseFeeds, ready, onMoveShip 
                                 '--enter-seconds': `${enterSeconds.toFixed(1)}s`,
                                 '--leave-to': `${leave.side === 'right' ? '' : '-'}${leavePath.toFixed(1)}%`,
                                 '--leave-seconds': `${leaveSeconds.toFixed(1)}s`,
-                                // У хода поперёк кадра своей точки нет: корабль идёт к новому
-                                // --slot-left, и стилям нужно знать только время.
-                                '--shift-seconds': `${shiftSeconds.toFixed(1)}s`,
                                 '--sail-trim': `${trim.toFixed(2)}deg`,
                             } as CSSProperties
                         }
                     >
                         <div
-                            className={[styles.shipSlot, canMove ? styles.shipMine : ''].filter(Boolean).join(' ')}
-                            // Свой корабль по щелчку снимается с места. Чужие не трогаем: рейд общий,
-                            // но распоряжаться там можно только собой.
-                            onClick={canMove ? onMoveShip : undefined}
-                            title={canMove ? 'Сменить место на рейде' : undefined}
+                            className={[styles.shipSlot, canEdit ? styles.shipMine : ''].filter(Boolean).join(' ')}
+                            // Чужие корабли не трогаем: рейд общий, но распоряжаться там можно
+                            // только собой.
+                            onClick={canEdit ? onEditShip : undefined}
+                            title={canEdit ? 'Изменить корабль и место на рейде' : undefined}
                             style={{ maxWidth: maxShipWidth(member) }}
                         >
                             {/* Корабль, номер, огни и тень на воде качаются как единое целое: обе анимации

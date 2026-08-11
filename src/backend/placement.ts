@@ -1,12 +1,15 @@
 /**
- * Куда встаёт корабль, когда участник входит в канал.
+ * Где на рейде стоят корабли: какие места вообще есть, какие из них свободны и куда встать
+ * тому, кто не выбрал сам.
  *
- * Место выбирает бэкенд — один раз, при входе, — и хранит его вместе с участником.
- * Поэтому сцена у всех одинаковая: чей-то корабль стоит на одном и том же месте и смотрит
- * в одну и ту же сторону во всех вкладках, а не разъезжается у каждого по-своему.
+ * Место человек выбирает в форме — свободные показываются овалами прямо на воде, — но хранит
+ * и назначает его бэкенд. Поэтому сцена у всех одинаковая: чей-то корабль стоит на одном
+ * и том же месте и смотрит в одну и ту же сторону во всех вкладках, а не разъезжается
+ * у каждого по-своему. И поэтому же выбор проверяется здесь: пока человек раздумывал,
+ * на выбранное место мог встать кто-то другой.
  *
- * Мест на рейде десять — это «слоты», различаются они дальностью от наблюдателя. Слот
- * занимает один корабль, и выбирается место случайно: строй не должен выглядеть построенным.
+ * Мест на рейде десять дальностей — это «слоты» — по три коридора в каждой. Слот занимает
+ * один корабль. Кто места не выбирал, встаёт случайно: строй не должен выглядеть построенным.
  * Свободная случайность, впрочем, быстро собирает корабли в кучу, поэтому её ограничивают
  * три правила: коридоры разводят соседей по ширине кадра, размер корабля задаёт, в какой
  * части рейда он скорее встанет, а из оставшегося берётся самое свободное — как место
@@ -20,6 +23,7 @@
  */
 
 import {
+    Berth,
     CORRIDORS,
     Corridor,
     ISLAND_FREE_SLOT,
@@ -129,8 +133,19 @@ const distanceTo = (slot: number, corridor: Corridor, other: ShipPlacement): num
 const loneliness = (slot: number, corridor: Corridor, taken: ShipPlacement[]): number =>
     taken.length === 0 ? Infinity : Math.min(...taken.map((other) => distanceTo(slot, corridor, other)));
 
-/** Точка внутри коридора. Место любое: строй не должен выглядеть расчерченным по линейке. */
-const leftInside = (corridor: Corridor): number => CORRIDOR_CENTERS[corridor] + (Math.random() - 0.5) * CORRIDOR_WIDTH;
+/**
+ * Точка внутри коридора: своя у каждого места и всегда одна и та же. Смещение
+ * псевдослучайное — строй не должен выглядеть расчерченным по линейке, — но постоянное:
+ * места начерчены на воде, человек их видит и выбирает, и ездить между отрисовками
+ * они не могут. Числа в хеше произвольные, важно только, что они дают ровную мешанину.
+ */
+const berthLeft = (slot: number, corridor: Corridor): number => {
+    const noise = Math.sin(slot * 12.9898 + CORRIDORS.indexOf(corridor) * 78.233) * 43758.5453;
+    return CORRIDOR_CENTERS[corridor] + (noise - Math.floor(noise) - 0.5) * CORRIDOR_WIDTH;
+};
+
+/** Место на рейде целиком: дальность, коридор и точка в кадре. */
+const berthAt = (slot: number, corridor: Corridor): Berth => ({ slot, corridor, left: berthLeft(slot, corridor) });
 
 /**
  * С какой стороны корабль заходит на рейд.
@@ -155,43 +170,47 @@ const enterSide = (slot: number, taken: ShipPlacement[]): Side => {
     return Math.random() < fromRight / (fromLeft + fromRight) ? 'left' : 'right';
 };
 
-/** Полное место на выбранном слоте: коридор, точка в нём, сторона захода и куда смотрит нос. */
-const placeAt = (slot: number, corridor: Corridor, taken: ShipPlacement[]): ShipPlacement => {
-    const enterFrom = enterSide(slot, taken);
-    return {
-        slot,
-        corridor,
-        left: leftInside(corridor),
-        // Пришёл справа — значит идёт влево, носом вперёд.
-        facing: enterFrom === 'right' ? 'left' : 'right',
-        enterFrom,
-        tried: [corridor],
-    };
-};
-
-/** Свободное место на рейде: дальность и коридор. Точку внутри коридора выберет placeAt. */
-interface Spot {
-    slot: number;
-    corridor: Corridor;
-}
+/** Кто уже занял этот слот: на одной дальности стоит один корабль. */
+const slotIsFree = (slot: number, taken: ShipPlacement[]): boolean =>
+    !taken.some((placement) => placement.slot === slot);
 
 /**
- * Куда этот корабль может встать. Сначала отбираем слоты по дальности — ближайшие к «своей»
- * части рейда, — а потом раскладываем их по свободным коридорам: получается набор мест,
- * из которого и выбираем.
+ * Место с назначенной стороной захода: откуда корабль придёт и куда будет смотреть носом.
+ * Само место к этому моменту уже выбрано — человеком в форме или расстановкой.
  */
-const freeSpots = (kind: ShipKind, taken: ShipPlacement[], exclude?: number): Spot[] => {
+const placeAt = (berth: Berth, taken: ShipPlacement[]): ShipPlacement => {
+    const enterFrom = enterSide(berth.slot, taken);
+    // Пришёл справа — значит идёт влево, носом вперёд.
+    return { ...berth, facing: enterFrom === 'right' ? 'left' : 'right', enterFrom };
+};
+
+/**
+ * Все свободные места рейда — то, что показывается овалами на воде. Здесь нет никаких
+ * предпочтений по размеру корабля: человек выбирает сам, и предлагать ему половину рейда
+ * только потому, что у него крупный корабль, незачем. Правила остаются только те, что
+ * про сцену: занятый слот, остров и коридор, в котором уже стоит близкий сосед.
+ */
+export const freeBerths = (taken: ShipPlacement[]): Berth[] =>
+    allSlots()
+        .filter((slot) => slotIsFree(slot, taken))
+        .flatMap((slot) => freeCorridors(slot, taken).map((corridor) => berthAt(slot, corridor)));
+
+/** Свободно ли это место: слот не занят, а коридор на нём разрешён. */
+export const isBerthFree = (berth: Berth, taken: ShipPlacement[]): boolean =>
+    slotIsFree(berth.slot, taken) && freeCorridors(berth.slot, taken).includes(berth.corridor);
+
+/**
+ * Куда этот корабль может встать сам. В отличие от freeBerths — с оглядкой на размер:
+ * сначала отбираются слоты по дальности, ближайшие к «своей» части рейда, а потом
+ * раскладываются по свободным коридорам.
+ */
+const preferredBerths = (kind: ShipKind, taken: ShipPlacement[]): Berth[] => {
     const wanted = preferredSlot(kind);
     return allSlots()
-        .filter(
-            (slot) =>
-                slot !== exclude &&
-                !taken.some((placement) => placement.slot === slot) &&
-                freeCorridors(slot, taken).length > 0
-        )
+        .filter((slot) => slotIsFree(slot, taken) && freeCorridors(slot, taken).length > 0)
         .sort((a, b) => Math.abs(a - wanted) - Math.abs(b - wanted))
         .slice(0, SLOT_CHOICE)
-        .flatMap((slot) => freeCorridors(slot, taken).map((corridor) => ({ slot, corridor })));
+        .flatMap((slot) => freeCorridors(slot, taken).map((corridor) => berthAt(slot, corridor)));
 };
 
 /**
@@ -202,48 +221,30 @@ const freeSpots = (kind: ShipKind, taken: ShipPlacement[], exclude?: number): Sp
  * Случайность нужна: без неё расстановка превратилась бы в алгоритм, который на одном
  * и том же составе каждый раз рисует одну и ту же картинку.
  */
-const pickSpot = (kind: ShipKind, taken: ShipPlacement[], exclude?: number): Spot | null => {
-    const spots = freeSpots(kind, taken, exclude);
-    if (spots.length === 0) {
+const pickBerth = (kind: ShipKind, taken: ShipPlacement[]): Berth | null => {
+    const berths = preferredBerths(kind, taken);
+    if (berths.length === 0) {
         return null;
     }
     // Перемешиваем до сортировки: сортировка устойчива, поэтому одинаково свободные места
     // сохранят случайный порядок. Без этого на пустом рейде, где свободно всё, в набор
     // попадали бы три коридора одного и того же слота — и первый корабль всегда вставал бы
     // на одно и то же место.
-    const roomiest = shuffled(spots)
+    const roomiest = shuffled(berths)
         .sort((a, b) => loneliness(b.slot, b.corridor, taken) - loneliness(a.slot, a.corridor, taken))
         .slice(0, SPOT_CHOICE);
     return pick(roomiest);
 };
 
 /**
- * Ставит новый корабль среди уже занятых мест. Если свободных мест нет — возвращаем null;
- * при пяти участниках на десять слотов это невозможно, но проверка дешевле, чем
- * разбирательство, если однажды станет возможно.
- */
-export const placeShip = (kind: ShipKind, taken: ShipPlacement[]): ShipPlacement | null => {
-    const spot = pickSpot(kind, taken);
-    return spot && placeAt(spot.slot, spot.corridor, taken);
-};
-
-/**
- * Куда переставить корабль, которого попросили сдвинуться. Сначала перебираются коридоры
- * своего слота: корабль переходит в тот, где ещё не стоял, и это короткий ход поперёк кадра.
- * Когда слот обойдён весь, корабль снимается и перезаходит на другой свободный слот —
- * на свой он не возвращается, иначе перестановка ходила бы по кругу.
+ * Ставит корабль на рейде. Место человек выбирает сам, но полагаться на этот выбор нельзя:
+ * пока он раздумывал, туда мог встать кто-то другой, — и тогда корабль встаёт на случайное
+ * свободное, как если бы места не выбирали вовсе.
  *
- * Возвращает null, если двигаться некуда: и коридоры кончились, и свободных слотов нет.
+ * Возвращает null, если свободных мест нет: при пяти участниках на десять слотов это
+ * невозможно, но проверка дешевле, чем разбирательство, если однажды станет возможно.
  */
-export const moveShip = (kind: ShipKind, place: ShipPlacement, others: ShipPlacement[]): ShipPlacement | null => {
-    const untried = freeCorridors(place.slot, others).filter((corridor) => !place.tried.includes(corridor));
-    if (untried.length > 0) {
-        const corridor = untried[0];
-        return { ...place, corridor, left: leftInside(corridor), tried: [...place.tried, corridor] };
-    }
-
-    // На свой слот не возвращаемся, иначе перестановка ходила бы по кругу; в остальном
-    // место выбирается так же, как при входе.
-    const spot = pickSpot(kind, others, place.slot);
-    return spot && placeAt(spot.slot, spot.corridor, others);
+export const placeShip = (kind: ShipKind, taken: ShipPlacement[], wanted?: Berth): ShipPlacement | null => {
+    const berth = wanted && isBerthFree(wanted, taken) ? wanted : pickBerth(kind, taken);
+    return berth && placeAt(berth, taken);
 };

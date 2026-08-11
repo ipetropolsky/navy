@@ -183,6 +183,15 @@ export default function MemberForm({ mode, crew, myId, initial, onSubmit, onCanc
                 />
             </Field>
 
+            {/* Само место выбирается не здесь, а на воде над формой: свободные отмечены
+                овалами, выбранное залито. Строчка нужна, чтобы человек туда посмотрел, —
+                иначе овалы легко принять за украшение сцены. */}
+            <Field label="Место на рейде">
+                <div className={styles.berthHint}>
+                    Выбирается на рейде выше: свободные места отмечены овалами. Одно уже выбрано за тебя.
+                </div>
+            </Field>
+
             <Field label="Цвет" group>
                 <div className={styles.colors}>
                     {MEMBER_COLORS.map((option) => (
