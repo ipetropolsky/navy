@@ -2,7 +2,7 @@ import { Page, expect, test } from '@playwright/test';
 
 import { MOBILE_MAX_WIDTH } from '@/config/layout';
 
-import { ALBATROS, DEMO, openChannel } from '@tests/helpers';
+import { ALBATROS, DEMO, openChannel, shipNames, ships } from '@tests/helpers';
 
 /**
  * Раскладка на телефоне и на десктопе. Здесь тоже только то, на чём наступали: вода однажды
@@ -57,6 +57,59 @@ const expectSaneScene = (view: Geometry): void => {
     expect(view.farShipTop, 'дальний корабль оторвался от воды').toBeLessThan(view.scene.height);
 };
 
+/**
+ * Разметка свободного места: во что перспектива превратила круг, лежащий на воде.
+ * Ширина здесь своя, до всяких поворотов, а высота — та, что вышла на экране.
+ */
+interface BerthShape {
+    width: number;
+    height: number;
+    /** Насколько отметка ниже горизонта, px: от этого и зависит, как сильно её сплющило. */
+    below: number;
+    perspective: number;
+}
+
+const berthShapes = (page: Page): Promise<BerthShape[]> =>
+    page.evaluate(() => {
+        // Сцена — родитель слоя воды: под этот же класс попадает обёртка в шапке приложения.
+        const sea = document.querySelector('[class*="sea_"]')!;
+        const horizon = sea.getBoundingClientRect().top;
+        const perspective = parseFloat(getComputedStyle(sea.parentElement!).perspective);
+        return [...document.querySelectorAll<HTMLElement>('[class*="berthMark"]')].map((mark) => ({
+            width: mark.offsetWidth,
+            height: mark.getBoundingClientRect().height,
+            // У дорожки нет высоты: её нижняя кромка и есть точка стоянки.
+            below: mark.parentElement!.getBoundingClientRect().bottom - horizon,
+            perspective,
+        }));
+    });
+
+/**
+ * Места на рейде должны лежать на воде, а не стоять в кадре. Проверяем это счётом, а не
+ * на глаз: круг радиуса r, уложенный плашмя на расстоянии below ниже точки схода, проекция
+ * с камерой на perspective сплющивает ровно до below * P * w / (P² − r²). Сойдётся — значит
+ * перспектива дошла до отметки: и сцена раздаёт её, и дорожка не расплющила её обратно
+ * в плоскость экрана.
+ *
+ * Числа для обеих раскладок свои: воды в кадре на телефоне больше, и камера отодвинута дальше.
+ */
+const expectBerthsLieOnWater = (marks: BerthShape[]): void => {
+    expect(marks.length, 'свободных мест на рейде не показано вовсе').toBeGreaterThan(3);
+    for (const mark of marks) {
+        const radius = mark.width / 2;
+        const lying = (mark.below * mark.perspective * mark.width) / (mark.perspective ** 2 - radius ** 2);
+        expect(Math.abs(mark.height - lying), 'отметка не легла на воду перспективой').toBeLessThan(1.5);
+    }
+
+    // И перспектива именно перспектива: ближнее место раскрыто заметно шире дальнего.
+    const byDepth = [...marks].sort((one, other) => one.below - other.below);
+    const far = byDepth[0];
+    const near = byDepth[byDepth.length - 1];
+    expect(near.height / near.width, 'ближнее место сплющено как дальнее').toBeGreaterThan(
+        (far.height / far.width) * 1.5
+    );
+};
+
 /** Плашка формы: её ширина и скругление и отличают мобильный вид от десктопного. */
 const panelBox = (page: Page): Promise<{ width: number; radius: number; parentWidth: number }> =>
     page.evaluate(() => {
@@ -77,6 +130,13 @@ test.describe('телефон', () => {
         const panel = await panelBox(page);
         expect(panel.width, 'форма не дотянулась до краёв').toBe(panel.parentWidth);
         expect(panel.radius, 'на всю ширину скругления не нужны').toBe(0);
+    });
+
+    test('места на рейде лежат на воде, а занятые подписаны', async ({ page }) => {
+        await openChannel(page, DEMO);
+        expectBerthsLieOnWater(await berthShapes(page));
+        // Занятые места подписаны все: рейд читается целиком — где свободно, а где «Вымпел».
+        await expect(shipNames(page)).toHaveCount(await ships(page).count());
     });
 
     test('вода закрывает своё место, месяц не под текстом, корабли по всей воде', async ({ page }) => {
@@ -112,6 +172,12 @@ test.describe('десктоп', () => {
 
     // Масштаб в списке один на всех, и линейка — единственное, что переводит его в метры.
     // Ошибись тут на шаг — и катер молча станет корветом.
+    test('места на рейде лежат на воде, а занятые подписаны', async ({ page }) => {
+        await openChannel(page, DEMO);
+        expectBerthsLieOnWater(await berthShapes(page));
+        await expect(shipNames(page)).toHaveCount(await ships(page).count());
+    });
+
     test('масштабная линейка не врёт: метр на ней и метр корабля — один и тот же', async ({ page }) => {
         await openChannel(page, DEMO);
         const drawings = await page.evaluate(() =>

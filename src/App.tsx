@@ -45,13 +45,17 @@ export default function App() {
     const members = useMemo(() => channel?.members ?? [], [channel]);
     const me = members.find((member) => member.memberId === myId) ?? null;
     const inChat = Boolean(channel && me && !editing);
+    // Место на рейде выбирают в форме корабля и только в ней: это её поле, просто вынесенное
+    // на воду. На главной канала ещё нет, вставать некуда и не в чем — там рейд пустой
+    // и ничего не предлагает.
+    const picking = !loading && Boolean(channel) && !inChat;
 
     // Свободные места на рейде: их показывает сцена, пока открыта форма корабля. Своё место
     // считается свободным — иначе, открыв форму, человек не видел бы, где он стоит сейчас.
     const berthOptions = useMemo(
         () =>
-            inChat ? [] : freeBerths(members.filter((member) => member.memberId !== myId).map((item) => item.place)),
-        [inChat, members, myId]
+            picking ? freeBerths(members.filter((member) => member.memberId !== myId).map((item) => item.place)) : [],
+        [picking, members, myId]
     );
     const [pickedBerth, setPickedBerth] = useState<Berth | null>(null);
     // Своё место выбрано заранее: у стоящего в строю — то, на котором он стоит, у входящего —
@@ -62,7 +66,7 @@ export default function App() {
     // случайное: заставлять человека выбирать заново из-за чужого хода незачем, а бэкенд
     // при отправке проверит это ещё раз.
     const berthIsFree = pickedBerth && berthOptions.some((berth) => isSameBerth(berth, pickedBerth));
-    if (inChat) {
+    if (!picking) {
         // Форма закрыта: выбор больше ничей. Оставить его — значит однажды переставить
         // корабль на место, которое человек выбирал в прошлый раз и с тех пор забыл.
         if (pickedBerth) {
@@ -147,7 +151,7 @@ export default function App() {
                         // и корабль, и место на рейде меняются в одном месте.
                         onEditShip={() => setEditing(true)}
                         berths={
-                            inChat ? undefined : { options: berthOptions, picked: pickedBerth, onPick: setPickedBerth }
+                            picking ? { options: berthOptions, picked: pickedBerth, onPick: setPickedBerth } : undefined
                         }
                     />
                 </div>

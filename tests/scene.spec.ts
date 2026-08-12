@@ -50,18 +50,26 @@ test('свой корабль заплывает в кадр, а не возни
     expect(hidden, 'в начале захода корабль виден в кадре').toBeLessThan(0);
 });
 
-test('место на рейде выбирается овалом, и корабль встаёт на выбранное', async ({ page }) => {
+test('место на рейде выбирается щелчком по воде, и корабль встаёт на выбранное', async ({ page }) => {
+    // На главной мест нет вовсе: канала ещё нет, вставать некуда, и рейд там ничего
+    // не предлагает — выбор места живёт в форме корабля и только в ней.
+    await page.goto('/', { waitUntil: 'networkidle' });
+    await expect(berths(page)).toHaveCount(0);
+
     await openNewChannel(page, 'mesto');
 
-    // Свободные места показаны, и одно из них выбрано заранее: человек, который ничего
-    // не трогал, всё равно должен видеть, куда встанет его корабль.
+    // Свободные места помечены огоньками, и одно из них выбрано заранее: человек, который
+    // ничего не трогал, всё равно должен видеть, куда встанет его корабль.
     await expect(berths(page).first()).toBeVisible();
     await expect(page.locator('[aria-pressed="true"][data-berth]')).toHaveCount(1);
 
-    // Выбираем другое место — не то, что предложили, — и встаём в строй.
+    // Выбираем другое место — не то, что предложили. Целиться в сам огонёк не нужно:
+    // щелчок по воде достаётся месту с ближайшей точкой, и восемь пикселей ниже огонька —
+    // это по-прежнему он: соседняя дальность вдвое дальше.
     const free = page.locator('[data-berth][aria-pressed="false"]').last();
     const chosen = await free.getAttribute('data-berth');
-    await free.click();
+    const spot = (await free.boundingBox())!;
+    await page.mouse.click(spot.x + spot.width / 2, spot.y + spot.height / 2 + 8);
     await expect(page.locator(`[data-berth="${chosen}"][aria-pressed="true"]`)).toHaveCount(1);
     await join(page, 'Гроза', '777');
 
@@ -160,7 +168,7 @@ test('огни на рейде якорные, на ходу ходовые, и 
     // Тронулись — якорные погасли, зажглись ходовые. Снимает корабль с места смена стоянки:
     // щелчок по своему кораблю открывает форму, там выбирается другое место, и корабль уходит.
     await page.locator('[class*="shipMine"]').click();
-    await berths(page).last().click();
+    await page.locator('[data-berth][aria-pressed="false"]').last().click();
     await page.locator('button[type=submit]').click();
     await expect(page.locator('[data-motion]')).toHaveCount(1);
     const underway = await lights(page, '[data-motion]');

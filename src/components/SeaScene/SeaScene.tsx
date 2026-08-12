@@ -1,4 +1,13 @@
-import { CSSProperties, useEffect, useLayoutEffect, useReducer, useRef, useState } from 'react';
+import {
+    CSSProperties,
+    MouseEvent,
+    PointerEvent,
+    useEffect,
+    useLayoutEffect,
+    useReducer,
+    useRef,
+    useState,
+} from 'react';
 
 import cloudFarUrl from '@/assets/scene/cloud-1.png';
 import cloudNearUrl from '@/assets/scene/cloud-2.png';
@@ -9,7 +18,17 @@ import skyUrl from '@/assets/scene/sky.png';
 import Ship from '@/components/ships/Ship';
 import { SHIP_SPRITES } from '@/components/ships/shipSprites';
 import { MOBILE_SHIP_ZOOM } from '@/config/layout';
-import { Berth, Corridor, Member, MorseFeed, ShipPlacement, isSameBerth, otherSide, slotDepth } from '@/types/channel';
+import {
+    Berth,
+    CORRIDORS,
+    Corridor,
+    Member,
+    MorseFeed,
+    ShipPlacement,
+    isSameBerth,
+    otherSide,
+    slotDepth,
+} from '@/types/channel';
 import { useIsMobile } from '@/utils/viewport';
 
 import {
@@ -100,7 +119,7 @@ const MOTION_CLASS: Record<string, string> = {
 const MOTION_GRACE_MS = 1500;
 
 /**
- * Как называется место на рейде вслух. Овалы различимы глазом, но не голосом: тому, кто
+ * Как называется место на рейде вслух. Разметка различима глазом, но не голосом: тому, кто
  * слушает страницу читалкой, нужно словами — в какой стороне кадра место и какая это линия.
  */
 const BERTH_LABELS: Record<Corridor, string> = {
@@ -108,6 +127,25 @@ const BERTH_LABELS: Record<Corridor, string> = {
     center: 'по центру',
     right: 'справа',
 };
+
+/**
+ * Во сколько раз камера отодвинута от кадра дальше, чем высока в нём вода. Это и есть
+ * перспектива сцены — та, по которой овалы мест ложатся на воду плашмя (см. стили).
+ *
+ * Считается число от воды, а не от сцены и не в пикселях, потому что перспектива обязана
+ * следовать за морем: на телефоне воды в кадре 58% высоты сцены, на десктопе 44%, и корабли
+ * на телефоне разведены по всей её высоте. Возьми мы одно число в пикселях — на телефоне
+ * овалы раскрылись бы заметно сильнее десктопных, а при сжатой сцене (вылезла клавиатура)
+ * сплющились бы в линию. От воды же выходит одинаково: у ближнего места овал вчетверо шире,
+ * чем выше, у дальнего — раз в двадцать, и так на обоих раскладках.
+ *
+ * Само значение — про то, откуда мы смотрим на рейд: чем оно больше, тем ниже наблюдатель
+ * и тем площе разметка. 3.6 отвечает взгляду с мостика.
+ */
+const BERTH_PERSPECTIVE = 3.6;
+
+/** Место на рейде одно на слот и коридор — этой пары хватает и для ключа, и для разметки. */
+const berthKey = (berth: Berth): string => `${berth.slot}-${berth.corridor}`;
 
 /**
  * Склеенная полоса воды: три плитки шириной с кадр, соседние зеркальны друг другу — поэтому
@@ -128,7 +166,7 @@ const seaTiles = (
  * кто на связи.
  */
 export interface BerthChoice {
-    /** Свободные места. Их и рисуем пунктирными овалами прямо на воде. */
+    /** Свободные места: в каждом горит точка, у выбранного — ещё и овал вокруг неё. */
     options: Berth[];
     picked: Berth | null;
     onPick: (berth: Berth) => void;
@@ -195,6 +233,22 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
     // На телефоне корабли растянуты, и путь у них в метрах длиннее — длительность хода
     // это учитывает, иначе на узком экране флот ходил бы быстрее, чем на широком.
     const zoom = useIsMobile() ? MOBILE_SHIP_ZOOM : 1;
+
+    // Высота воды в кадре, px. Нужна перспективе: та считается от моря, а не от сцены,
+    // и меняется вместе с ним — сцена сжимается под клавиатуру, а на телефоне ещё и доля
+    // воды другая. Замер идёт по самому слою воды: он и есть море, спрашивать его надёжнее,
+    // чем повторять в коде долю из стилей.
+    const seaRef = useRef<HTMLDivElement>(null);
+    const [seaHeight, setSeaHeight] = useState(0);
+    useEffect(() => {
+        const water = seaRef.current;
+        if (!water) {
+            return undefined;
+        }
+        const observer = new ResizeObserver(([entry]) => setSeaHeight(entry.contentRect.height));
+        observer.observe(water);
+        return () => observer.disconnect();
+    }, []);
 
     // Задники готовы — сцену можно показывать.
     const [painted, setPainted] = useState(false);
@@ -387,6 +441,8 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
             '--slot-left': `${place.left.toFixed(2)}%`,
             '--slot-width': `${width}%`,
             '--slot-half': `${width / 2}%`,
+            // Дальность нужна и стилям: от неё идёт размер точки, отмечающей место на рейде.
+            '--slot-depth': depth.toFixed(4),
             // Чем дальше корабль, тем выше он стоит в кадре — это и создаёт перспективу.
             // Отсчёт идёт от воды, а не от низа сцены: воды на телефоне 58% высоты сцены,
             // а на десктопе 44%, и от низа сцены корабли жались бы к нижнему краю, оставляя
@@ -405,8 +461,92 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
     const maxShipWidth = (member: Member): number =>
         (150 + slotDepth(member.place.slot) * 200) * SHIP_SPRITES[member.shipKind].scale;
 
+    // Выбор места на рейде. Целиться в саму разметку не нужно: указатель ловит вся вода,
+    // а выбирается место, до чьей точки ближе всего. Иначе на дальних слотах пришлось бы
+    // попадать в трёхпиксельный кружок, а на телефоне — ещё и пальцем.
+    //
+    // Расстояние тут экранное, в пикселях, и меряется по самим точкам: считать его по долям
+    // кадра нельзя — место в кадре проходит ещё и через clamp у краёв, — а по-настоящему
+    // близко то, что близко на глаз.
+    const berthOptions = berths?.options;
+    const berthDots = useRef(new Map<string, HTMLElement>());
+    const berthSpots = useRef<{ berth: Berth; x: number; y: number }[]>([]);
+    // Место под указателем: по нему проступает разметка остальных мест и подсвечивается то,
+    // которое достанется нажатию. Мера тут одна — расстояние до точки, поэтому и хранится
+    // не «где указатель», а «какое место оказалось ближайшим».
+    const [nearBerth, setNearBerth] = useState<Berth | null>(null);
+
+    // Замер идёт после отрисовки и повторяется, когда сцена меняет размер: точки стоят
+    // в долях кадра, и в пикселях они переезжают вместе с ним.
+    useLayoutEffect(() => {
+        const frame = sceneRef.current?.getBoundingClientRect();
+        berthSpots.current = !frame
+            ? []
+            : (berthOptions ?? []).flatMap((berth) => {
+                  const spot = berthDots.current.get(berthKey(berth))?.getBoundingClientRect();
+                  return spot
+                      ? [
+                            {
+                                berth,
+                                x: spot.left + spot.width / 2 - frame.left,
+                                y: spot.top + spot.height / 2 - frame.top,
+                            },
+                        ]
+                      : [];
+              });
+        // Выбор закрылся или рейд перебрали заново — подсветка предыдущего указателя
+        // к новому набору мест отношения не имеет.
+        setNearBerth(null);
+    }, [berthOptions, seaHeight, zoom]);
+
+    /** Место, до чьей точки ближе всего от этого места в кадре. */
+    const berthNearest = (clientX: number, clientY: number): Berth | null => {
+        const frame = sceneRef.current?.getBoundingClientRect();
+        if (!frame) {
+            return null;
+        }
+        const x = clientX - frame.left;
+        const y = clientY - frame.top;
+        let nearest: Berth | null = null;
+        let shortest = Infinity;
+        for (const spot of berthSpots.current) {
+            const gap = (spot.x - x) ** 2 + (spot.y - y) ** 2;
+            if (gap < shortest) {
+                shortest = gap;
+                nearest = spot.berth;
+            }
+        }
+        return nearest;
+    };
+
+    // Указатель ведут по воде — показываем, какое место ему достанется. Палец сюда попадает
+    // тоже: пока он прижат, события приходят те же, а на отрыве браузер сам присылает уход
+    // указателя, и подсветка гаснет.
+    const trackBerth = (event: PointerEvent<HTMLElement>): void => {
+        const nearest = berthNearest(event.clientX, event.clientY);
+        setNearBerth((previous) => (previous && nearest && isSameBerth(previous, nearest) ? previous : nearest));
+    };
+
+    const pickNearestBerth = (event: MouseEvent<HTMLElement>): void => {
+        const nearest = berthNearest(event.clientX, event.clientY);
+        if (nearest) {
+            berths?.onPick(nearest);
+        }
+    };
+
     return (
-        <div className={painted ? `${styles.scene} ${styles.scenePainted}` : styles.scene} ref={sceneRef}>
+        <div
+            className={painted ? `${styles.scene} ${styles.scenePainted}` : styles.scene}
+            ref={sceneRef}
+            // Перспектива сцены: камера отодвинута от кадра на столько же высот воды,
+            // сколько задано BERTH_PERSPECTIVE. До первого замера значение остаётся
+            // из стилей — показывать в этот момент всё равно нечего.
+            style={
+                seaHeight
+                    ? ({ '--berth-perspective': `${(seaHeight * BERTH_PERSPECTIVE).toFixed(0)}px` } as CSSProperties)
+                    : undefined
+            }
+        >
             <div className={styles.sky}>
                 {/* Небо-текстура: соседние плитки зеркальны друг другу, поэтому стыки незаметны. */}
                 <div className={styles.skyStrip}>
@@ -420,31 +560,37 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
             <img className={styles.cloudNear} src={cloudNearUrl} alt="" />
             {/* Вода: та же склеенная полоса, что и небо, а поверх — она же, перевёрнутая ещё раз.
                 Верхняя проступает и гаснет, отчего рябь перетекает в собственное отражение. */}
-            <div className={styles.sea}>
+            <div className={styles.sea} ref={seaRef}>
                 <div className={styles.seaStrip}>{seaTiles}</div>
                 <div className={styles.seaStripMirrored}>{seaTiles}</div>
             </div>
             {/* Остров стоит на воде ниже горизонта, за ним видно море. Отражение уже есть в картинке. */}
             <img className={styles.island} src={islandUrl} alt="" />
-            {/* Свободные места на рейде — пунктирные овалы прямо на воде, как разметка стоянки.
+            {/* Разметка мест на рейде — круги, лежащие прямо на воде, как разметка стоянки.
                 Показываются, только пока человек выбирает, куда встать. Идут перед кораблями
                 и с тем же zIndex: при равном порядке наложения решает разметка, поэтому ближний
-                корабль накрывает собой овалы своей дальности, а не наоборот. */}
+                корабль накрывает собой разметку своей дальности, а не наоборот — она на воде,
+                он на ней стоит. */}
             {berths?.options.map((berth) => {
-                const picked = berths.picked && isSameBerth(berth, berths.picked);
+                const picked = Boolean(berths.picked && isSameBerth(berth, berths.picked));
+                const near = Boolean(nearBerth && isSameBerth(berth, nearBerth));
                 return (
                     <div
-                        key={`${berth.slot}-${berth.corridor}`}
-                        className={styles.shipLane}
+                        key={berthKey(berth)}
+                        className={styles.berthLane}
                         style={{ ...laneStyle(berth, berthWidthPercent(berth.slot)), zIndex: berth.slot + 1 }}
                     >
-                        <button
-                            type="button"
-                            className={picked ? styles.berthPicked : styles.berth}
-                            data-berth={`${berth.slot}-${berth.corridor}`}
-                            aria-pressed={Boolean(picked)}
-                            aria-label={`Место на рейде: ${BERTH_LABELS[berth.corridor]}, ${berth.slot + 1}-я линия`}
-                            onClick={() => berths.onPick(berth)}
+                        <div
+                            className={[
+                                styles.berthMark,
+                                // Остальные места проступают, только когда указатель на воде:
+                                // весь рейд в овалах разом — узор, а не выбор.
+                                nearBerth ? styles.berthMarkShown : '',
+                                near ? styles.berthMarkNear : '',
+                                picked ? styles.berthMarkPicked : '',
+                            ]
+                                .filter(Boolean)
+                                .join(' ')}
                         />
                     </div>
                 );
@@ -492,7 +638,9 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
                     ) * (heading === 'left' ? 1 : -1);
                 // Свой корабль открывает форму: там меняются и корабль, и место на рейде.
                 // Идущий не открывает: он ещё не пришёл туда, откуда его будут переставлять.
-                const canEdit = Boolean(onEditShip) && member.memberId === myId && !leaving && !motion;
+                // Пока форма и так открыта, корабль ничего не открывает и указателем
+                // не притворяется: щелчок по воде в этот момент занят выбором места.
+                const canEdit = Boolean(onEditShip) && !berths && member.memberId === myId && !leaving && !motion;
                 return (
                     // Дорожка во всю ширину кадра: она и возит корабль. Ход и место на рейде
                     // считаются в долях кадра, поэтому и блок нужен шириной с кадр — см. стили.
@@ -536,6 +684,10 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
                             title={canEdit ? 'Изменить корабль и место на рейде' : undefined}
                             style={{ maxWidth: maxShipWidth(member) }}
                         >
+                            {/* Пока выбирают место, занятые подписаны: рейд должен читаться целиком —
+                                где свободно, а где уже стоит «Альбатрос». Подпись держится над кораблём
+                                и вне качающегося блока: ходить вместе с корпусом ей незачем. */}
+                            {berths && <div className={styles.shipName}>{member.name}</div>}
                             {/* Корабль, номер, огни и тень на воде качаются как единое целое: обе анимации
                             висят на одном блоке, потому что двигают разные свойства — translate и rotate. */}
                             <div
@@ -578,6 +730,76 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
                     </div>
                 );
             })}
+            {/* Слой выбора места: он поверх кораблей, потому что точки должны быть видны
+                и сквозь корпус — иначе занятая половина рейда выглядит так, будто мест там нет.
+                Указатель ловит вся вода, а достаётся нажатие ближайшей точке. */}
+            {berths && (
+                <div
+                    className={styles.berthField}
+                    onPointerMove={trackBerth}
+                    onPointerLeave={() => setNearBerth(null)}
+                    onClick={pickNearestBerth}
+                >
+                    <div className={styles.berthWater} />
+                    {berths.options.map((berth) => {
+                        const picked = Boolean(berths.picked && isSameBerth(berth, berths.picked));
+                        const near = Boolean(nearBerth && isSameBerth(berth, nearBerth));
+                        const key = berthKey(berth);
+                        return (
+                            <div
+                                key={key}
+                                className={styles.berthLane}
+                                style={laneStyle(berth, berthWidthPercent(berth.slot))}
+                            >
+                                <button
+                                    type="button"
+                                    ref={(element) => {
+                                        if (element) {
+                                            berthDots.current.set(key, element);
+                                        } else {
+                                            berthDots.current.delete(key);
+                                        }
+                                    }}
+                                    className={styles.berthDot}
+                                    data-berth={key}
+                                    aria-pressed={picked}
+                                    aria-label={`Место на рейде: ${BERTH_LABELS[berth.corridor]}, ${berth.slot + 1}-я линия`}
+                                    // Своя обработка нужна ради клавиатуры: у нажатия с неё нет
+                                    // координат, а без них ближайшее место не найти.
+                                    onClick={(event) => {
+                                        event.stopPropagation();
+                                        berths.onPick(berth);
+                                    }}
+                                    style={
+                                        {
+                                            // Точка нарисована на самой воде, поэтому качается
+                                            // с полным размахом волны: это корабль режет её вполовину.
+                                            '--heave': `${waveAmplitude(slotDepth(berth.slot)).toFixed(2)}px`,
+                                            // Момент старта закреплён за местом, а не раздаётся
+                                            // по порядку: соседние точки должны ходить вразнобой,
+                                            // и делать это одинаково от отрисовки к отрисовке.
+                                            '--wave-start': `-${WAVE_STARTS[
+                                                (berth.slot + CORRIDORS.indexOf(berth.corridor) * 2) %
+                                                    WAVE_STARTS.length
+                                            ].toFixed(2)}s`,
+                                        } as CSSProperties
+                                    }
+                                >
+                                    <span
+                                        className={[
+                                            styles.berthDotLight,
+                                            near ? styles.berthDotNear : '',
+                                            picked ? styles.berthDotPicked : '',
+                                        ]
+                                            .filter(Boolean)
+                                            .join(' ')}
+                                    />
+                                </button>
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
             <div className={styles.bottomFade} />
         </div>
     );
