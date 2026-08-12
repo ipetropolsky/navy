@@ -2,7 +2,7 @@ import { useState } from 'react';
 
 import { ChannelError, MemberDraft } from '@/backend';
 import MemberName from '@/components/ships/MemberName';
-import { SHIP_SPRITES, shipSizeShare } from '@/components/ships/shipSprites';
+import { SHIP_SPRITES } from '@/components/ships/shipSprites';
 import Button from '@/components/ui/Button';
 import Field from '@/components/ui/Field';
 import Input from '@/components/ui/Input';
@@ -17,6 +17,7 @@ import {
     SHIP_SPECS,
     ShipKind,
     isValidHullNumber,
+    shipSizeShare,
 } from '@/types/channel';
 import { plural } from '@/utils/plural';
 import { isMobile } from '@/utils/viewport';
@@ -31,6 +32,12 @@ interface MemberFormProps {
     /** Свой корабль, если он уже в строю: его цвет из занятых не исключаем. */
     myId: string | null;
     initial?: MemberDraft;
+    /**
+     * Выбранный силуэт. Единственное поле формы, которое живёт снаружи: от размера корабля
+     * зависит, куда он влезет на рейде, а свободные места показывает не форма, а сцена.
+     */
+    shipKind: ShipKind;
+    onShipKind: (kind: ShipKind) => void;
     onSubmit: (draft: MemberDraft) => Promise<void>;
     onCancel?: () => void;
 }
@@ -89,11 +96,19 @@ const shipSpecLine = (kind: ShipKind): string => {
  * Корабль участника: силуэт, цвет, бортовой номер и позывной. Форма одна и та же
  * при входе и при переоснащении — меняются только заголовок и состав кнопок.
  */
-export default function MemberForm({ mode, crew, myId, initial, onSubmit, onCancel }: MemberFormProps) {
+export default function MemberForm({
+    mode,
+    crew,
+    myId,
+    initial,
+    shipKind,
+    onShipKind,
+    onSubmit,
+    onCancel,
+}: MemberFormProps) {
     const takenColors = crew.filter((member) => member.memberId !== myId).map((member) => member.color);
     const [name, setName] = useState(initial?.name ?? '');
     const [hullNumber, setHullNumber] = useState(initial?.hullNumber ?? randomHullNumber);
-    const [shipKind, setShipKind] = useState<ShipKind>(initial?.shipKind ?? 'corvette');
     // Цвет по умолчанию — первый свободный: два одинаковых позывных в ленте не различить.
     const [color, setColor] = useState(
         initial?.color ?? MEMBER_COLORS.find((option) => !takenColors.includes(option)) ?? MEMBER_COLORS[0]
@@ -196,7 +211,7 @@ export default function MemberForm({ mode, crew, myId, initial, onSubmit, onCanc
                             key={kind}
                             type="button"
                             className={kind === shipKind ? styles.kindActive : styles.kind}
-                            onClick={() => setShipKind(kind)}
+                            onClick={() => onShipKind(kind)}
                         >
                             {/* Место под силуэт одно на всех, а сам силуэт в нём той ширины,
                                 какую даёт его длина. */}

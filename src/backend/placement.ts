@@ -8,13 +8,13 @@
  * у каждого по-своему. И поэтому же выбор проверяется здесь: пока человек раздумывал,
  * на выбранное место мог встать кто-то другой.
  *
- * Мест на рейде десять дальностей — это «слоты» — по три коридора в каждой. На одной дальности
- * помещаются два объекта: два корабля или корабль и остров, чей берег занимает дальние линии
- * слева. Кто места не выбирал, встаёт случайно: строй не должен выглядеть построенным.
- * Свободная случайность, впрочем, быстро собирает корабли в кучу, поэтому её ограничивают
- * три правила: коридоры разводят соседей по ширине кадра, размер корабля задаёт, в какой
- * части рейда он скорее встанет, а из оставшегося берётся самое свободное — как место
- * в автобусе, где сперва садятся подальше от всех.
+ * Мест на рейде десять дальностей — это «слоты» — по три коридора в каждой. Сколько кораблей
+ * встанет на одну дальность, наперёд не сказано: это решает их размер, см. sideBySide. Кто
+ * места не выбирал, встаёт случайно: строй не должен выглядеть построенным. Свободная
+ * случайность, впрочем, быстро собирает корабли в кучу, поэтому её ограничивают три правила:
+ * коридоры разводят соседей по ширине кадра, размер корабля задаёт, в какой части рейда
+ * он скорее встанет, а из оставшегося берётся самое свободное — как место в автобусе,
+ * где сперва садятся подальше от всех.
  *
  * Коридор — вертикальная полоса кадра, в которой стоит корабль. Их три, с серединами
  * на 20%, 50% и 80% ширины, и корабль сейчас встаёт ровно на середину своего: место
@@ -24,12 +24,14 @@
  * друг от друга — тогда они разнесены по дальности достаточно, чтобы не наложиться силуэтами.
  */
 
+import { MOBILE_SHIP_ZOOM } from '@/config/layout';
 import {
     Berth,
     CORRIDORS,
     Corridor,
     ISLAND_FREE_SLOT,
     ISLAND_SIDE,
+    Member,
     SHIP_KINDS,
     SHIP_SPECS,
     SLOT_COUNT,
@@ -37,7 +39,15 @@ import {
     ShipPlacement,
     Side,
     otherSide,
+    shipWidthPercent,
+    shownLeft,
 } from '@/types/channel';
+
+/**
+ * Чужой корабль на рейде, каким его видит расстановка: где стоит и какой ширины. Размер
+ * нужен ей не меньше места — помещаются ли двое на одной линии, решают именно борта.
+ */
+export type Standing = Pick<Member, 'shipKind' | 'place'>;
 
 /** Центры коридоров, % ширины сцены. */
 const CORRIDOR_CENTERS: Record<Corridor, number> = { left: 20, center: 50, right: 80 };
@@ -46,36 +56,21 @@ const CORRIDOR_CENTERS: Record<Corridor, number> = { left: 20, center: 50, right
 const MIN_SLOT_GAP = 3;
 
 /**
- * Сколько объектов помещается на одной дальности: два корабля или корабль и остров.
- * Больше двух не ставим — третьему на линии просто негде стоять, коридора без соседа
- * борт о борт для него уже не найдётся.
+ * Насколько сцена сводит боковые коридоры к горизонту, % ширины кадра (@berth-spread-far
+ * в стилях). Коридоры не строго вертикальные: у дальнего края они сходятся к середине кадра,
+ * к наблюдателю — расходятся, и на воде это видно по точкам свободных мест. Расстановке
+ * важен тесный конец: взяв дальний, она ошибётся только в свою пользу — там, где корабли
+ * разведены сильнее, места им тем более хватит.
  */
-const SLOT_CAPACITY = 2;
+const CORRIDOR_SQUEEZE = 2;
 
 /**
- * Ближе этой линии двое на одной дальности не помещаются, и она снова занимается целиком.
- * Считается это не на глаз: корабль на линии занимает 10 + 50/D процентов ширины кадра
- * (slotWidthPercent в сцене), стоит он в своём коридоре, а к краю кадра его не пускает отступ.
- * Двое стоят борт о борт, не налезая друг на друга, пока их общая ширина умещается между
- * этими отступами, — на телефоне, где корабли растянуты (MOBILE_SHIP_ZOOM), это верно
- * до пятой линии включительно, на широком экране — до восьмой. Берём тесный расклад:
- * расстановка одна на всех, и на телефоне она не должна разводить корабли внахлёст.
- *
- * Дальше пятой линии двоих и не нужно: там стоят самые крупные корабли, и линия под одним
- * из них занята по делу — он и правда занимает её всю.
+ * Сколько воды остаётся между бортами, долей корпуса. Меркой служит сам корабль, а не проценты
+ * кадра: на дальней линии те же три процента — это половина корпуса, а на ближней едва
+ * ли не швартовный конец. Седьмой части хватает, чтобы борта читались раздельно и на глаз
+ * было видно, что это двое, а не один длинный силуэт.
  */
-const PAIR_SLOT_LIMIT = 4;
-
-/**
- * Соседний коридор: между этими двумя корабль на одной дальности встал бы борт о борт
- * с соседом. Двое на линии расходятся по разным бортам кадра — левый с правым, — а середина
- * соседствует с обоими, и рядом с ней на её же дальности не встать никому.
- */
-const NEXT_TO: Record<Corridor, Corridor[]> = {
-    left: ['center'],
-    center: ['left', 'right'],
-    right: ['center'],
-};
+const BOARD_GAP = 0.15;
 
 /**
  * Левый коридор упирается в остров: тот занимает левую часть кадра, а его берег стоит
@@ -135,17 +130,63 @@ const shuffled = <T>(items: T[]): T[] => {
 const allSlots = (): number[] => [...new Array<number>(SLOT_COUNT)].map((_, index) => index);
 
 /**
- * Коридоры, свободные для этого слота, в случайном порядке: занятые соседями по дальности,
- * соседние с тем, кто уже стоит на этой линии, и остров — мимо.
+ * Где корабль этого размера на самом деле стоит в этом коридоре, % ширины сцены. Не середина
+ * коридора: боковые сведены к горизонту, а у края кадра корабль ещё и упирается в отступ —
+ * чем он крупнее, тем дальше от кромки его держат стили, и на ближних линиях двое сходятся
+ * теснее, чем стоят их коридоры.
+ *
+ * Считается по самому тесному раскладу — телефонному, где корабли растянуты (MOBILE_SHIP_ZOOM).
+ * Расстановка одна на всех, и разводить корабли внахлёст на узком экране она не должна;
+ * на широком то же место окажется только просторнее.
  */
-const freeCorridors = (slot: number, taken: ShipPlacement[]): Corridor[] => {
+const standingLeft = (slot: number, corridor: Corridor, kind: ShipKind): number => {
+    const side = CORRIDOR_CENTERS[corridor] - CORRIDOR_CENTERS.center;
+    const squeeze = CORRIDOR_SQUEEZE * Math.sign(side);
+    return shownLeft(CORRIDOR_CENTERS[corridor] - squeeze, shipWidthPercent(slot, kind), MOBILE_SHIP_ZOOM);
+};
+
+/**
+ * Помещаются ли эти двое борт о борт. Мерка простая и та же, что на воде: между серединами
+ * корпусов должно быть не меньше их полусумм, да ещё немного воды сверх того.
+ *
+ * Раньше на месте этого счёта стояли три числа на глазок — вместимость линии, ближняя граница,
+ * за которой двоих уже не ставили, и список соседних коридоров, — и вместе они выходили строже
+ * любой геометрии: пара помещалась ровно на двух линиях из десяти, третьей и четвёртой, да
+ * и там лишь по краям кадра. В правилах она была, а в кадре её почти никто не видел: на пять
+ * кораблей — одна расстановка из двенадцати (замер). Настоящий предел ставит размер: два катера
+ * расходятся по бортам и у самой кромки, а двум крупным тесно уже на середине рейда. Так пара
+ * стала обычным делом — каждая пятая расстановка, и на любой из десяти линий.
+ */
+const sideBySide = (slot: number, corridor: Corridor, kind: ShipKind, other: Standing): boolean => {
+    const mine = shipWidthPercent(slot, kind);
+    const its = shipWidthPercent(other.place.slot, other.shipKind);
+    const apart = Math.abs(
+        standingLeft(slot, corridor, kind) - standingLeft(other.place.slot, other.place.corridor, other.shipKind)
+    );
+    return apart >= ((mine + its) / 2) * MOBILE_SHIP_ZOOM * (1 + BOARD_GAP);
+};
+
+/**
+ * Коридоры, свободные для этого слота, в случайном порядке. Мимо идут три: занятые соседом
+ * по дальности в том же коридоре, те, где кораблю не разойтись бортами с уже стоящим на этой
+ * линии, и остров.
+ *
+ * Дальность и ширина проверяются порознь, потому что мешают по-разному. Сосед на соседней
+ * линии того же коридора закрывает её собой: разница в дальности там на девятую часть
+ * перспективы, силуэты почти одного размера и почти на одном месте — это читается наложением,
+ * сколько бы воды между ними ни было. А вот на одной дальности всё решают борта, и решают
+ * честным счётом.
+ */
+const freeCorridors = (slot: number, kind: ShipKind, taken: Standing[]): Corridor[] => {
     const blocked = new Set<Corridor>();
-    for (const placement of taken) {
-        if (Math.abs(placement.slot - slot) < MIN_SLOT_GAP) {
-            blocked.add(placement.corridor);
+    for (const other of taken) {
+        if (Math.abs(other.place.slot - slot) < MIN_SLOT_GAP) {
+            blocked.add(other.place.corridor);
         }
-        if (placement.slot === slot) {
-            NEXT_TO[placement.corridor].forEach((corridor) => blocked.add(corridor));
+        if (other.place.slot === slot) {
+            CORRIDORS.filter((corridor) => !sideBySide(slot, corridor, kind, other)).forEach((corridor) =>
+                blocked.add(corridor)
+            );
         }
     }
     if (slot < ISLAND_FREE_SLOT) {
@@ -165,8 +206,8 @@ const distanceTo = (slot: number, corridor: Corridor, other: ShipPlacement): num
     Math.abs(CORRIDOR_CENTERS[corridor] - CORRIDOR_CENTERS[other.corridor]) / CORRIDOR_SPAN;
 
 /** Насколько место свободно: расстояние до ближайшего соседа. Пустой рейд — свободно всё. */
-const loneliness = (slot: number, corridor: Corridor, taken: ShipPlacement[]): number =>
-    taken.length === 0 ? Infinity : Math.min(...taken.map((other) => distanceTo(slot, corridor, other)));
+const loneliness = (slot: number, corridor: Corridor, taken: Standing[]): number =>
+    taken.length === 0 ? Infinity : Math.min(...taken.map((other) => distanceTo(slot, corridor, other.place)));
 
 /**
  * Место на рейде целиком: дальность, коридор и точка в кадре. Точка — ровно середина
@@ -194,65 +235,51 @@ const berthAt = (slot: number, corridor: Corridor): Berth => ({
  * обычное сглаживание: на пустом рейде выходит ровно половина, и правая сторона не запрещена
  * никогда.
  */
-const enterSide = (slot: number, taken: ShipPlacement[]): Side => {
+const enterSide = (slot: number, taken: Standing[]): Side => {
     if (slot < ISLAND_FREE_SLOT) {
         return otherSide(ISLAND_SIDE);
     }
-    const fromLeft = (taken.filter((placement) => placement.enterFrom === 'left').length + 1) ** 2;
-    const fromRight = (taken.filter((placement) => placement.enterFrom === 'right').length + 1) ** 2;
+    const fromLeft = (taken.filter((other) => other.place.enterFrom === 'left').length + 1) ** 2;
+    const fromRight = (taken.filter((other) => other.place.enterFrom === 'right').length + 1) ** 2;
     return Math.random() < fromRight / (fromLeft + fromRight) ? 'left' : 'right';
 };
-
-/** Сколько мест на этой дальности вообще есть: у переднего плана линия одноместная. */
-const slotCapacity = (slot: number): number => (slot <= PAIR_SLOT_LIMIT ? SLOT_CAPACITY : 1);
-
-/**
- * Сколько объектов на этой дальности уже стоит. Остров считается наравне с кораблём: он тоже
- * занимает линию — своим берегом слева, — и линия под ним вмещает уже только одного.
- */
-const slotLoad = (slot: number, taken: ShipPlacement[]): number =>
-    taken.filter((placement) => placement.slot === slot).length + (slot < ISLAND_FREE_SLOT ? 1 : 0);
-
-/** Есть ли на этой дальности место ещё для одного. */
-const slotIsFree = (slot: number, taken: ShipPlacement[]): boolean => slotLoad(slot, taken) < slotCapacity(slot);
 
 /**
  * Место с назначенной стороной захода: откуда корабль придёт и куда будет смотреть носом.
  * Само место к этому моменту уже выбрано — человеком в форме или расстановкой.
  */
-const placeAt = (berth: Berth, taken: ShipPlacement[]): ShipPlacement => {
+const placeAt = (berth: Berth, taken: Standing[]): ShipPlacement => {
     const enterFrom = enterSide(berth.slot, taken);
     // Пришёл справа — значит идёт влево, носом вперёд.
     return { ...berth, facing: enterFrom === 'right' ? 'left' : 'right', enterFrom };
 };
 
 /**
- * Все свободные места рейда — то, что показывается овалами на воде. Здесь нет никаких
- * предпочтений по размеру корабля: человек выбирает сам, и предлагать ему половину рейда
- * только потому, что у него крупный корабль, незачем. Правила остаются только те, что
- * про сцену: занятый слот, остров и коридор, в котором уже стоит близкий сосед.
+ * Все свободные места рейда — то, что показывается овалами на воде. Предпочтений по размеру
+ * тут нет: куда встать, человек решает сам, и предлагать ему половину рейда только потому,
+ * что у него крупный корабль, незачем. А вот сам размер важен — от него зависит, куда этот
+ * корабль вообще влезет, и, выбрав в форме другой силуэт, человек видит, как часть точек
+ * на воде пропадает или появляется.
  */
-export const freeBerths = (taken: ShipPlacement[]): Berth[] =>
-    allSlots()
-        .filter((slot) => slotIsFree(slot, taken))
-        .flatMap((slot) => freeCorridors(slot, taken).map((corridor) => berthAt(slot, corridor)));
+export const freeBerths = (kind: ShipKind, taken: Standing[]): Berth[] =>
+    allSlots().flatMap((slot) => freeCorridors(slot, kind, taken).map((corridor) => berthAt(slot, corridor)));
 
-/** Свободно ли это место: слот не занят, а коридор на нём разрешён. */
-export const isBerthFree = (berth: Berth, taken: ShipPlacement[]): boolean =>
-    slotIsFree(berth.slot, taken) && freeCorridors(berth.slot, taken).includes(berth.corridor);
+/** Свободно ли это место для такого корабля. */
+export const isBerthFree = (berth: Berth, kind: ShipKind, taken: Standing[]): boolean =>
+    freeCorridors(berth.slot, kind, taken).includes(berth.corridor);
 
 /**
- * Куда этот корабль может встать сам. В отличие от freeBerths — с оглядкой на размер:
- * сначала отбираются слоты по дальности, ближайшие к «своей» части рейда, а потом
- * раскладываются по свободным коридорам.
+ * Куда этот корабль может встать сам. В отличие от freeBerths — с оглядкой на дальность:
+ * сначала отбираются слоты, ближайшие к «своей» части рейда, а потом раскладываются
+ * по свободным коридорам.
  */
-const preferredBerths = (kind: ShipKind, taken: ShipPlacement[]): Berth[] => {
+const preferredBerths = (kind: ShipKind, taken: Standing[]): Berth[] => {
     const wanted = preferredSlot(kind);
     return allSlots()
-        .filter((slot) => slotIsFree(slot, taken) && freeCorridors(slot, taken).length > 0)
+        .filter((slot) => freeCorridors(slot, kind, taken).length > 0)
         .sort((a, b) => Math.abs(a - wanted) - Math.abs(b - wanted))
         .slice(0, SLOT_CHOICE)
-        .flatMap((slot) => freeCorridors(slot, taken).map((corridor) => berthAt(slot, corridor)));
+        .flatMap((slot) => freeCorridors(slot, kind, taken).map((corridor) => berthAt(slot, corridor)));
 };
 
 /**
@@ -263,7 +290,7 @@ const preferredBerths = (kind: ShipKind, taken: ShipPlacement[]): Berth[] => {
  * Случайность нужна: без неё расстановка превратилась бы в алгоритм, который на одном
  * и том же составе каждый раз рисует одну и ту же картинку.
  */
-const pickBerth = (kind: ShipKind, taken: ShipPlacement[]): Berth | null => {
+const pickBerth = (kind: ShipKind, taken: Standing[]): Berth | null => {
     const berths = preferredBerths(kind, taken);
     if (berths.length === 0) {
         return null;
@@ -286,7 +313,7 @@ const pickBerth = (kind: ShipKind, taken: ShipPlacement[]): Berth | null => {
  * Возвращает null, если свободных мест нет: при пяти участниках на десять слотов это
  * невозможно, но проверка дешевле, чем разбирательство, если однажды станет возможно.
  */
-export const placeShip = (kind: ShipKind, taken: ShipPlacement[], wanted?: Berth): ShipPlacement | null => {
-    const berth = wanted && isBerthFree(wanted, taken) ? wanted : pickBerth(kind, taken);
+export const placeShip = (kind: ShipKind, taken: Standing[], wanted?: Berth): ShipPlacement | null => {
+    const berth = wanted && isBerthFree(wanted, kind, taken) ? wanted : pickBerth(kind, taken);
     return berth && placeAt(berth, taken);
 };

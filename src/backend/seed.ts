@@ -1,6 +1,6 @@
-import { Member, ShipKind, ShipPlacement } from '@/types/channel';
+import { Member, ShipKind } from '@/types/channel';
 
-import { placeShip } from '@/backend/placement';
+import { Standing, placeShip } from '@/backend/placement';
 import { ChannelSnapshot } from '@/backend/types';
 
 /**
@@ -62,12 +62,12 @@ const DEMO_CREW: (Omit<Member, 'place'> & { shipKind: ShipKind })[] = [
 ];
 
 const placeDemoCrew = (): Member[] => {
-    const taken: ShipPlacement[] = [];
+    const taken: Standing[] = [];
     return DEMO_CREW.map((member) => {
         // Место найдётся всегда: три корабля на десять слотов. Пустого места ради типов
         // хватит и первого слота — до него дело не дойдёт.
-        const place = placeShip(member.shipKind, taken) ?? { ...taken[0] };
-        taken.push(place);
+        const place = placeShip(member.shipKind, taken) ?? { ...taken[0].place };
+        taken.push({ shipKind: member.shipKind, place });
         return { ...member, place };
     });
 };

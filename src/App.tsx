@@ -15,7 +15,7 @@ import { useSnackbar } from '@/components/ui/Snackbar';
 import { HAIL_SIGNAL, morseDuration } from '@/hooks/morse';
 import { useChannel } from '@/hooks/useChannel';
 import { channelLink, useRoute } from '@/routing';
-import { Berth, MAX_MESSAGE_LENGTH, Message, MorseFeed, isSameBerth } from '@/types/channel';
+import { Berth, MAX_MESSAGE_LENGTH, Message, MorseFeed, ShipKind, isSameBerth } from '@/types/channel';
 import { copyText } from '@/utils/clipboard';
 
 import styles from './App.module.less';
@@ -27,6 +27,9 @@ import styles from './App.module.less';
  * а забытый потолок молча обрезал бы его на полуслове.
  */
 const HAIL_HOLD_MS = morseDuration(HAIL_SIGNAL) + 1200;
+
+/** С каким кораблём открывается форма у того, кто ещё не в строю. */
+const DEFAULT_SHIP_KIND: ShipKind = 'corvette';
 
 /**
  * Три состояния сервиса, и выбираются они по адресу и по тому, кто эта вкладка:
@@ -59,12 +62,23 @@ export default function App() {
     // и ничего не предлагает.
     const picking = !loading && Boolean(channel) && !inChat;
 
+    // Какой корабль выбран в форме. Держим здесь, а не в самой форме: от размера зависит,
+    // куда этот корабль вообще влезет, и точки свободных мест на воде обязаны это знать.
+    // Пока форма закрыта, выбор ничей — как и выбранное место, см. ниже.
+    const [pickedKind, setPickedKind] = useState<ShipKind | null>(null);
+    const shipKind = pickedKind ?? me?.shipKind ?? DEFAULT_SHIP_KIND;
+
     // Свободные места на рейде: их показывает сцена, пока открыта форма корабля. Своё место
     // считается свободным — иначе, открыв форму, человек не видел бы, где он стоит сейчас.
     const berthOptions = useMemo(
         () =>
-            picking ? freeBerths(members.filter((member) => member.memberId !== myId).map((item) => item.place)) : [],
-        [picking, members, myId]
+            picking
+                ? freeBerths(
+                      shipKind,
+                      members.filter((member) => member.memberId !== myId)
+                  )
+                : [],
+        [picking, shipKind, members, myId]
     );
     const [pickedBerth, setPickedBerth] = useState<Berth | null>(null);
     // Своё место выбрано заранее: у стоящего в строю — то, на котором он стоит, у входящего —
@@ -80,6 +94,9 @@ export default function App() {
         // корабль на место, которое человек выбирал в прошлый раз и с тех пор забыл.
         if (pickedBerth) {
             setPickedBerth(null);
+        }
+        if (pickedKind) {
+            setPickedKind(null);
         }
     } else if (berthOptions.length > 0 && !berthIsFree) {
         setPickedBerth(
@@ -268,6 +285,8 @@ export default function App() {
                         crew={members}
                         myId={myId}
                         initial={me ?? undefined}
+                        shipKind={shipKind}
+                        onShipKind={setPickedKind}
                         onSubmit={handleMemberSubmit}
                         onCancel={editing ? () => setEditing(false) : undefined}
                     />

@@ -30,6 +30,8 @@ import {
     ShipPlacement,
     isSameBerth,
     otherSide,
+    shipWidthPercent,
+    shownLeft,
     slotDepth,
     slotScale,
     slotShare,
@@ -45,8 +47,6 @@ import {
     pathToEdge,
     sailSeconds,
     sailTrim,
-    shipWidthPercent,
-    shownLeft,
 } from '@/components/SeaScene/shipMotion';
 
 import styles from './SeaScene.module.less';

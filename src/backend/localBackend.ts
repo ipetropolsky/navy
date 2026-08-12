@@ -1,7 +1,7 @@
 import { Channel, MAX_MESSAGE_LENGTH, Member, Message, SHIP_KIND_LABELS, ShipKind, isSameBerth } from '@/types/channel';
 import { isValidSlug } from '@/utils/slug';
 
-import { placeShip } from '@/backend/placement';
+import { isBerthFree, placeShip } from '@/backend/placement';
 import { DEMO_CHANNEL_ID, createDemoChannel } from '@/backend/seed';
 import { localStore } from '@/backend/storage';
 import {
@@ -261,11 +261,7 @@ export function createLocalBackend(): ChannelBackend {
             // Место на рейде назначаем здесь, а не в сцене: тогда оно уедет вместе с участником
             // во все вкладки, и корабль у всех окажется в одном и том же месте. Выбранное
             // в форме место — пожелание: занято, значит корабль встанет на свободное.
-            const place = placeShip(
-                draft.shipKind,
-                snapshot.members.map((item) => item.place),
-                draft.berth
-            );
+            const place = placeShip(draft.shipKind, snapshot.members, draft.berth);
             if (!place) {
                 throw new ChannelError('channel-full', 'На рейде не осталось свободного места');
             }
@@ -301,13 +297,17 @@ export function createLocalBackend(): ChannelBackend {
                 member.hullNumber = draft.hullNumber.trim();
                 member.shipKind = draft.shipKind;
                 member.color = draft.color;
-                // Место меняем, только если выбрали другое: у оставшегося на своём месте корабля
-                // не должна заново разыгрываться сторона захода — он никуда не идёт.
-                if (draft.berth && !isSameBerth(member.place, draft.berth)) {
-                    const others = current.members
-                        .filter((item) => item.memberId !== memberId)
-                        .map((item) => item.place);
-                    member.place = placeShip(draft.shipKind, others, draft.berth) ?? member.place;
+                // Место меняем, только если корабль и правда куда-то идёт: у оставшегося
+                // на своём месте не должна заново разыгрываться сторона захода.
+                //
+                // «Своё место» проверяется заново, потому что переоснащение меняет и размер:
+                // катер, ставший ракетным кораблём, может уже не помещаться там, где стоял,
+                // — и тогда ему приходится искать себе место, даже если он его не выбирал.
+                const others = current.members.filter((item) => item.memberId !== memberId);
+                const wanted = draft.berth ?? member.place;
+                const stays = isSameBerth(member.place, wanted) && isBerthFree(member.place, draft.shipKind, others);
+                if (!stays) {
+                    member.place = placeShip(draft.shipKind, others, wanted) ?? member.place;
                 }
                 return { ...member };
             });

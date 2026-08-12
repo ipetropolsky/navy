@@ -8,7 +8,7 @@ import pr1258Url from '@/assets/scene/ship-pr1258.png';
 import pr1400Url from '@/assets/scene/ship-pr1400.png';
 import pr201Url from '@/assets/scene/ship-pr201.png';
 import pr205Url from '@/assets/scene/ship-pr205.png';
-import { SHIP_KINDS, SHIP_SPECS, ShipKind } from '@/types/channel';
+import { SHIP_SPECS, ShipKind, shipSizeShare } from '@/types/channel';
 
 /**
  * Точка на спрайте — пиксели от левого верхнего угла картинки, в её собственном размере.
@@ -53,43 +53,6 @@ export interface ShipSprite {
     hullNumber: SpritePoint;
     lights: ShipLights;
 }
-
-/**
- * Сколько метров в единице масштаба сцены. Мерка взята по самому длинному кораблю
- * справочника: он занимает свой слот целиком, остальные — свою долю от него. То же правило,
- * что и в списке кораблей, только там доля от ширины кнопки, а здесь — от ширины слота.
- *
- * Привязывать мерку к конкретному кораблю нельзя: стоит ему стать короче, и вся сцена
- * поедет вместе со скоростями. А вот «самый длинный» — это правило, и оно держит масштаб
- * на месте: сцена всегда занята кораблями настолько, насколько может.
- */
-export const SCENE_SCALE_LENGTH = Math.max(...SHIP_KINDS.map((kind) => SHIP_SPECS[kind].length));
-
-const SHORTEST_SHIP_LENGTH = Math.min(...SHIP_KINDS.map((kind) => SHIP_SPECS[kind].length));
-
-/**
- * Пределы размера силуэта: доля от отведённого ему места у самого короткого корабля
- * справочника и у самого длинного. Строго по длине катер выходил бы втрое мельче корабля —
- * точкой на воде, в которой ничего не разобрать, — поэтому разброс поджат. Порядок при этом
- * сохраняется: крупный всегда крупнее мелкого.
- *
- * Правило одно на всё приложение: и на сцену, где место — это слот, и на список кораблей,
- * где место — ширина кнопки.
- */
-export const SHIP_SIZE_MIN = 0.5;
-export const SHIP_SIZE_MAX = 1;
-
-/**
- * Показатель поджатия. Не подобран на глаз: это решение уравнения
- * (самый короткий / самый длинный) ^ k = SHIP_SIZE_MIN / SHIP_SIZE_MAX, то есть единственное k,
- * при котором края справочника встают ровно туда, куда решено. Появится корабль короче
- * или длиннее — показатель пересчитается сам.
- */
-const SIZE_POWER = Math.log(SHIP_SIZE_MIN / SHIP_SIZE_MAX) / Math.log(SHORTEST_SHIP_LENGTH / SCENE_SCALE_LENGTH);
-
-/** Какую долю отведённого места занимает силуэт этого корабля. */
-export const shipSizeShare = (kind: ShipKind): number =>
-    Number((SHIP_SIZE_MAX * (SHIP_SPECS[kind].length / SCENE_SCALE_LENGTH) ** SIZE_POWER).toFixed(4));
 
 /**
  * Спрайты нарисованы носом влево; в сцене отражаем по горизонтали, если нужно наоборот.

@@ -1,9 +1,9 @@
-import { SCENE_SCALE_LENGTH, SHIP_SPRITES } from '@/components/ships/shipSprites';
 import {
     ISLAND_FREE_SLOT,
     ISLAND_SIDE,
-    SHIP_KINDS,
+    SCENE_SCALE_LENGTH,
     SHIP_SPECS,
+    SHORTEST_SHIP_LENGTH,
     ShipKind,
     ShipPlacement,
     otherSide,
@@ -27,7 +27,7 @@ import {
 const KNOT_MPS = 1852 / 3600;
 
 /*
- * Линейка сцены — SCENE_SCALE_LENGTH из shipSprites: сколько метров в единице масштаба.
+ * Линейка сцены — SCENE_SCALE_LENGTH из справочника кораблей: сколько метров в единице масштаба.
  * Мерка нужна общая для всех: море одно, и катер не может идти по нему в других метрах,
  * чем тральщик. На ближнем плане получается кадр шириной около 140 м, у горизонта —
  * около 300 м: это и есть перспектива, выраженная в метрах.
@@ -49,9 +49,6 @@ const KNOT_MPS = 1852 / 3600;
  */
 const ROADSTEAD_KNOTS_LONGEST = 4;
 const ROADSTEAD_KNOTS_SHORTEST = 6.7;
-
-/** Длина самого короткого корабля справочника, м. Самый длинный — это SCENE_SCALE_LENGTH. */
-const SHORTEST_SHIP_LENGTH = Math.min(...SHIP_KINDS.map((item) => SHIP_SPECS[item].length));
 
 /**
  * Насколько корабль велик среди прочих: 0 — самый короткий справочника, 1 — самый длинный.
@@ -133,9 +130,6 @@ const MIN_SAIL_PACE = 4;
 export const ENTER_GUARD = 0.5;
 export const LEAVE_GUARD = 1.5;
 
-export const shipWidthPercent = (slot: number, kind: ShipKind): number =>
-    slotWidthPercent(slot) * SHIP_SPRITES[kind].scale;
-
 /**
  * Ширина овала свободного места, % ширины сцены. Считается от той же ширины слота, что
  * и корабль, поэтому дальние места мельче ближних — овалы лежат на воде и подчиняются
@@ -149,24 +143,6 @@ export const berthWidthPercent = (slot: number): number => slotWidthPercent(slot
 
 /** Сколько метров моря приходится на процент ширины кадра на этой дальности. */
 const metresPerPercent = (slot: number): number => SCENE_SCALE_LENGTH / slotWidthPercent(slot);
-
-/**
- * Отступ от края кадра, % ширины сцены: в стилях это @ship-edge-gap в пикселях, и в долях
- * он тем больше, чем уже экран. Взята оценка сверху — на самом узком телефоне: ошибиться
- * в эту сторону безопасно, корабль просто уйдёт чуть дальше за кромку.
- */
-const EDGE_GAP_PERCENT = 10;
-
-/**
- * Где корабль стоит на самом деле. Стили не дают ему подойти к краю кадра вплотную — иначе
- * он читался бы наехавшим на границу, — и настоящее место отличается от выбранного расстановкой.
- * Ход считается от настоящего: иначе заходящий корабль стартует не оттуда, откуда думает,
- * и из-за кромки торчит его нос.
- */
-export const shownLeft = (leftPercent: number, widthPercent: number, zoom: number): number => {
-    const safe = (widthPercent / 2) * zoom + EDGE_GAP_PERCENT;
-    return Math.min(Math.max(leftPercent, safe), 100 - safe);
-};
 
 /**
  * Сколько кораблю идти от стоянки за край кадра, % ширины сцены. Путь до кромки — это про
