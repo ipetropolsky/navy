@@ -5,6 +5,16 @@ import styles from './Actions.module.less';
 interface ActionsProps {
     children: ReactNode;
     /**
+     * Слот стоит в широком блоке — шторка на всю колонку. Тогда на десктопе кнопки жмутся
+     * к левому краю и берут ширину по подписям. По умолчанию слот узкий: кнопки делят всю
+     * ширину, как в карточке формы, которая и на десктопе с ладонь.
+     *
+     * Вариант задаётся здесь, а не меряется: про каждый случай мы знаем наперёд, широкий
+     * он или узкий, а по ширине окна о ширине блока можно только гадать. На телефоне
+     * разницы всё равно нет — там любой блок узкий.
+     */
+    wide?: boolean;
+    /**
      * Кнопки прилипают к нижней кромке, пока окно достаточно высокое. Нужно длинному:
      * форме, которую листают, и списку, который не влезает целиком. Короткому и так
      * ничего не мешает, а с припиской под кнопками прилипание и вредно: приписка
@@ -20,10 +30,12 @@ interface ActionsProps {
  * у кнопок одни и те же везде — как они делят ширину, когда переносятся и когда липнут
  * к нижней кромке, — и живут они здесь, в одном месте, а не переписываются в каждой форме.
  *
- * Хозяин слота задаёт только свои поля: `--actions-top` (отбивка сверху) и `--actions-pad`
- * (нижнее поле, которое прилипшие кнопки уносят с собой).
+ * Хозяин слота задаёт только своё: широкий он или узкий и какие у него поля — `--actions-top`
+ * (отбивка сверху) и `--actions-pad` (нижнее поле, которое прилипшие кнопки уносят с собой).
  */
-export default function Actions({ children, pinned = false, className }: ActionsProps) {
-    const look = pinned ? `${styles.actions} ${styles.actionsPinned}` : styles.actions;
-    return <div className={className ? `${look} ${className}` : look}>{children}</div>;
+export default function Actions({ children, wide = false, pinned = false, className }: ActionsProps) {
+    const look = [styles.actions, wide && styles.actionsWide, pinned && styles.actionsPinned, className]
+        .filter(Boolean)
+        .join(' ');
+    return <div className={look}>{children}</div>;
 }

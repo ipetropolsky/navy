@@ -585,14 +585,23 @@ test.describe('десктоп', () => {
         expect(panel.radius, 'у карточки должны быть скруглённые края').toBeGreaterThan(0);
     });
 
-    test('кнопки стоят в строку по ширине подписей и вместе по центру', async ({ page }) => {
+    // Раскладка кнопок идёт от ширины блока, а не от ширины экрана: в широком блоке им незачем
+    // растягиваться, в узком — незачем жаться к краю. Оба случая мы знаем наперёд, поэтому
+    // и заданы они классом; на телефоне разницы нет — там любой блок узкий.
+    test('в шторке кнопки стоят у левого края по ширине подписей', async ({ page }) => {
         await openChannel(page, DEMO, ALBATROS);
         await openSheet(page);
         const bar = await actionsBar(page);
         expect(bar.rows, 'на широком экране кнопкам хватает одной строки').toBe(1);
         const filled = bar.buttons.reduce((total, button) => total + button.width, 0);
         expect(filled, 'кнопки растянулись через всю ширину вместо ширины подписей').toBeLessThan(bar.width * 0.8);
-        expect(bar.buttons[0].left, 'ряд кнопок сдвинут от середины').toBeCloseTo(bar.buttons.at(-1)!.right, 0);
+        expect(bar.buttons[0].left, 'кнопки отошли от левого края').toBeCloseTo(0, 0);
+    });
+
+    test('в карточке формы кнопки делят ширину так же, как на телефоне', async ({ page }) => {
+        await openChannel(page, DEMO);
+        const bar = await actionsBar(page);
+        expect(bar.buttons[0].width, 'одинокая кнопка не заняла ширину карточки').toBeCloseTo(bar.width, 0);
     });
 });
 
