@@ -145,6 +145,71 @@ test('рейд подсвечивает одно место и только по
     expect(await litMarks(), 'над водой размечен весь рейд, а не одно место').toHaveLength(2);
 });
 
+test('качка идёт по рейду волной, а не вразнобой', async ({ page }) => {
+    await openNewChannel(page, 'volna');
+
+    // Фаза качки места — отрицательная задержка его анимации, круг — её длительность.
+    // Берём и то и другое из самой сцены: длительность цикла живёт в стилях, и знать её
+    // проверке неоткуда.
+    const phases = await page.evaluate(() => {
+        const seconds = (value: string): number => parseFloat(value) * (value.endsWith('ms') ? 0.001 : 1);
+        const dots = [...document.querySelectorAll<HTMLElement>('[data-berth]')];
+        const style = getComputedStyle(dots[0].querySelector('span')!);
+        return {
+            cycle: seconds(style.animationDuration),
+            marks: dots.map((dot) => {
+                const [slot, corridor] = dot.dataset.berth!.split('-');
+                return {
+                    slot: Number(slot),
+                    corridor,
+                    phase: -seconds(getComputedStyle(dot.querySelector('span')!).animationDelay),
+                };
+            }),
+        };
+    });
+
+    expect(phases.cycle, 'у качки нет цикла, сдвиг не с чем сравнивать').toBeGreaterThan(0);
+
+    /** Насколько вторая фаза отстаёт от первой, с. По кругу: сдвиг на цикл — это ноль. */
+    const lag = (from: number, to: number): number => (((to - from) % phases.cycle) + phases.cycle) % phases.cycle;
+
+    /** Сдвиг между соседями по ряду обязан быть один и тот же, иначе это не волна. */
+    const expectEvenLag = (row: { key: number; phase: number }[], what: string): void => {
+        const order = [...row].sort((one, other) => one.key - other.key);
+        const lags = order
+            .slice(1)
+            .map((item, index) => lag(order[index].phase, item.phase) / (item.key - order[index].key));
+        expect(lags.length, `${what}: сравнивать не с чем`).toBeGreaterThan(0);
+        for (const step of lags) {
+            expect(step, `${what}: соседи качаются в такт`).toBeGreaterThan(0);
+            expect(step, `${what}: сдвиг между соседями неровный`).toBeCloseTo(lags[0], 2);
+        }
+    };
+
+    // Вдоль коридора: волна идёт с горизонта на наблюдателя, каждая следующая линия
+    // повторяет за предыдущей через один и тот же промежуток.
+    for (const corridor of ['left', 'center', 'right']) {
+        const row = phases.marks.filter((mark) => mark.corridor === corridor);
+        expectEvenLag(
+            row.map((mark) => ({ key: mark.slot, phase: mark.phase })),
+            `коридор ${corridor}`
+        );
+    }
+
+    // И поперёк: фронт идёт наискось, поэтому у соседних коридоров на одной линии
+    // тоже свой постоянный сдвиг.
+    const corridors = ['left', 'center', 'right'];
+    for (const slot of new Set(phases.marks.map((mark) => mark.slot))) {
+        const row = phases.marks.filter((mark) => mark.slot === slot);
+        if (row.length === corridors.length) {
+            expectEvenLag(
+                row.map((mark) => ({ key: corridors.indexOf(mark.corridor), phase: mark.phase })),
+                `линия ${slot}`
+            );
+        }
+    }
+});
+
 test('ход корабля идёт с правдоподобной скоростью и зависит от корабля', async ({ browser }) => {
     // Каждый замер — своя вкладка со своим хранилищем: во второй раз форма постановки
     // в строй в той же вкладке уже не покажется, вкладка помнит, что корабль у неё есть.

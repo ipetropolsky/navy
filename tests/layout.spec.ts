@@ -68,6 +68,9 @@ interface BerthShape {
     /** Насколько отметка ниже горизонта, px: от этого и зависит, как сильно её сплющило. */
     below: number;
     perspective: number;
+    /** Радиус круга в его собственных единицах и длина штриха, px. */
+    radius: number;
+    dash: number;
 }
 
 const berthShapes = (page: Page): Promise<BerthShape[]> =>
@@ -79,11 +82,14 @@ const berthShapes = (page: Page): Promise<BerthShape[]> =>
             // Дорожка тянется от горизонта до точки стоянки: её верх — точка схода для овала,
             // её низ — само место. Перспектива живёт на ней же, у каждого коридора своя.
             const lane = mark.parentElement!;
+            const ring = mark.querySelector('circle')!;
             return {
                 width: mark.offsetWidth,
                 height: mark.getBoundingClientRect().height,
                 below: lane.getBoundingClientRect().bottom - horizon,
                 perspective: parseFloat(getComputedStyle(lane).perspective),
+                radius: ring.r.baseVal.value,
+                dash: parseFloat(getComputedStyle(ring).strokeDasharray),
             };
         });
     });
@@ -101,28 +107,27 @@ const slotLines = (page: Page): Promise<[number, number][]> =>
     });
 
 /**
- * Линии рейда размечены ровным шагом по морю, а не по экрану. Проверяется это обратной
- * величиной: предмет на дальности D стоит ниже горизонта на h/D, поэтому 1/(высота над
- * горизонтом) — это и есть дальность в неизвестных единицах. Равный шаг по морю обязан
- * дать равный шаг у этих величин, сколько бы линий ни оказалось свободно.
+ * Линии рейда стоят там, куда их ставит глубина слота: высота линии под горизонтом ей прямо
+ * пропорциональна. Сравниваем отношения к самой дальней линии — так проверка не зависит
+ * ни от высоты воды, ни от того, сколько линий оказалось свободно.
  *
- * Заодно это проверка и на то, что перспектива работает в нужную сторону: между дальними
- * линиями на экране остаются пиксели, между ближними — десятки.
+ * И перспектива в этих отношениях именно перспектива, но смягчённая: ближние линии разнесены
+ * заметно шире дальних — и всё же не настолько, чтобы дальняя половина рейда слиплась
+ * в кашу. Обе границы здесь по делу: без нижней разметка становится лесенкой в таблице,
+ * без верхней — пятачком у горизонта, каким рейд однажды и был.
  */
-const expectSlotsEvenlySpacedAtSea = (lines: [number, number][]): void => {
+const expectSlotsFollowDepth = (lines: [number, number][]): void => {
     expect(lines.length, 'свободных линий слишком мало, шаг не проверить').toBeGreaterThan(3);
-    const steps = lines
-        .slice(1)
-        .map(([slot, below], index) => (1 / below - 1 / lines[index][1]) / (slot - lines[index][0]));
-    const average = steps.reduce((sum, step) => sum + step, 0) / steps.length;
-    for (const step of steps) {
-        expect(Math.abs(step - average) / average, 'шаг между линиями на море неровный').toBeLessThan(0.02);
+    for (const [slot, below] of lines) {
+        expect(below / lines[0][1], `линия ${slot} стоит не на своей глубине`).toBeCloseTo(
+            slotDepth(slot) / slotDepth(lines[0][0]),
+            1
+        );
     }
 
-    // И этот ровный шаг по морю на экране обязан быть неровным: ближние линии разнесены
-    // в разы шире дальних, иначе перспективы в разметке нет.
     const gaps = lines.slice(1).map(([slot, below], index) => (below - lines[index][1]) / (slot - lines[index][0]));
-    expect(gaps.at(-1)!, 'ближние линии не разнесены шире дальних').toBeGreaterThan(gaps[0] * 3);
+    expect(gaps.at(-1)!, 'ближние линии не разнесены шире дальних').toBeGreaterThan(gaps[0] * 1.8);
+    expect(gaps.at(-1)!, 'дальние линии сбиты в кучу у горизонта').toBeLessThan(gaps[0] * 6);
 };
 
 /** Насколько ниже горизонта стоят корабли, px, от дальнего к ближнему. */
@@ -179,6 +184,16 @@ const expectBerthsLieOnWater = (marks: BerthShape[]): void => {
     expect(near.height / near.width, 'ближнее место сплющено как дальнее').toBeGreaterThan(
         (far.height / far.width) * 1.5
     );
+
+    // Круг у каждого места свой не по масштабу, а по размеру: его радиус в собственных
+    // единицах разметки равен половине ширины отметки в пикселях экрана. Разъедутся — значит
+    // разметку опять растягивают масштабом, и вместе с ней растянется штрих: у дальнего места
+    // он превратится в пыль. Штрих поэтому один на весь рейд и заметно длиннее толщины линии.
+    for (const mark of marks) {
+        expect(mark.radius * 2, 'круг нарисован масштабом, а не размером').toBeCloseTo(mark.width * 0.98, 0);
+        expect(mark.dash, 'штрих у всех мест один и тот же').toBe(far.dash);
+        expect(mark.dash, 'штрих короче толщины линии, разметка сольётся в пунктирную пыль').toBeGreaterThan(6);
+    }
 };
 
 /** Плашка формы: её ширина и скругление и отличают мобильный вид от десктопного. */
@@ -206,7 +221,7 @@ test.describe('телефон', () => {
     test('места на рейде лежат на воде, а занятые подписаны', async ({ page }) => {
         await openChannel(page, DEMO);
         expectBerthsLieOnWater(await berthShapes(page));
-        expectSlotsEvenlySpacedAtSea(await slotLines(page));
+        expectSlotsFollowDepth(await slotLines(page));
         // Занятые места подписаны все: рейд читается целиком — где свободно, а где «Вымпел».
         await expect(shipNames(page)).toHaveCount(await ships(page).count());
     });
@@ -248,7 +263,7 @@ test.describe('десктоп', () => {
     test('места на рейде лежат на воде, а занятые подписаны', async ({ page }) => {
         await openChannel(page, DEMO);
         expectBerthsLieOnWater(await berthShapes(page));
-        expectSlotsEvenlySpacedAtSea(await slotLines(page));
+        expectSlotsFollowDepth(await slotLines(page));
         await expect(shipNames(page)).toHaveCount(await ships(page).count());
     });
 
