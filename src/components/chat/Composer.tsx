@@ -19,6 +19,37 @@ interface ComposerProps {
     onTyped: (chars: string) => void;
 }
 
+/**
+ * Что человек набрал этим изменением: добавленные символы, а если ничего не добавилось,
+ * но что-то исчезло — '\b'. Считается разностью двух строк с обоих концов, а не длиной:
+ * править текст можно не только с конца.
+ *
+ * Ровно на этом и наступали. Сравнение по длине и по началу строки видело только дописанное
+ * в конец: набранное поверх выделения не передавалось вовсе (текст стал короче — значит
+ * стёрли), замена одной буквы на другую не давала даже этого (длина не изменилась), а буква,
+ * вставленная в середину, терялась молча. Разность концов ловит все эти случаи одинаково:
+ * общее начало и общий конец — это то, чего человек не трогал, а между ними и есть его правка.
+ */
+const typedChars = (prev: string, next: string): string => {
+    let head = 0;
+    while (head < prev.length && head < next.length && prev[head] === next[head]) {
+        head += 1;
+    }
+    let tail = 0;
+    while (
+        tail < prev.length - head &&
+        tail < next.length - head &&
+        prev[prev.length - 1 - tail] === next[next.length - 1 - tail]
+    ) {
+        tail += 1;
+    }
+    const added = next.slice(head, next.length - tail);
+    if (added) {
+        return added;
+    }
+    return next.length < prev.length ? '\b' : '';
+};
+
 /** Поле ввода в стиле Telegram: плашка ответа, кнопка отправки появляется при вводе. */
 export default function Composer({ replyTo, replyToAuthor, onCancelReply, onSend, onTooLong, onTyped }: ComposerProps) {
     const [value, setValue] = useState('');
@@ -29,10 +60,9 @@ export default function Composer({ replyTo, replyToAuthor, onCancelReply, onSend
         const prevValue = prevValueRef.current;
         prevValueRef.current = nextValue;
         setValue(nextValue);
-        if (nextValue.length > prevValue.length && nextValue.startsWith(prevValue)) {
-            onTyped(nextValue.slice(prevValue.length));
-        } else if (nextValue.length < prevValue.length) {
-            onTyped('\b');
+        const typed = typedChars(prevValue, nextValue);
+        if (typed) {
+            onTyped(typed);
         }
     };
 

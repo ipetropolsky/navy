@@ -144,6 +144,8 @@ export default function MemberForm({ mode, crew, myId, initial, onSubmit, onCanc
                 )
             }
             onSubmit={handleSubmit}
+            // Форма длинная: корабли идут столбиком, и кнопки без этого уезжают под обрез.
+            pinActions
             actions={
                 <>
                     {onCancel && (

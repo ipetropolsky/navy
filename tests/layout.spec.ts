@@ -1,9 +1,9 @@
 import { Page, expect, test } from '@playwright/test';
 
-import { MOBILE_MAX_WIDTH } from '@/config/layout';
+import { MOBILE_MAX_WIDTH, PINNED_ACTIONS_MIN_HEIGHT } from '@/config/layout';
 import { SLOT_COUNT, slotDepth, slotScale, slotShare } from '@/types/channel';
 
-import { ALBATROS, DEMO, openChannel, readState, shipNames, ships } from '@tests/helpers';
+import { ALBATROS, DEMO, openChannel, openSheet, readState, shipNames, ships } from '@tests/helpers';
 
 /**
  * Раскладка на телефоне и на десктопе. Здесь тоже только то, на чём наступали: вода однажды
@@ -376,6 +376,33 @@ const panelBox = (page: Page): Promise<{ width: number; radius: number; parentWi
         };
     });
 
+interface ActionsBar {
+    /** Ширина самого слота: ею меряем, взяли кнопки всю ширину или нет. */
+    width: number;
+    position: string;
+    /** Сколько строк заняли кнопки: разные верхние кромки — разные строки. */
+    rows: number;
+    buttons: { left: number; right: number; width: number }[];
+}
+
+/** Ряд кнопок внизу формы или шторки: где он стоит и как в нём поделена ширина. */
+const actionsBar = (page: Page): Promise<ActionsBar> =>
+    page.evaluate(() => {
+        const bar = document.querySelector('[class*="actions"]')!;
+        const box = bar.getBoundingClientRect();
+        const buttons = [...bar.querySelectorAll('button')].map((button) => button.getBoundingClientRect());
+        return {
+            width: box.width,
+            position: getComputedStyle(bar).position,
+            rows: new Set(buttons.map((button) => Math.round(button.top))).size,
+            buttons: buttons.map((button) => ({
+                left: button.left - box.left,
+                right: box.right - button.right,
+                width: button.width,
+            })),
+        };
+    });
+
 test.describe('телефон', () => {
     // Ширина заведомо мобильная: точка перехода одна на стили и на код, и берём мы её оттуда же.
     test.use({ viewport: { width: MOBILE_MAX_WIDTH - 90, height: 844 } });
@@ -385,6 +412,27 @@ test.describe('телефон', () => {
         const panel = await panelBox(page);
         expect(panel.width, 'форма не дотянулась до краёв').toBe(panel.parentWidth);
         expect(panel.radius, 'на всю ширину скругления не нужны').toBe(0);
+    });
+
+    test('кнопки берут всю ширину: в строку, пока подписи влезают, и столбиком, когда нет', async ({ page }) => {
+        await openChannel(page, DEMO, ALBATROS);
+        await openSheet(page);
+
+        // Две кнопки в строку делят ширину слота целиком: они и промежуток между ними —
+        // это вся ширина, и по краям не остаётся ничего.
+        const row = await actionsBar(page);
+        expect(row.rows, 'кнопки разъехались по строкам там, где влезали в одну').toBe(1);
+        expect(row.buttons[0].left, 'первая кнопка отошла от левого края').toBeCloseTo(0, 0);
+        expect(row.buttons.at(-1)!.right, 'последняя кнопка не дотянулась до правого края').toBeCloseTo(0, 0);
+
+        // Ужимаем окно так, чтобы подписи в строку не влезли: тогда каждая кнопка встаёт
+        // на свою строку и там разворачивается во всю ширину.
+        await page.setViewportSize({ width: 320, height: 844 });
+        const stack = await actionsBar(page);
+        expect(stack.rows, 'подписи не влезли в строку, а кнопки остались в ней').toBe(2);
+        for (const button of stack.buttons) {
+            expect(button.width, 'кнопка на своей строке не заняла всю ширину').toBeCloseTo(stack.width, 0);
+        }
     });
 
     test('места на рейде лежат на воде, а занятые подписаны', async ({ page }) => {
@@ -535,5 +583,38 @@ test.describe('десктоп', () => {
         const panel = await panelBox(page);
         expect(panel.width, 'карточка растеклась по всей панели').toBeLessThan(panel.parentWidth);
         expect(panel.radius, 'у карточки должны быть скруглённые края').toBeGreaterThan(0);
+    });
+
+    test('кнопки стоят в строку по ширине подписей и вместе по центру', async ({ page }) => {
+        await openChannel(page, DEMO, ALBATROS);
+        await openSheet(page);
+        const bar = await actionsBar(page);
+        expect(bar.rows, 'на широком экране кнопкам хватает одной строки').toBe(1);
+        const filled = bar.buttons.reduce((total, button) => total + button.width, 0);
+        expect(filled, 'кнопки растянулись через всю ширину вместо ширины подписей').toBeLessThan(bar.width * 0.8);
+        expect(bar.buttons[0].left, 'ряд кнопок сдвинут от середины').toBeCloseTo(bar.buttons.at(-1)!.right, 0);
+    });
+});
+
+/**
+ * Прилипание кнопок. Отсечка здесь по высоте окна, а не по тому, сколько места досталось
+ * форме: место зависит от сцены, сцена сжимается плавно, и на границе кнопки то прилипали бы,
+ * то отлипали от пары пикселей.
+ */
+test.describe('кнопки у нижней кромки', () => {
+    test.use({ viewport: { width: 390, height: PINNED_ACTIONS_MIN_HEIGHT } });
+
+    test('на высоком окне кнопка видна сразу, на низком — отлипает и уезжает под обрез', async ({ page }) => {
+        await openChannel(page, DEMO);
+        expect((await actionsBar(page)).position, 'кнопки не прилипли на высоком окне').toBe('sticky');
+        await expect(page.locator('button[type=submit]'), 'прилипшая кнопка не видна').toBeInViewport();
+
+        // Ниже отсечки прилипания нет совсем, и длинная форма снова уезжает кнопкой под обрез.
+        await page.setViewportSize({ width: 390, height: PINNED_ACTIONS_MIN_HEIGHT - 1 });
+        expect((await actionsBar(page)).position, 'кнопки прилипли ниже отсечки').toBe('static');
+        await expect(
+            page.locator('button[type=submit]'),
+            'на низком окне кнопка осталась приклеенной'
+        ).not.toBeInViewport();
     });
 });

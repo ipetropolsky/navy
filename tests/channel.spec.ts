@@ -72,7 +72,7 @@ test('уход с рейда отмечается в ленте и возвра�
     await expect(ships(page)).toHaveCount(3);
 
     await page.getByLabel('Корабли на связи').click();
-    await page.getByRole('button', { name: 'Выйти из канала' }).click();
+    await page.getByRole('button', { name: 'Уйти с рейда' }).click();
 
     // Вкладка возвращается к форме — тупика нет, встать в строй можно снова.
     await expect(page.getByPlaceholder('Гром')).toBeVisible();
@@ -85,7 +85,7 @@ test('переоснащение пишет в ленту, что было и ч
     await openChannel(page, DEMO, ALBATROS);
 
     await page.getByLabel('Корабли на связи').click();
-    await page.getByRole('button', { name: 'Переоснастить корабль' }).click();
+    await page.getByRole('button', { name: 'Настроить корабль' }).click();
     await join(page, 'Буран', '512', 'Тральщик');
 
     await expect(systemLines(page).last()).toHaveText('Сторожевой катер «Альбатрос» 317 теперь тральщик «Буран» 512');

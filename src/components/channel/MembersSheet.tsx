@@ -1,5 +1,6 @@
 import Avatar from '@/components/ships/Avatar';
 import MemberName from '@/components/ships/MemberName';
+import Actions from '@/components/ui/Actions';
 import Button from '@/components/ui/Button';
 import { Member, SHIP_KIND_LABELS } from '@/types/channel';
 
@@ -13,14 +14,16 @@ interface MembersSheetProps {
     onEditMe: () => void;
     onLeave: () => void;
     onClose: () => void;
+    /** Окликнуть корабль: тычок в аватарку — и тот отвечает лампой со своего места на рейде. */
+    onHail: (memberId: string) => void;
 }
 
 /**
  * Список тех, кто на связи. Переключиться на чужой корабль нельзя: за каждый говорит
- * своя вкладка со своим memberId, а не выбор в списке. Свои действия — переоснастить
- * корабль и выйти из канала — внизу, отбитые чертой.
+ * своя вкладка со своим memberId, а не выбор в списке. Свои действия — настроить корабль
+ * и уйти с рейда — внизу, отбитые чертой.
  */
-export default function MembersSheet({ open, members, myId, onEditMe, onLeave, onClose }: MembersSheetProps) {
+export default function MembersSheet({ open, members, myId, onEditMe, onLeave, onClose, onHail }: MembersSheetProps) {
     if (!open) {
         return null;
     }
@@ -36,7 +39,7 @@ export default function MembersSheet({ open, members, myId, onEditMe, onLeave, o
                     const mine = member.memberId === myId;
                     return (
                         <div key={member.memberId} className={mine ? styles.rowActive : styles.row}>
-                            <Avatar number={member.hullNumber} large />
+                            <Avatar number={member.hullNumber} large onHail={() => onHail(member.memberId)} />
                             <span className={styles.info}>
                                 <span>
                                     <MemberName name={member.name} color={member.color} />
@@ -48,14 +51,16 @@ export default function MembersSheet({ open, members, myId, onEditMe, onLeave, o
                     );
                 })}
                 {myId && (
-                    <div className={styles.actions}>
+                    // Список бывает длиннее шторки, и кнопки уезжают под обрез так же,
+                    // как в форме корабля, — значит и держим мы их так же.
+                    <Actions pinned className={styles.actions}>
                         <Button variant="secondary" onClick={onEditMe}>
-                            Переоснастить корабль
+                            Настроить корабль
                         </Button>
                         <Button variant="danger" onClick={onLeave}>
-                            Выйти из канала
+                            Уйти с рейда
                         </Button>
-                    </div>
+                    </Actions>
                 )}
             </div>
         </div>

@@ -5,7 +5,7 @@ import { defineConfig } from 'vite';
 // Путь относительный нарочно: конфиг собирается раньше, чем становится известен алиас '@',
 // который в нём же и объявлен.
 // eslint-disable-next-line no-restricted-imports
-import { MOBILE_MAX_WIDTH, MOBILE_SHIP_ZOOM } from './src/config/layout';
+import { MOBILE_MAX_WIDTH, MOBILE_SHIP_ZOOM, PINNED_ACTIONS_MIN_HEIGHT } from './src/config/layout';
 
 export default defineConfig({
     plugins: [react()],
@@ -14,7 +14,10 @@ export default defineConfig({
             less: {
                 // Точка перехода в мобильный вид приезжает в стили из того же файла, откуда её
                 // берёт код: @mobile-width доступен в любом .less без импортов.
-                additionalData: `@mobile-width: ${MOBILE_MAX_WIDTH}px;\n@ship-zoom-mobile: ${MOBILE_SHIP_ZOOM};\n`,
+                additionalData:
+                    `@mobile-width: ${MOBILE_MAX_WIDTH}px;\n` +
+                    `@ship-zoom-mobile: ${MOBILE_SHIP_ZOOM};\n` +
+                    `@pinned-actions-height: ${PINNED_ACTIONS_MIN_HEIGHT}px;\n`,
             },
         },
     },

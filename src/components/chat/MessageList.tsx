@@ -32,10 +32,12 @@ interface MessageListProps {
     /** Чьи сообщения показывать своими — справа и без подписи. */
     myId: string;
     onReply: (message: Message) => void;
+    /** Окликнуть корабль автора: тычок в аватарку — и тот отвечает лампой. */
+    onHail: (memberId: string) => void;
 }
 
 /** Лента сообщений в стиле Telegram: группировка по автору, ответы, тап по сообщению — ответить. */
-export default function MessageList({ messages, members, myId, onReply }: MessageListProps) {
+export default function MessageList({ messages, members, myId, onReply, onHail }: MessageListProps) {
     const listRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
@@ -78,7 +80,13 @@ export default function MessageList({ messages, members, myId, onReply }: Messag
                     <div key={message.messageId} className={own ? styles.rowOwn : styles.row}>
                         {!own && (
                             <div className={styles.avatarCell}>
-                                {lastOfGroup && author && <Avatar number={author.hullNumber} name={author.name} />}
+                                {lastOfGroup && author && (
+                                    <Avatar
+                                        number={author.hullNumber}
+                                        name={author.name}
+                                        onHail={() => onHail(author.memberId)}
+                                    />
+                                )}
                             </div>
                         )}
                         <button

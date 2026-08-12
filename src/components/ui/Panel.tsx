@@ -1,5 +1,7 @@
 import { ReactNode, SyntheticEvent } from 'react';
 
+import Actions from '@/components/ui/Actions';
+
 import styles from './Panel.module.less';
 
 /**
@@ -19,18 +21,24 @@ interface PanelProps {
     children?: ReactNode;
     /** Кнопки внизу: одна занимает всю ширину, две делят её пополам. */
     actions?: ReactNode;
+    /**
+     * Длинная форма: кнопки прилипают к нижней кромке, пока окно достаточно высокое.
+     * Короткой это не нужно — она и так видна целиком, — а с припиской под кнопками
+     * и вредно: приписка уезжала бы под них.
+     */
+    pinActions?: boolean;
     /** Приписка под кнопками: ссылка в сторону, а не действие. */
     footer?: ReactNode;
     onSubmit?: () => void;
 }
 
-export default function Panel({ title, hint, children, actions, footer, onSubmit }: PanelProps) {
+export default function Panel({ title, hint, children, actions, footer, pinActions, onSubmit }: PanelProps) {
     const content = (
         <>
             <h1 className={styles.title}>{title}</h1>
             {hint && <p className={styles.hint}>{hint}</p>}
             {children}
-            {actions && <div className={styles.actions}>{actions}</div>}
+            {actions && <Actions pinned={pinActions}>{actions}</Actions>}
             {footer && <p className={styles.footer}>{footer}</p>}
         </>
     );

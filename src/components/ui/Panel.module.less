@@ -1,16 +1,23 @@
+// Поле плашки: одно число на все стороны, и то же самое переезжает на прилипшие кнопки —
+// см. --actions-pad в Actions.module.less.
+@card-pad: 24px;
+
 // Плашка формы. На широком экране это карточка по центру: без неё форма висела бы посреди
 // большого незалитого поля. На телефоне карточки нет — форма занимает экран целиком, как
 // отдельная страница, поэтому ни скруглений, ни полей по краям.
 //
 // Фон тот же, что у панели с полем ввода: всё поднятое над лентой в приложении одного цвета.
 .card {
+    // Нижнее поле карточки — то самое, которое прилипшие кнопки уносят с собой.
+    --actions-pad: @card-pad;
+
     flex: none;
     width: 100%;
     max-width: 460px;
     margin: 16px auto;
     // Поля со всех сторон одинаковые: рамка плашки идёт вокруг формы на равном расстоянии,
     // и ни одна сторона не выглядит поджатой.
-    padding: 24px;
+    padding: @card-pad;
     border-radius: 16px;
     background: var(--color-bg-raised);
     text-align: left;
@@ -18,10 +25,12 @@
 
 @media (max-width: @mobile-width) {
     .card {
+        --actions-pad: calc(@card-pad + env(safe-area-inset-bottom));
+
         flex: 1 0 auto;
         max-width: none;
         margin: 0;
-        padding: 24px 24px calc(24px + env(safe-area-inset-bottom));
+        padding: @card-pad @card-pad calc(@card-pad + env(safe-area-inset-bottom));
         border-radius: 0;
     }
 }
@@ -37,18 +46,6 @@
 .hint {
     margin: 0 0 16px;
     color: var(--color-text-muted);
-}
-
-// Кнопки во всю ширину плашки: одна занимает её целиком, две делят пополам. Так действие
-// видно сразу и одинаково во всех формах, а выравнивать одинокую кнопку по краю не приходится.
-.actions {
-    display: flex;
-    gap: 8px;
-    margin-top: 20px;
-
-    > * {
-        flex: 1;
-    }
 }
 
 // Приписка под кнопками: ссылка в сторону, а не действие.

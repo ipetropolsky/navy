@@ -48,6 +48,12 @@ export const join = async (page: Page, name: string, hullNumber: string, shipKin
     await page.locator('button[type=submit]').click();
 };
 
+/** Открыть шторку со списком кораблей. */
+export const openSheet = async (page: Page): Promise<void> => {
+    await page.getByLabel('Корабли на связи').click();
+    await page.waitForTimeout(300);
+};
+
 /** Написать в ленту. */
 export const send = async (page: Page, text: string): Promise<void> => {
     await page.getByPlaceholder('Сообщение').fill(text);

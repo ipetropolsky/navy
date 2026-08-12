@@ -364,7 +364,7 @@ test('корабль уходит за кромку и пропадает из �
     await expect(ships(page)).toHaveCount(3);
 
     await page.getByLabel('Корабли на связи').click();
-    await page.getByRole('button', { name: 'Выйти из канала' }).click();
+    await page.getByRole('button', { name: 'Уйти с рейда' }).click();
 
     // Сразу после выхода корабль ещё в кадре: он выбирается за кромку своим ходом.
     await expect(page.locator('[data-motion="leaving"]')).toHaveCount(1);
@@ -397,4 +397,74 @@ test('огни на рейде якорные, на ходу ходовые, и 
     expect(kinds.filter((kind) => kind.startsWith('masthead'))).toHaveLength(1);
     expect(kinds.some((kind) => kind === 'port' || kind === 'starboard')).toBe(true);
     expect(kinds.some((kind) => kind.startsWith('anchor'))).toBe(false);
+});
+
+/**
+ * Вспышки сигнальных ламп, по кораблям. Считаем не состояние в момент замера, а сами
+ * включения: буква Морзе — это несколько коротких вспышек, и застать лампу горящей
+ * ожидающей проверкой можно, а вот отличить «мигнула трижды» от «мигнула однажды» — нет.
+ */
+declare global {
+    interface Window {
+        __flashes: Record<string, number>;
+    }
+}
+
+const watchLamps = (page: Page): Promise<void> =>
+    page.evaluate(() => {
+        window.__flashes = {};
+        for (const lane of document.querySelectorAll('[class*="shipLane"]')) {
+            const lamp = lane.querySelector('[class*="lamp"]')!;
+            // Корабли различаем по подписи спрайта: своего имени у дорожки нет.
+            const name = lane.querySelector('img')?.alt ?? '?';
+            window.__flashes[name] = 0;
+            new MutationObserver(() => {
+                if (lamp.className.includes('lampOn')) {
+                    window.__flashes[name] += 1;
+                }
+            }).observe(lamp, { attributes: true, attributeFilter: ['class'] });
+        }
+    });
+
+const flashes = (page: Page): Promise<Record<string, number>> => page.evaluate(() => window.__flashes);
+
+test('оклик: тычок в аватарку — и корабль отвечает лампой', async ({ page }) => {
+    await openChannel(page, DEMO, ALBATROS);
+    await watchLamps(page);
+
+    // Аватарка окликаемая — значит кнопка. Кого именно окликаем, написано на ней самой.
+    const avatar = page.locator('button[title^="Окликнуть"]').first();
+    const hailed = (await avatar.getAttribute('title'))!.replace(/^Окликнуть «|»$/g, '');
+    await avatar.click();
+
+    // K — это «−·−», три вспышки. Ждём именно трёх: одной хватило бы и на случайное мигание.
+    await expect
+        .poll(async () => (await flashes(page))[`Корабль «${hailed}»`], 'окликнутый корабль не ответил лампой')
+        .toBe(3);
+    // И отвечает только он: оклик — это «который из них твой», а не «мигните все разом».
+    const all = await flashes(page);
+    expect(
+        Object.values(all).filter((count) => count > 0),
+        'на оклик ответил не один корабль'
+    ).toHaveLength(1);
+});
+
+test('лампа передаёт и то, что набрано поверх выделения', async ({ page }) => {
+    await openChannel(page, DEMO, ALBATROS);
+    const mine = 'Корабль «Альбатрос»';
+    await watchLamps(page);
+
+    // Набираем и ждём, пока лампа отработает набранное: А — две вспышки, Б — четыре.
+    const input = page.getByPlaceholder('Сообщение');
+    await input.pressSequentially('аб');
+    await expect.poll(async () => (await flashes(page))[mine], 'лампа не передала набранное').toBe(6);
+
+    // Теперь выделяем всё и набираем поверх. Так правят текст постоянно, и передавать это
+    // надо: раньше правка поверх выделения не доходила до лампы вовсе — строка стала короче,
+    // значит стёрли, — и корабль на неё молчал.
+    await page.keyboard.press('ControlOrMeta+a');
+    await input.pressSequentially('ш');
+    // Ш — «−−−−», ровно четыре вспышки. Их и ждём: лишние две означали бы, что вместо буквы
+    // передан знак стирания, а он тут ни при чём — человек не стёр, а переписал.
+    await expect.poll(async () => (await flashes(page))[mine], 'набранное поверх выделения не ушло в лампу').toBe(10);
 });

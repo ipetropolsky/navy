@@ -17,3 +17,16 @@
     width: 42px;
     height: 42px;
 }
+
+// Аватарка, которой можно окликнуть корабль. Кнопкой она выглядит ровно так же, как обычной
+// аватаркой: рамка тут своя — сам кружок, — и подчёркивать нажимаемость нечем, кроме курсора.
+.hail {
+    padding: 0;
+    border: 0;
+    cursor: pointer;
+
+    &:focus-visible {
+        outline: 2px solid var(--color-accent);
+        outline-offset: 2px;
+    }
+}

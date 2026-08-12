@@ -23,6 +23,11 @@
 }
 
 .sheet {
+    // Поля слота под кнопки: от списка их отбивает черта, поэтому сверху меньше, чем
+    // в карточке, а снизу — то поле шторки, которое прилипшие кнопки уносят с собой.
+    --actions-top: 12px;
+    --actions-pad: calc(16px + env(safe-area-inset-bottom));
+
     position: relative;
     display: flex;
     flex-direction: column;
@@ -88,12 +93,10 @@
     font-weight: 400;
 }
 
-// Свои действия внизу списка, отбиты чертой: они про тебя, а не про эскадру.
+// Свои действия внизу списка, отбиты чертой: они про тебя, а не про эскадру. Как кнопки
+// делят ширину и как липнут к нижней кромке — общее для всех форм, это в Actions; здесь
+// только черта и отбивка от списка.
 .actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-top: 12px;
     padding-top: 12px;
     border-top: 1px solid var(--color-border);
 }

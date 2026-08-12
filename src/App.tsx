@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { ChannelDraft, ChannelError, MemberDraft, backend, freeBerths } from '@/backend';
 import { DEMO_CHANNEL_SLUG } from '@/backend/seed';
@@ -12,12 +12,19 @@ import Button from '@/components/ui/Button';
 import IconButton from '@/components/ui/IconButton';
 import Panel from '@/components/ui/Panel';
 import { useSnackbar } from '@/components/ui/Snackbar';
+import { HAIL_LETTER } from '@/hooks/morse';
 import { useChannel } from '@/hooks/useChannel';
 import { channelLink, useRoute } from '@/routing';
 import { Berth, MAX_MESSAGE_LENGTH, Message, MorseFeed, isSameBerth } from '@/types/channel';
 import { copyText } from '@/utils/clipboard';
 
 import styles from './App.module.less';
+
+/**
+ * Сколько оклик держится в состоянии, мс. Больше, чем длится сама буква (K — это 1.3с),
+ * с запасом на то, что лампа могла в этот момент передавать что-то ещё.
+ */
+const HAIL_HOLD_MS = 2500;
 
 /**
  * Три состояния сервиса, и выбираются они по адресу и по тому, кто эта вкладка:
@@ -100,11 +107,43 @@ export default function App() {
         ? (members.find((member) => member.memberId === replyTo.author.memberId) ?? null)
         : null;
 
+    // Оклик: тычок в аватарку — и корабль отзывается лампой со своего места на рейде.
+    // Так в кадре находят нужный корабль: имя есть в ленте, а какой из десятка силуэтов
+    // за ним стоит — иначе и не понять.
+    //
+    // Живёт оклик только в этой вкладке и до бэкенда не доходит, в отличие от печати. Печать
+    // — это то, что человек делает сам, и всем видеть её правильно; оклик же делают с ним,
+    // и мигание чужого корабля в чужой вкладке выглядело бы там сигналом ниоткуда.
+    //
+    // Счётчик в seq — чтобы окликать можно было подряд: лампе нужен новый повод передавать,
+    // а буква каждый раз одна и та же, и по ней двух окликов не различить.
+    const [hail, setHail] = useState<{ memberId: string; feed: MorseFeed } | null>(null);
+    const handleHail = useCallback(
+        (memberId: string) =>
+            setHail((prev) => ({ memberId, feed: { seq: (prev?.feed.seq ?? 0) + 1, text: HAIL_LETTER } })),
+        []
+    );
+    // Держится оклик ровно на свою букву и снимается. Он одноразовый, и оставлять его
+    // в состоянии нельзя: корабль, собранный заново — сменил тип, ушёл и вернулся, — принял бы
+    // висящий оклик за новый повод передавать и мигнул бы сам по себе.
+    useEffect(() => {
+        if (!hail) {
+            return undefined;
+        }
+        const timer = window.setTimeout(() => setHail(null), HAIL_HOLD_MS);
+        return () => window.clearTimeout(timer);
+    }, [hail]);
+
     // Лампа мигает у того, кто печатает, — и у своего корабля тоже: событие о печати
     // приходит от бэкенда одинаково, своё оно или чужое.
     const morseFeeds: Partial<Record<string, MorseFeed>> = {};
     if (typing) {
         morseFeeds[typing.memberId] = typing.feed;
+    }
+    // Оклик поверх печати: окликнули печатающего — лампа передаст и то и другое, очередь у неё
+    // общая. А вот запись о печати затёрла бы оклик молча, поэтому он и ставится последним.
+    if (hail) {
+        morseFeeds[hail.memberId] = hail.feed;
     }
 
     const handleSend = (text: string) => {
@@ -236,6 +275,7 @@ export default function App() {
                             members={members}
                             myId={me.memberId}
                             onReply={setReplyTo}
+                            onHail={handleHail}
                         />
                         <Composer
                             replyTo={replyTo}
@@ -261,6 +301,7 @@ export default function App() {
                     void channelState.leave();
                 }}
                 onClose={() => setSheetOpen(false)}
+                onHail={handleHail}
             />
         </div>
     );
