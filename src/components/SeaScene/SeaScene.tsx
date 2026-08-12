@@ -29,6 +29,7 @@ import {
     isSameBerth,
     otherSide,
     slotDepth,
+    slotShare,
 } from '@/types/channel';
 import { useIsMobile } from '@/utils/viewport';
 
@@ -165,7 +166,7 @@ const seaTiles = (
  * кто на связи.
  */
 export interface BerthChoice {
-    /** Свободные места: в каждом горит точка, у выбранного — ещё и круг света вокруг неё. */
+    /** Свободные места: в каждом горит точка, а у выбранного она вырастает в круг света. */
     options: Berth[];
     picked: Berth | null;
     onPick: (berth: Berth) => void;
@@ -435,6 +436,10 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
      */
     const laneStyle = (place: Berth, width: number): CSSProperties => {
         const depth = slotDepth(place.slot);
+        // Доля пути от дальней линии к ближней. Считается от концов рейда, а не от глубины:
+        // сами концы приколочены к горизонту и к нижней кромке кадра, а перспектива
+        // распределяет линии между ними.
+        const share = slotShare(place.slot);
         return {
             // Ширину и кламп «не подходить к краям кадра» досчитывает CSS: там же живёт
             // масштаб для телефонов и отступ от краёв.
@@ -443,18 +448,17 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
             '--slot-half': `${width / 2}%`,
             // Дальность нужна и стилям: от неё идёт размер точки, отмечающей место на рейде.
             '--slot-depth': depth.toFixed(4),
-            // Чем дальше корабль, тем выше он стоит в кадре — это и есть перспектива, и считается
-            // она прямо: место поднято над ближним краем рейда на свою глубину, то есть на 1/D,
-            // а на нуле — у горизонта — оказывается бесконечная дальность. Отсчёт идёт от воды,
-            // а не от низа сцены: воды на телефоне 58% высоты сцены, а на десктопе 44%, и от низа
-            // сцены корабли жались бы к нижнему краю, оставляя у горизонта пустую полосу.
+            // Чем дальше корабль, тем выше он стоит в кадре — это и есть перспектива. Рейд
+            // натянут между двумя отметками: дальняя линия стоит на --berth-far ниже горизонта,
+            // ближняя — на --berth-near выше нижней кромки кадра, а между ними линии расходятся
+            // по доле, то есть по той же смягчённой перспективе, что и всё остальное в сцене.
             //
-            // Сверху на это ложится подъём в пикселях (см. @berth-lift в стилях): доля отмеряет
-            // расстояние от кромки воды, а кромке кадра до долей дела нет — ближняя линия
-            // просто упиралась в неё. Общий подъём двигает весь рейд, второй достаётся одной
-            // первой линии: воды под килем меньше всего у неё, ей одной её и добавляем.
-            bottom: `calc((100% - var(--horizon)) * (1 - ${depth.toFixed(4)} * (1 - var(--sea-near-edge)))
-                + var(--berth-lift)${place.slot === SLOT_COUNT - 1 ? ' + var(--berth-lift-near)' : ''})`,
+            // Концы приколочены отступами, а не долями, потому что упереть их некуда: у самого
+            // горизонта корабль наезжает на линию воды, у самой кромки кадра — уходит под неё.
+            // Сами отступы отмерены от нормы воды и ужимаются вместе с ней в тесном кадре —
+            // см. --sea-fit в стилях.
+            bottom: `calc(var(--berth-near)
+                + (100% - var(--horizon) - var(--berth-far) - var(--berth-near)) * ${(1 - share).toFixed(4)})`,
         } as CSSProperties;
     };
 
@@ -568,7 +572,12 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
                     <img className={styles.skyTileMirrored} src={skyUrl} alt="" />
                 </div>
             </div>
-            <img className={styles.moon} src={moonUrl} alt="" />
+            {/* Месяц лежит на кружке неба: у картинки тёмная половина прозрачна, и сквозь неё
+                просвечивали звёзды. Кружок этот — сам блок, а картинка внутри: диск месяца
+                и картинка не одно и то же, у картинки вокруг диска пустые поля. */}
+            <div className={styles.moon}>
+                <img className={styles.moonImage} src={moonUrl} alt="" />
+            </div>
             <img className={styles.cloudFar} src={cloudFarUrl} alt="" />
             <img className={styles.cloudNear} src={cloudNearUrl} alt="" />
             {/* Вода: та же склеенная полоса, что и небо, а поверх — она же, перевёрнутая ещё раз.
@@ -579,37 +588,6 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
             </div>
             {/* Остров стоит на воде ниже горизонта, за ним видно море. Отражение уже есть в картинке. */}
             <img className={styles.island} src={islandUrl} alt="" />
-            {/* Разметка мест на рейде — пятна света, лежащие прямо на воде.
-                Показываются, только пока человек выбирает, куда встать. Идут перед кораблями
-                и с тем же zIndex: при равном порядке наложения решает разметка, поэтому ближний
-                корабль накрывает собой разметку своей дальности, а не наоборот — она на воде,
-                он на ней стоит. */}
-            {berths?.options.map((berth) => {
-                const picked = Boolean(berths.picked && isSameBerth(berth, berths.picked));
-                const near = Boolean(nearBerth && isSameBerth(berth, nearBerth));
-                return (
-                    <div
-                        key={berthKey(berth)}
-                        className={styles.berthLane}
-                        style={{ ...laneStyle(berth, berthWidthPercent(berth.slot)), zIndex: berth.slot + 1 }}
-                    >
-                        {/* Пятно света есть у выбранного места и у того, что под указателем, —
-                            больше ни у кого: весь рейд в пятнах разом читается узором, а не
-                            выбором. Стоят они в разметке всегда, даже невидимые: так они
-                            проступают и гаснут переходом, а не появляются рывком. */}
-                        <div
-                            data-mark={berthKey(berth)}
-                            className={[
-                                styles.berthMark,
-                                near ? styles.berthMarkNear : '',
-                                picked ? styles.berthMarkPicked : '',
-                            ]
-                                .filter(Boolean)
-                                .join(' ')}
-                        />
-                    </div>
-                );
-            })}
             {placed.map((member) => {
                 const depth = slotDepth(member.place.slot);
                 const width = shipWidthPercent(member.place.slot, member.shipKind);
@@ -766,7 +744,11 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
                         // Под кораблём точку не рисуем — см. berthTaken. Заодно она пропадает
                         // и из замера: ближайшей к указателю она уже не считается, иначе
                         // щелчок по воде доставался бы месту, которого в кадре не видно.
-                        if (berthTaken.has(key)) {
+                        //
+                        // Выбранное место — исключение: подсветка выбора и есть эта самая точка,
+                        // выросшая в круг света, и убрать её значит убрать сам выбор. А выбрать
+                        // занятое место можно только одно — своё, где корабль стоит и сейчас.
+                        if (berthTaken.has(key) && !picked) {
                             return null;
                         }
                         return (
@@ -809,6 +791,7 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
                                         // Огонёк качается той же волной, что и корабль, который
                                         // сюда встанет, — и по тем же общим часам.
                                         data-wave={wavePhase(berth).toFixed(2)}
+                                        data-lit={key}
                                         className={[
                                             styles.berthDotLight,
                                             near ? styles.berthDotNear : '',

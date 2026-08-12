@@ -106,18 +106,17 @@ test('рейд подсвечивает одно место и только по
         expect(columns.size, `коридор ${corridor} разъехался по ширине`).toBe(1);
     }
 
-    // Какие места подсвечены. Подсветка и точка лежат в разных слоях — подсветка под кораблями,
-    // точка над ними, — и общего родителя у них нет, поэтому место подсветки написано на ней
-    // самой. Проявляется она переходом, поэтому смотреть на неё надо ожидающей проверкой.
+    // Какие места подсвечены. Подсветка — не отдельное пятно, а сама точка места, выросшая
+    // в круг света, поэтому и признак у неё размерный: круг втрое шире точки. Растёт он
+    // переходом, поэтому смотреть на него надо ожидающей проверкой.
     //
-    // Порог низкий: горит подсветка с разной силой — у выбранного места в полную, у того, что
-    // под указателем, вполовину, — а погашенная стоит на нуле. Гаснущая пройдёт порог сверху
+    // Порог посередине между точкой и кругом: и растущий, и гаснущий огонёк проходят его
     // за 160мс перехода, и ожидающая проверка это переждёт.
     const litMarks = (): Promise<string[]> =>
         page.evaluate(() =>
-            [...document.querySelectorAll<HTMLElement>('[data-mark]')]
-                .filter((mark) => parseFloat(getComputedStyle(mark).opacity) > 0.1)
-                .map((mark) => mark.dataset.mark!)
+            [...document.querySelectorAll<HTMLElement>('[data-lit]')]
+                .filter((light) => light.getBoundingClientRect().width > light.getBoundingClientRect().height * 1.5)
+                .map((light) => light.dataset.lit!)
                 .sort()
         );
 
@@ -240,7 +239,7 @@ test('качка идёт по одним часам, и пришедший по
     }
 });
 
-test('точка под своим кораблём гаснет, пока выбрано его же место', async ({ page }) => {
+test('точка под своим кораблём разгорается в круг, пока выбрано его же место', async ({ page }) => {
     await openChannel(page, DEMO, ALBATROS);
     const fleet = Object.values((await readState(page)).channels)[0].members;
     const mine = fleet.find((member) => member.memberId === ALBATROS)!;
@@ -249,15 +248,24 @@ test('точка под своим кораблём гаснет, пока вы�
     await page.locator('[class*="shipMine"]').click();
     await expect(berths(page).first()).toBeVisible();
 
-    // Своё место рейд предлагает всегда — иначе не видно, где корабль стоит сейчас, — но точки
-    // под собственным килем нет: там и без неё горит подсветка выбора.
-    await expect(page.locator(`[data-berth="${key}"]`), 'под своим кораблём горит точка').toHaveCount(0);
-    await expect(page.locator(`[data-mark="${key}"]`), 'своё место осталось без подсветки').toHaveCount(1);
+    // Своё место рейд предлагает всегда — иначе не видно, где корабль стоит сейчас, — и,
+    // пока выбрано оно же, огонёк на нём вырос в круг света: подсветка выбора и есть эта
+    // самая точка, убрать её значит убрать сам выбор.
+    // Круг лежит на воде и потому сплющен: по этому его от точки и отличаем — у точки
+    // ширина с высотой равны, у круга ширина заметно больше.
+    const flatness = (): Promise<number> =>
+        page.locator(`[data-lit="${key}"]`).evaluate((light) => {
+            const box = light.getBoundingClientRect();
+            return box.width / box.height;
+        });
+    await expect(page.locator(`[data-lit="${key}"]`), 'своё место осталось без огонька').toHaveCount(1);
+    await expect.poll(flatness, { message: 'своё место осталось без подсветки' }).toBeGreaterThan(1.5);
 
-    // Переключились на другое — своё стало обычным свободным местом, и точка на нём загорелась:
-    // иначе вернуться на своё место было бы некуда.
+    // Переключились на другое — своё стало обычным свободным местом, и огонёк на нём осел
+    // обратно в точку: иначе непонятно, куда возвращаться.
     await page.locator('[data-berth][aria-pressed="false"]').last().click();
     await expect(page.locator(`[data-berth="${key}"]`), 'на покинутое место некуда вернуться').toHaveCount(1);
+    await expect.poll(flatness, { message: 'покинутое место осталось подсвеченным' }).toBeCloseTo(1, 1);
 });
 
 test('ход корабля идёт с правдоподобной скоростью и зависит от корабля', async ({ browser }) => {
