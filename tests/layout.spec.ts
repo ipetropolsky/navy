@@ -68,10 +68,9 @@ interface BerthShape {
     /** Насколько отметка ниже горизонта, px: от этого и зависит, как сильно её сплющило. */
     below: number;
     perspective: number;
-    /** Радиус круга в его собственных единицах, px. */
-    radius: number;
-    /** Разбивка линии на штрихи. Её быть не должно: пунктир в перспективе не читается. */
-    dash: string;
+    /** Чем нарисовано место. Ждём пятно света без обвода: линия в перспективе не читается. */
+    background: string;
+    border: string;
 }
 
 const berthShapes = (page: Page): Promise<BerthShape[]> =>
@@ -83,14 +82,14 @@ const berthShapes = (page: Page): Promise<BerthShape[]> =>
             // Дорожка тянется от горизонта до точки стоянки: её верх — точка схода для овала,
             // её низ — само место. Перспектива живёт на ней же, у каждого коридора своя.
             const lane = mark.parentElement!;
-            const ring = mark.querySelector('circle')!;
+            const paint = getComputedStyle(mark);
             return {
                 width: mark.offsetWidth,
                 height: mark.getBoundingClientRect().height,
                 below: lane.getBoundingClientRect().bottom - horizon,
                 perspective: parseFloat(getComputedStyle(lane).perspective),
-                radius: ring.r.baseVal.value,
-                dash: getComputedStyle(ring).strokeDasharray,
+                background: paint.backgroundImage,
+                border: paint.borderTopWidth,
             };
         });
     });
@@ -206,12 +205,12 @@ const expectBerthsLieOnWater = (marks: BerthShape[]): void => {
     // и держит эти две высоты в одной сцене.
     expect(near.height / near.width, 'на рейд смотрят сверху, а на корабли сбоку').toBeLessThan(0.2);
 
-    // Круг у каждого места свой не по масштабу, а по размеру: его радиус в собственных
-    // единицах разметки равен половине ширины отметки в пикселях экрана. Разъедутся — значит
-    // разметку опять растягивают масштабом, а вместе с кругом растянется и линия.
+    // Место помечено светом, а не чертой. Обвод — хоть сплошной, хоть пунктирный — в перспективе
+    // выглядит чужим: у лежащего круга дальняя половина сжата вчетверо против ближней, и ровная
+    // по чертежу линия идёт по экрану неровно, а вдали вырождается в полоску поперёк воды.
     for (const mark of marks) {
-        expect(mark.radius * 2, 'круг нарисован масштабом, а не размером').toBeCloseTo(mark.width * 0.98, 0);
-        expect(mark.dash, 'линия разбита на штрихи, а пунктир в перспективе не читается').toBe('none');
+        expect(mark.background, 'место помечено не светом на воде').toContain('radial-gradient');
+        expect(mark.border, 'у места опять появился обвод').toBe('0px');
     }
 };
 
