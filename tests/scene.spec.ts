@@ -79,6 +79,72 @@ test('место на рейде выбирается щелчком по вод
     expect(`${member.place.slot}-${member.place.corridor}`).toBe(chosen);
 });
 
+test('рейд подсвечивает одно место и только под указателем на воде', async ({ page }) => {
+    await openNewChannel(page, 'podskazka');
+    const scene = page.locator('[class*="scene_"]').first();
+    const frame = (await scene.boundingBox())!;
+
+    // Что где стоит: линия горизонта и точки свободных мест — в координатах страницы,
+    // чтобы можно было целиться мышью.
+    const view = await page.evaluate(() => ({
+        horizon: document.querySelector('[class*="sea_"]')!.getBoundingClientRect().top,
+        dots: [...document.querySelectorAll<HTMLElement>('[data-berth]')].map((dot) => {
+            const spot = dot.getBoundingClientRect();
+            return {
+                berth: dot.dataset.berth!,
+                x: spot.left + spot.width / 2,
+                y: spot.top + spot.height / 2,
+            };
+        }),
+    }));
+
+    // Коридоры идут отвесно: место в коридоре стоит на своей доле ширины на любой дальности.
+    for (const corridor of ['left', 'center', 'right']) {
+        const columns = new Set(
+            view.dots.filter((dot) => dot.berth.endsWith(corridor)).map((dot) => Math.round(dot.x))
+        );
+        expect(columns.size, `коридор ${corridor} разъехался по ширине`).toBe(1);
+    }
+
+    // Какие места размечены кругами. Круги и точки лежат в разных слоях — круги под
+    // кораблями, точки над ними, — и общего родителя у них нет, поэтому круг узнаётся
+    // по дорожке: доля ширины и глубина слота у неё те же, что у дорожки его точки.
+    // Проявляются круги переходом, поэтому смотреть на них надо ожидающей проверкой.
+    const litMarks = (): Promise<string[]> =>
+        page.evaluate(() => {
+            const lane = (element: Element): string => {
+                const style = getComputedStyle(element);
+                return `${style.getPropertyValue('--slot-left')}|${style.getPropertyValue('--slot-depth')}`;
+            };
+            const berths = new Map(
+                [...document.querySelectorAll<HTMLElement>('[data-berth]')].map((dot) => [
+                    lane(dot.parentElement!),
+                    dot.dataset.berth!,
+                ])
+            );
+            return [...document.querySelectorAll('[class*="berthMark"]')]
+                .filter((mark) => parseFloat(getComputedStyle(mark).opacity) > 0.5)
+                .map((mark) => berths.get(lane(mark.parentElement!)) ?? '?')
+                .sort();
+        });
+
+    const picked = (await page.locator('[data-berth][aria-pressed="true"]').getAttribute('data-berth'))!;
+    await expect.poll(litMarks, 'до наведения показано не только выбранное место').toEqual([picked]);
+
+    // Указатель по небу: рейд не размечается — там не вода, вставать некуда.
+    await page.mouse.move(frame.x + frame.width / 2, view.horizon - 20);
+    await expect.poll(litMarks, 'над небом рейд размечает места').toEqual([picked]);
+
+    // Указатель по воде: подсвечивается ровно одно место — ближайшее к указателю,
+    // а не весь рейд разом.
+    const spot = view.dots.find((dot) => dot.berth !== picked)!;
+    await page.mouse.move(spot.x, spot.y);
+    await expect
+        .poll(litMarks, 'над водой подсвечено не ближайшее место')
+        .toEqual(expect.arrayContaining([picked, spot.berth]));
+    expect(await litMarks(), 'над водой размечен весь рейд, а не одно место').toHaveLength(2);
+});
+
 test('ход корабля идёт с правдоподобной скоростью и зависит от корабля', async ({ browser }) => {
     // Каждый замер — своя вкладка со своим хранилищем: во второй раз форма постановки
     // в строй в той же вкладке уже не покажется, вкладка помнит, что корабль у неё есть.

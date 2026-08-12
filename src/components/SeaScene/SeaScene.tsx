@@ -443,13 +443,12 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
             '--slot-half': `${width / 2}%`,
             // Дальность нужна и стилям: от неё идёт размер точки, отмечающей место на рейде.
             '--slot-depth': depth.toFixed(4),
-            // Чем дальше корабль, тем выше он стоит в кадре — это и создаёт перспективу.
-            // Отсчёт идёт от воды, а не от низа сцены: воды на телефоне 58% высоты сцены,
-            // а на десктопе 44%, и от низа сцены корабли жались бы к нижнему краю, оставляя
-            // у горизонта пустую полосу. Сами доли живут в стилях (--sea-near-edge,
-            // --sea-depth-span) и на телефоне шире: там воды больше, и флоту надо разойтись
-            // по всей её высоте, а не толпиться в середине.
-            bottom: `calc((100% - var(--horizon)) * (var(--sea-near-edge) + ${(1 - depth).toFixed(4)} * var(--sea-depth-span)))`,
+            // Чем дальше корабль, тем выше он стоит в кадре — это и есть перспектива, и считается
+            // она прямо: место поднято над ближним краем рейда на свою глубину, то есть на 1/D,
+            // а на нуле — у горизонта — оказывается бесконечная дальность. Отсчёт идёт от воды,
+            // а не от низа сцены: воды на телефоне 58% высоты сцены, а на десктопе 44%, и от низа
+            // сцены корабли жались бы к нижнему краю, оставляя у горизонта пустую полосу.
+            bottom: `calc((100% - var(--horizon)) * (1 - ${depth.toFixed(4)} * (1 - var(--sea-near-edge))))`,
         } as CSSProperties;
     };
 
@@ -459,7 +458,7 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
      * перспектива, — и у мелкого корабля тоже: его доля от предела та же, что и в кадре.
      */
     const maxShipWidth = (member: Member): number =>
-        (150 + slotDepth(member.place.slot) * 200) * SHIP_SPRITES[member.shipKind].scale;
+        (60 + slotDepth(member.place.slot) * 290) * SHIP_SPRITES[member.shipKind].scale;
 
     // Выбор места на рейде. Целиться в саму разметку не нужно: указатель ловит вся вода,
     // а выбирается место, до чьей точки ближе всего. Иначе на дальних слотах пришлось бы
@@ -499,10 +498,15 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
         setNearBerth(null);
     }, [berthOptions, seaHeight, zoom]);
 
-    /** Место, до чьей точки ближе всего от этого места в кадре. */
+    /**
+     * Место, до чьей точки ближе всего от этого места в кадре. Считается только по воде:
+     * выше горизонта рейда нет, и указатель, гуляющий по небу, ничего не выбирает и ничего
+     * не подсвечивает — иначе разметка проступала бы от движения мыши над месяцем.
+     */
     const berthNearest = (clientX: number, clientY: number): Berth | null => {
         const frame = sceneRef.current?.getBoundingClientRect();
-        if (!frame) {
+        const water = seaRef.current?.getBoundingClientRect();
+        if (!frame || !water || clientY < water.top) {
             return null;
         }
         const x = clientX - frame.left;
@@ -580,18 +584,25 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
                         className={styles.berthLane}
                         style={{ ...laneStyle(berth, berthWidthPercent(berth.slot)), zIndex: berth.slot + 1 }}
                     >
+                        {/* Овал есть у выбранного места и у того, что под указателем, — больше ни
+                            у кого: весь рейд в овалах разом читается узором, а не выбором. Стоят
+                            овалы в разметке всегда, даже невидимые: так они проступают и гаснут
+                            переходом, а не появляются рывком. */}
                         <div
                             className={[
                                 styles.berthMark,
-                                // Остальные места проступают, только когда указатель на воде:
-                                // весь рейд в овалах разом — узор, а не выбор.
-                                nearBerth ? styles.berthMarkShown : '',
                                 near ? styles.berthMarkNear : '',
                                 picked ? styles.berthMarkPicked : '',
                             ]
                                 .filter(Boolean)
                                 .join(' ')}
-                        />
+                        >
+                            <svg className={styles.berthRing} viewBox="0 0 100 100" aria-hidden="true">
+                                {/* pathLength приводит окружность к сотне единиц, и штрих в стилях
+                                    задан её долями: круг любого размера разбит на те же 25 штрихов. */}
+                                <circle cx="50" cy="50" r="49" pathLength="100" />
+                            </svg>
+                        </div>
                     </div>
                 );
             })}

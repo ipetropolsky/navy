@@ -1,8 +1,9 @@
 import { Page, expect, test } from '@playwright/test';
 
 import { MOBILE_MAX_WIDTH } from '@/config/layout';
+import { slotDepth } from '@/types/channel';
 
-import { ALBATROS, DEMO, openChannel, shipNames, ships } from '@tests/helpers';
+import { ALBATROS, DEMO, openChannel, readState, shipNames, ships } from '@tests/helpers';
 
 /**
  * Раскладка на телефоне и на десктопе. Здесь тоже только то, на чём наступали: вода однажды
@@ -74,15 +75,85 @@ const berthShapes = (page: Page): Promise<BerthShape[]> =>
         // Сцена — родитель слоя воды: под этот же класс попадает обёртка в шапке приложения.
         const sea = document.querySelector('[class*="sea_"]')!;
         const horizon = sea.getBoundingClientRect().top;
-        const perspective = parseFloat(getComputedStyle(sea.parentElement!).perspective);
-        return [...document.querySelectorAll<HTMLElement>('[class*="berthMark"]')].map((mark) => ({
-            width: mark.offsetWidth,
-            height: mark.getBoundingClientRect().height,
-            // У дорожки нет высоты: её нижняя кромка и есть точка стоянки.
-            below: mark.parentElement!.getBoundingClientRect().bottom - horizon,
-            perspective,
-        }));
+        return [...document.querySelectorAll<HTMLElement>('[class*="berthMark"]')].map((mark) => {
+            // Дорожка тянется от горизонта до точки стоянки: её верх — точка схода для овала,
+            // её низ — само место. Перспектива живёт на ней же, у каждого коридора своя.
+            const lane = mark.parentElement!;
+            return {
+                width: mark.offsetWidth,
+                height: mark.getBoundingClientRect().height,
+                below: lane.getBoundingClientRect().bottom - horizon,
+                perspective: parseFloat(getComputedStyle(lane).perspective),
+            };
+        });
     });
+
+/** Где стоят линии рейда: номер линии и насколько её точка ниже горизонта, px. */
+const slotLines = (page: Page): Promise<[number, number][]> =>
+    page.evaluate(() => {
+        const horizon = document.querySelector('[class*="sea_"]')!.getBoundingClientRect().top;
+        const lines = new Map<number, number>();
+        for (const dot of document.querySelectorAll<HTMLElement>('[data-berth]')) {
+            const spot = dot.getBoundingClientRect();
+            lines.set(Number(dot.dataset.berth!.split('-')[0]), spot.top + spot.height / 2 - horizon);
+        }
+        return [...lines.entries()].sort((one, other) => one[0] - other[0]);
+    });
+
+/**
+ * Линии рейда размечены ровным шагом по морю, а не по экрану. Проверяется это обратной
+ * величиной: предмет на дальности D стоит ниже горизонта на h/D, поэтому 1/(высота над
+ * горизонтом) — это и есть дальность в неизвестных единицах. Равный шаг по морю обязан
+ * дать равный шаг у этих величин, сколько бы линий ни оказалось свободно.
+ *
+ * Заодно это проверка и на то, что перспектива работает в нужную сторону: между дальними
+ * линиями на экране остаются пиксели, между ближними — десятки.
+ */
+const expectSlotsEvenlySpacedAtSea = (lines: [number, number][]): void => {
+    expect(lines.length, 'свободных линий слишком мало, шаг не проверить').toBeGreaterThan(3);
+    const steps = lines
+        .slice(1)
+        .map(([slot, below], index) => (1 / below - 1 / lines[index][1]) / (slot - lines[index][0]));
+    const average = steps.reduce((sum, step) => sum + step, 0) / steps.length;
+    for (const step of steps) {
+        expect(Math.abs(step - average) / average, 'шаг между линиями на море неровный').toBeLessThan(0.02);
+    }
+
+    // И этот ровный шаг по морю на экране обязан быть неровным: ближние линии разнесены
+    // в разы шире дальних, иначе перспективы в разметке нет.
+    const gaps = lines.slice(1).map(([slot, below], index) => (below - lines[index][1]) / (slot - lines[index][0]));
+    expect(gaps.at(-1)!, 'ближние линии не разнесены шире дальних').toBeGreaterThan(gaps[0] * 3);
+};
+
+/** Насколько ниже горизонта стоят корабли, px, от дальнего к ближнему. */
+const shipWaterlines = (page: Page): Promise<number[]> =>
+    page.evaluate(() => {
+        const horizon = document.querySelector('[class*="sea_"]')!.getBoundingClientRect().top;
+        // Нижняя кромка дорожки — сама точка стоянки: по ней корабль и поставлен.
+        return [...document.querySelectorAll('[class*="shipLane"]')]
+            .map((lane) => lane.getBoundingClientRect().bottom - horizon)
+            .sort((one, other) => one - other);
+    });
+
+/**
+ * Корабли стоят по тому же закону, что и разметка: высота места под горизонтом идёт
+ * от глубины слота, а не от его номера. Слоты демо-эскадре раздаёт бэкенд и раздаёт
+ * случайно, поэтому сравниваем не абсолютные высоты, а их отношения к самой дальней:
+ * они обязаны совпасть с отношениями глубин тех слотов, которые эскадре достались.
+ *
+ * Так проверка и не зависит от расстановки, и ловит то, ради чего заведена: собранный
+ * в кучу флот или лесенку, разъехавшуюся с перспективой, отношения выдадут сразу.
+ */
+const expectFleetStandsByDepth = (waterlines: number[], slots: number[]): void => {
+    expect(waterlines.length, 'кораблей в кадре нет').toBe(slots.length);
+    const order = [...slots].sort((one, other) => one - other);
+    for (let index = 1; index < order.length; index++) {
+        expect(
+            waterlines[index] / waterlines[0],
+            `корабль на линии ${order[index]} стоит не по своей глубине`
+        ).toBeCloseTo(slotDepth(order[index]) / slotDepth(order[0]), 1);
+    }
+};
 
 /**
  * Места на рейде должны лежать на воде, а не стоять в кадре. Проверяем это счётом, а не
@@ -135,6 +206,7 @@ test.describe('телефон', () => {
     test('места на рейде лежат на воде, а занятые подписаны', async ({ page }) => {
         await openChannel(page, DEMO);
         expectBerthsLieOnWater(await berthShapes(page));
+        expectSlotsEvenlySpacedAtSea(await slotLines(page));
         // Занятые места подписаны все: рейд читается целиком — где свободно, а где «Вымпел».
         await expect(shipNames(page)).toHaveCount(await ships(page).count());
     });
@@ -148,11 +220,12 @@ test.describe('телефон', () => {
         expect(view.moon.top, 'месяц заехал под заголовок').toBeGreaterThan(view.headerBottom);
         expect(view.moon.bottom, 'месяц ушёл в воду').toBeLessThan(view.horizon);
 
-        // Корабли разнесены по всей воде, а не собраны у нижней кромки: от горизонта
-        // до ближнего корабля должно быть занято больше половины высоты воды.
-        const band = view.scene.height - view.horizon;
-        const used = view.nearShipBottom - Math.max(view.farShipTop, view.horizon);
-        expect(used / band, 'флот толпится в части воды').toBeGreaterThan(0.5);
+        // Корабли разнесены по воде перспективой, а не собраны в кучу.
+        const fleet = Object.values((await readState(page)).channels)[0].members;
+        expectFleetStandsByDepth(
+            await shipWaterlines(page),
+            fleet.map((member) => member.place.slot)
+        );
     });
 });
 
@@ -175,6 +248,7 @@ test.describe('десктоп', () => {
     test('места на рейде лежат на воде, а занятые подписаны', async ({ page }) => {
         await openChannel(page, DEMO);
         expectBerthsLieOnWater(await berthShapes(page));
+        expectSlotsEvenlySpacedAtSea(await slotLines(page));
         await expect(shipNames(page)).toHaveCount(await ships(page).count());
     });
 
