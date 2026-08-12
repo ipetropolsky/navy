@@ -41,6 +41,7 @@ import {
     LEAVE_GUARD,
     berthWidthPercent,
     leaveCourse,
+    nodAngle,
     pathToEdge,
     sailSeconds,
     sailTrim,
@@ -62,11 +63,13 @@ const WAVE_SECONDS = 10;
 // центрального, у центрального — относительно правого, — иначе весь рейд вставал бы на волну
 // одной ровной стенкой, чего на воде не бывает.
 //
-// Секунда на линию — это волна длиной ровно в рейд: десять линий как раз укладываются
-// в круг. Шаг коридора нарочно не кратен шагу линии: на кратном по кадру пошли бы
-// заметные диагонали из кораблей, качающихся в такт.
-const WAVE_SLOT_LAG = 1;
-const WAVE_CORRIDOR_LAG = 1.4;
+// Полсекунды на линию — это волна вдвое длиннее рейда: соседние линии идут почти в фазе,
+// и видно именно, как гребень катится от дальних мест к ближним, поднимая и опуская точки
+// одну за другой. Секунда на линию укладывала в рейд целый период, и соседи оказывались
+// в противоходе: рейд не катился волной, а болтался вразнобой. Шаг коридора нарочно не кратен
+// шагу линии: на кратном по кадру пошли бы заметные диагонали из кораблей, качающихся в такт.
+const WAVE_SLOT_LAG = 0.5;
+const WAVE_CORRIDOR_LAG = 0.7;
 
 /**
  * Момент, с которого место на рейде начинает круг качки, с. Уходит в анимацию отрицательной
@@ -112,6 +115,17 @@ const SCENE_IMAGES = [skyUrl, moonUrl, cloudFarUrl, cloudNearUrl, islandUrl, sea
 // Сколько корабль пропадает из виду, перезаходя на другой слот. Пауза нужна, чтобы уход
 // и заход читались как два разных манёвра, а не как рывок из одного края кадра в другой.
 const RELOCATE_PAUSE_MS = 3000;
+
+// Сколько длится кивок, с. Сама длительность живёт в стилях (@nod-seconds), здесь она нужна
+// затем, чтобы вовремя снять класс: анимация запускается его появлением, и оставшийся класс
+// не дал бы кораблю кивнуть во второй раз.
+const NOD_SECONDS = 1.2;
+
+// Насколько кивок на остановке опережает конец хода. Клюёт носом корабль, пока гасит ход,
+// а не после: к тому мгновению, когда он встал, он уже должен быть выровнен. Не весь кивок
+// целиком — хвост его приходится на первые мгновения стоянки, и это правильно: вода
+// под остановившимся корпусом успокаивается не сразу.
+const NOD_LEAD = 0.8;
 
 /** Ждёт загрузки картинки. Не сложилось — тоже ответ: сцену показываем в любом случае. */
 const preload = (url: string): Promise<void> =>
@@ -231,10 +245,14 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
     // хода, см. MOTION_GRACE_MS. И те и другие чистим при размонтировании.
     const pauseTimers = useRef(new Map<string, number>());
     const motionTimers = useRef(new Map<string, number>());
+    // Кто прямо сейчас кивает, погасив ход, — и таймеры, снимающие с них этот класс.
+    const noddingIds = useRef(new Set<string>());
+    const nodTimers = useRef(new Map<string, number>());
     useEffect(
         () => () => {
             pauseTimers.current.forEach((timer) => window.clearTimeout(timer));
             motionTimers.current.forEach((timer) => window.clearTimeout(timer));
+            nodTimers.current.forEach((timer) => window.clearTimeout(timer));
         },
         []
     );
@@ -357,6 +375,36 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
         }));
 
     /**
+     * Кивок на остановке: корабль гасит ход и клюёт носом. Ставится он не по концу хода,
+     * а раньше — см. NOD_LEAD, — и держится ровно на свою анимацию. Снять класс обязательно:
+     * анимацию запускает его появление, и с оставшимся классом второй раз корабль уже не кивнёт.
+     *
+     * Таймер один на оба срока: сперва он ждёт своего мгновения в ходе, потом — конца анимации.
+     */
+    const startNod = (id: string): void => {
+        window.clearTimeout(nodTimers.current.get(id));
+        noddingIds.current.add(id);
+        nodTimers.current.set(
+            id,
+            window.setTimeout(() => {
+                nodTimers.current.delete(id);
+                noddingIds.current.delete(id);
+                redraw();
+            }, NOD_SECONDS * 1000)
+        );
+        redraw();
+    };
+
+    /** Тот же кивок, но заранее: за NOD_LEAD до конца хода, чтобы к остановке корабль выровнялся. */
+    const scheduleNod = (id: string, seconds: number): void => {
+        window.clearTimeout(nodTimers.current.get(id));
+        nodTimers.current.set(
+            id,
+            window.setTimeout(() => startNod(id), Math.max(seconds - NOD_SECONDS * NOD_LEAD, 0) * 1000)
+        );
+    };
+
+    /**
      * Движение отработало. Класс снимаем всегда — иначе следующее движение того же корабля
      * не начнётся: переход запускается сменой значения, а у оставшегося класса оно уже своё.
      *
@@ -373,6 +421,11 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
             redraw();
             return;
         }
+        // Уходящий кивать на остановке не должен: гасит ход он уже за кромкой кадра, а его
+        // отложенный кивок пришёлся бы на пустое место или, того хуже, на его же заход обратно.
+        window.clearTimeout(nodTimers.current.get(id));
+        nodTimers.current.delete(id);
+        noddingIds.current.delete(id);
         leavingById.current.delete(id);
         if (!relocatingIds.current.has(id)) {
             redraw();
@@ -394,6 +447,9 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
     // момент старта запоминается настоящий, а не тот, в который на вкладку вернулись.
     // Тогда же заводим страховку на случай, что события конца перехода не будет вовсе:
     // длительность берём с самого элемента, чтобы не разойтись со стилями.
+    //
+    // И тогда же назначается кивок заходящего: он приходится на конец хода, а знать про этот
+    // конец заранее можно только отсюда — по событию было бы уже поздно.
     useLayoutEffect(() => {
         const now = Date.now();
         movingShips().forEach(({ id, kind, element }) => {
@@ -405,6 +461,9 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
                     id,
                     window.setTimeout(() => finishMotion(id), seconds * 1000 + MOTION_GRACE_MS)
                 );
+                if (kind === 'entering') {
+                    scheduleNod(id, seconds);
+                }
             }
         });
     });
@@ -644,18 +703,33 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
                 const enterSeconds = sailSeconds(enterPath, member.place.slot, member.shipKind, false, zoom);
                 // Задний ход отличается только длительностью: кривая та же, а скорость ниже.
                 const leaveSeconds = sailSeconds(leavePath, member.place.slot, member.shipKind, leave.astern, zoom);
-                // Куда корабль идёт прямо сейчас: заходящий — от своей кромки внутрь кадра,
-                // уходящий — к своей.
-                const heading = (leaving && leave.side) || (entering && otherSide(member.place.enterFrom)) || '';
-                // Дифферент: приподнята та оконечность, которой корабль идёт вперёд. Положительный
-                // угол поднимает левый край, поэтому идущему влево он и достаётся.
-                const trim =
-                    sailTrim(
-                        leaving ? leavePath : enterPath,
-                        leaving ? leaveSeconds : enterSeconds,
-                        member.place.slot,
-                        zoom
-                    ) * (heading === 'left' ? 1 : -1);
+                // Куда корабль идёт: уходящий — в свою сторону, остальные — той же, которой
+                // заходили на рейд. Стоящему это не пустое значение, а память о последнем ходе:
+                // кивок на остановке отыгрывается уже без движения, а клюнуть носом корабль
+                // должен в ту сторону, в которую шёл.
+                const course = leaving ? leave.side : otherSide(member.place.enterFrom);
+                // Положительный угол поднимает левый край, поэтому идущему влево он и достаётся.
+                const bowUp = course === 'left' ? 1 : -1;
+                // Дифферент: приподнята та оконечность, которой корабль идёт вперёд.
+                //
+                // Стоящему кораблю угол не полагается вовсе: дифферент — это про ход. Раньше он
+                // считался и на якоре, и знак ему доставался от пустого курса, — стоящий флот
+                // от этого держал заметный крен, а в конце хода корабль на глазах переваливался
+                // с одного на другой.
+                const trim = motionKind
+                    ? sailTrim(
+                          leaving ? leavePath : enterPath,
+                          leaving ? leaveSeconds : enterSeconds,
+                          member.place.slot,
+                          member.shipKind,
+                          zoom
+                      ) * bowUp
+                    : 0;
+                // Кивок — короткое движение по краям манёвра, поверх дифферента: трогаясь,
+                // корабль приподнимает нос, а гася ход, клюёт им. Угол один на оба случая,
+                // знак второму меняют стили.
+                const nod = nodAngle(member.shipKind) * bowUp;
+                const nodding = noddingIds.current.has(member.memberId);
                 // Свой корабль открывает форму: там меняются и корабль, и место на рейде.
                 // Идущий не открывает: он ещё не пришёл туда, откуда его будут переставлять.
                 // Пока форма и так открыта, корабль ничего не открывает и указателем
@@ -666,7 +740,10 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
                     // считаются в долях кадра, поэтому и блок нужен шириной с кадр — см. стили.
                     <div
                         key={member.memberId}
-                        className={[styles.shipLane, motion].filter(Boolean).join(' ') || undefined}
+                        className={
+                            [styles.shipLane, motion, nodding ? styles.shipNodding : ''].filter(Boolean).join(' ') ||
+                            undefined
+                        }
                         // Конец хода. Событие приходит и от дифферента на вложенном блоке, поэтому
                         // спрашиваем и свойство, и элемент: чужой конец за свой принимать нельзя.
                         onTransitionEnd={
@@ -693,66 +770,71 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
                                 '--leave-to': `${leave.side === 'right' ? '' : '-'}${leavePath.toFixed(1)}%`,
                                 '--leave-seconds': `${leaveSeconds.toFixed(1)}s`,
                                 '--sail-trim': `${trim.toFixed(2)}deg`,
+                                '--nod-angle': `${nod.toFixed(2)}deg`,
                             } as CSSProperties
                         }
                     >
-                        {/* Пока выбирают место, занятые подписаны: рейд должен читаться целиком —
-                            где свободно, а где уже стоит «Альбатрос». Подпись стоит на самой
-                            отметке стоянки — там же, где у свободного места горит точка, — и живёт
-                            на дорожке, а не на корабле: ходить вместе с корпусом ей незачем. */}
-                        {berths && (
-                            <div className={styles.shipName}>
-                                <MemberName name={member.name} color={member.color} />
-                            </div>
-                        )}
                         <div
-                            className={[styles.shipSlot, canEdit ? styles.shipMine : ''].filter(Boolean).join(' ')}
+                            className={[
+                                styles.shipSlot,
+                                canEdit ? styles.shipMine : '',
+                                // Пока выбирают место, чужие корабли отходят на второй план:
+                                // разбирают в этот момент свой, и рейд под ним должно быть видно.
+                                berths && member.memberId !== myId ? styles.shipAside : '',
+                            ]
+                                .filter(Boolean)
+                                .join(' ')}
                             // Чужие корабли не трогаем: рейд общий, но распоряжаться там можно
                             // только собой.
                             onClick={canEdit ? onEditShip : undefined}
                             title={canEdit ? 'Изменить корабль и место на рейде' : undefined}
                             style={{ maxWidth: maxShipWidth(member) }}
                         >
-                            {/* Корабль, номер, огни и тень на воде качаются как единое целое: обе анимации
+                            {/* Кивок живёт своим блоком: он тоже поворот, а поворот на слоте уже занят
+                            дифферентом, и на качающемся блоке — тангажом. Свойство одно на элемент,
+                            поэтому и слоёв столько же, сколько поворотов. */}
+                            <div className={styles.shipNod}>
+                                {/* Корабль, номер, огни и тень на воде качаются как единое целое: обе анимации
                             висят на одном блоке, потому что двигают разные свойства — translate и rotate. */}
-                            <div
-                                className={styles.shipRock}
-                                // Фаза места на общих часах качки: по ней сцена подводит анимации
-                                // после каждой отрисовки, чтобы корабль не начинал круг заново.
-                                data-wave={wavePhase(member.place).toFixed(2)}
-                                style={
-                                    {
-                                        // Минус — момент старта в прошлом: корабль появляется уже качающимся.
-                                        // Отсюда же CSS считает задержку тангажа, отняв четверть цикла.
-                                        '--wave-start': `-${wavePhase(member.place).toFixed(2)}s`,
-                                        '--heave': `${heaveAmplitude(depth).toFixed(2)}px`,
-                                        // Крутизна волны идёт от её высоты, поэтому угол считаем из неё,
-                                        // а не из хода корпуса: осадка корабля уклон воды не меняет.
-                                        // Знак зависит от того, куда смотрит корабль: положительный
-                                        // поворот поднимает левый край, отрицательный — правый, а вверх
-                                        // вместе с корпусом должен идти нос, а не корма.
-                                        '--pitch-angle': `${(
-                                            waveAmplitude(depth) *
-                                            PITCH_PER_PX *
-                                            (member.place.facing === 'left' ? 1 : -1)
-                                        ).toFixed(2)}deg`,
-                                    } as CSSProperties
-                                }
-                            >
-                                {/* Тень идёт перед кораблём в разметке, поэтому корпус её перекрывает. */}
-                                <div className={styles.shipShadow} />
-                                <Ship
-                                    kind={member.shipKind}
-                                    name={member.name}
-                                    hullNumber={member.hullNumber}
-                                    facing={member.place.facing}
-                                    // Идёт — ходовые огни, стоит на рейде — якорные. Это про всех
-                                    // в кадре, а не только про свой корабль: огни у корабля не зависят
-                                    // от того, из чьей вкладки на него смотрят.
-                                    mode={motionKind ? 'underway' : 'anchored'}
-                                    depth={depth}
-                                    morseFeed={morseFeeds[member.memberId] ?? null}
-                                />
+                                <div
+                                    className={styles.shipRock}
+                                    // Фаза места на общих часах качки: по ней сцена подводит анимации
+                                    // после каждой отрисовки, чтобы корабль не начинал круг заново.
+                                    data-wave={wavePhase(member.place).toFixed(2)}
+                                    style={
+                                        {
+                                            // Минус — момент старта в прошлом: корабль появляется уже качающимся.
+                                            // Отсюда же CSS считает задержку тангажа, отняв четверть цикла.
+                                            '--wave-start': `-${wavePhase(member.place).toFixed(2)}s`,
+                                            '--heave': `${heaveAmplitude(depth).toFixed(2)}px`,
+                                            // Крутизна волны идёт от её высоты, поэтому угол считаем из неё,
+                                            // а не из хода корпуса: осадка корабля уклон воды не меняет.
+                                            // Знак зависит от того, куда смотрит корабль: положительный
+                                            // поворот поднимает левый край, отрицательный — правый, а вверх
+                                            // вместе с корпусом должен идти нос, а не корма.
+                                            '--pitch-angle': `${(
+                                                waveAmplitude(depth) *
+                                                PITCH_PER_PX *
+                                                (member.place.facing === 'left' ? 1 : -1)
+                                            ).toFixed(2)}deg`,
+                                        } as CSSProperties
+                                    }
+                                >
+                                    {/* Тень идёт перед кораблём в разметке, поэтому корпус её перекрывает. */}
+                                    <div className={styles.shipShadow} />
+                                    <Ship
+                                        kind={member.shipKind}
+                                        name={member.name}
+                                        hullNumber={member.hullNumber}
+                                        facing={member.place.facing}
+                                        // Идёт — ходовые огни, стоит на рейде — якорные. Это про всех
+                                        // в кадре, а не только про свой корабль: огни у корабля не зависят
+                                        // от того, из чьей вкладки на него смотрят.
+                                        mode={motionKind ? 'underway' : 'anchored'}
+                                        depth={depth}
+                                        morseFeed={morseFeeds[member.memberId] ?? null}
+                                    />
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -769,6 +851,32 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
                     onClick={pickNearestBerth}
                 >
                     <div className={styles.berthWater} />
+                    {/* Подписи занятых мест. Живут они здесь, в слое разметки, а не на дорожке
+                        корабля: слой лежит поверх всего флота, и подпись дальнего корабля
+                        не пропадает за ближним корпусом. Стоит она там же, где у свободного
+                        места горит точка, — на самой отметке стоянки, — и качается той же
+                        волной и в той же фазе, что и корабль над ней: имя написано на воде,
+                        а вода одна на всех. */}
+                    {placed.map((member) => (
+                        <div
+                            key={member.memberId}
+                            className={styles.shipNameLane}
+                            style={laneStyle(member.place, shipWidthPercent(member.place.slot, member.shipKind))}
+                        >
+                            <span
+                                className={styles.shipName}
+                                data-wave={wavePhase(member.place).toFixed(2)}
+                                style={
+                                    {
+                                        '--heave': `${waveAmplitude(slotDepth(member.place.slot)).toFixed(2)}px`,
+                                        '--wave-start': `-${wavePhase(member.place).toFixed(2)}s`,
+                                    } as CSSProperties
+                                }
+                            >
+                                <MemberName name={member.name} color={member.color} />
+                            </span>
+                        </div>
+                    ))}
                     {berths.options.map((berth) => {
                         const picked = Boolean(berths.picked && isSameBerth(berth, berths.picked));
                         const near = Boolean(nearBerth && isSameBerth(berth, nearBerth));

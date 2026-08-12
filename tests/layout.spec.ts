@@ -311,18 +311,25 @@ const expectBerthLightGrows = async (page: Page): Promise<void> => {
  * на отметке стоянки. Раньше имя висело над мачтами, и рейд читался двумя ярусами: огоньки
  * на воде, надписи в небе, — а сводить их приходилось глазу.
  *
+ * Качается подпись той же волной, что и корабль над ней, — потому и допуск ниже не нулевой.
+ *
  * Написаны они позывным: цветом участника и той же меркой, что подпись под репликой в ленте.
  * Цвет проверяем не по значению — какой кому достался, решает бэкенд, — а по тому, что он
  * у каждого свой и не общий текстовый.
  */
+/** Насколько подпись может уехать от своей отметки, качаясь на волне, px: см. WAVE_NEAR. */
+const NAME_SWING = 2.5;
+
 const expectNamesStandOnBerths = async (page: Page): Promise<void> => {
+    // Подчёркивание в конце обязательно: подпись ездит по своей дорожке (shipNameLane),
+    // и без него в набор попадала бы ещё и она.
     const marks = await page.evaluate(() =>
-        [...document.querySelectorAll<HTMLElement>('[class*="shipName"]')].map((mark) => {
+        [...document.querySelectorAll<HTMLElement>('[class*="shipName_"]')].map((mark) => {
             const box = mark.getBoundingClientRect();
             const paint = getComputedStyle(mark.firstElementChild ?? mark);
             return {
                 middle: box.top + box.height / 2,
-                berth: mark.closest('[class*="shipLane"]')!.getBoundingClientRect().bottom,
+                berth: mark.closest('[class*="shipNameLane"]')!.getBoundingClientRect().bottom,
                 size: paint.fontSize,
                 color: paint.color,
             };
@@ -330,7 +337,10 @@ const expectNamesStandOnBerths = async (page: Page): Promise<void> => {
     );
     expect(marks.length, 'занятые места не подписаны вовсе').toBeGreaterThan(0);
     for (const mark of marks) {
-        expect(mark.middle, 'подпись висит не на отметке стоянки').toBeCloseTo(mark.berth, 0);
+        // Не «ровно на отметке», а «в пределах хода волны»: подпись качается вместе с кораблём,
+        // и в кадре замера она может стоять на гребне или в подошве. Ход этот — @heave, у самого
+        // ближнего места около двух пикселей (см. WAVE_NEAR), их и допускаем в обе стороны.
+        expect(Math.abs(mark.middle - mark.berth), 'подпись висит не на отметке стоянки').toBeLessThan(NAME_SWING);
         expect(mark.size, 'подпись на воде набрана не той же меркой, что позывной в ленте').toBe('14px');
     }
     expect(new Set(marks.map((mark) => mark.color)).size, 'подписи на воде набраны одним цветом').toBe(marks.length);
@@ -377,31 +387,65 @@ const panelBox = (page: Page): Promise<{ width: number; radius: number; parentWi
     });
 
 interface ActionsBar {
-    /** Ширина самого слота: ею меряем, взяли кнопки всю ширину или нет. */
+    /** Ширина, которую делят кнопки: сама полоса за вычетом своих полей. */
     width: number;
+    /** Ширина полосы целиком: она доходит фоном и чертой до краёв хозяина. */
+    bandWidth: number;
+    /** Ширина хозяина по внешней кромке: до неё полосе и положено доходить. */
+    ownerWidth: number;
+    /** Толщина черты сверху: полоса отбита ею так же, как панель с полем ввода. */
+    rule: number;
+    /** Фон полосы: он поднятый, а не прозрачный — иначе панели не видно. */
+    background: string;
     position: string;
     /** Сколько строк заняли кнопки: разные верхние кромки — разные строки. */
     rows: number;
     buttons: { left: number; right: number; width: number }[];
 }
 
-/** Ряд кнопок внизу формы или шторки: где он стоит и как в нём поделена ширина. */
+/**
+ * Ряд кнопок внизу формы или шторки: где он стоит и как в нём поделена ширина.
+ *
+ * Мерка тут по внутренней кромке полосы, а не по внешней: полоса — панель со своим фоном
+ * и своими полями, и «кнопки взяли всю ширину» значит всю ширину внутри неё. Саму полосу
+ * меряем отдельно: ей положено доходить фоном и чертой до краёв хозяина, гася его поля
+ * отрицательными margin и возвращая их своими padding.
+ */
 const actionsBar = (page: Page): Promise<ActionsBar> =>
     page.evaluate(() => {
         const bar = document.querySelector('[class*="actions"]')!;
         const box = bar.getBoundingClientRect();
+        const style = getComputedStyle(bar);
+        const left = box.left + Number.parseFloat(style.paddingLeft);
+        const right = box.right - Number.parseFloat(style.paddingRight);
         const buttons = [...bar.querySelectorAll('button')].map((button) => button.getBoundingClientRect());
         return {
-            width: box.width,
-            position: getComputedStyle(bar).position,
+            width: right - left,
+            bandWidth: box.width,
+            ownerWidth: bar.parentElement!.getBoundingClientRect().width,
+            rule: Number.parseFloat(style.borderTopWidth),
+            background: style.backgroundColor,
+            position: style.position,
             rows: new Set(buttons.map((button) => Math.round(button.top))).size,
             buttons: buttons.map((button) => ({
-                left: button.left - box.left,
-                right: box.right - button.right,
+                left: button.left - left,
+                right: right - button.right,
                 width: button.width,
             })),
         };
     });
+
+/**
+ * Полоса кнопок — такая же панель, как та, в которой стоит поле ввода в ленте: черта сверху,
+ * поднятый фон, и оба доходят до краёв хозяина, а не обрываются по его полям. Прилипла полоса
+ * или просто стоит внизу — выглядит она одинаково, поэтому и проверка одна на оба случая.
+ */
+const expectBandLooksLikePanel = (bar: ActionsBar): void => {
+    expect(bar.bandWidth, 'полоса кнопок не дотянулась фоном до краёв').toBeCloseTo(bar.ownerWidth, 0);
+    expect(bar.rule, 'полоса кнопок не отчёркнута сверху').toBeGreaterThan(0);
+    expect(bar.background, 'у полосы кнопок нет своего фона').not.toBe('rgba(0, 0, 0, 0)');
+    expect(bar.width, 'поля полосы съели всю её ширину').toBeLessThan(bar.bandWidth);
+};
 
 test.describe('телефон', () => {
     // Ширина заведомо мобильная: точка перехода одна на стили и на код, и берём мы её оттуда же.
@@ -421,6 +465,7 @@ test.describe('телефон', () => {
         // Две кнопки в строку делят ширину слота целиком: они и промежуток между ними —
         // это вся ширина, и по краям не остаётся ничего.
         const row = await actionsBar(page);
+        expectBandLooksLikePanel(row);
         expect(row.rows, 'кнопки разъехались по строкам там, где влезали в одну').toBe(1);
         expect(row.buttons[0].left, 'первая кнопка отошла от левого края').toBeCloseTo(0, 0);
         expect(row.buttons.at(-1)!.right, 'последняя кнопка не дотянулась до правого края').toBeCloseTo(0, 0);
@@ -601,6 +646,7 @@ test.describe('десктоп', () => {
     test('в карточке формы кнопки делят ширину так же, как на телефоне', async ({ page }) => {
         await openChannel(page, DEMO);
         const bar = await actionsBar(page);
+        expectBandLooksLikePanel(bar);
         expect(bar.buttons[0].width, 'одинокая кнопка не заняла ширину карточки').toBeCloseTo(bar.width, 0);
     });
 });

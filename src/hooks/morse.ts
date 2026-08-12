@@ -85,7 +85,17 @@ export const MORSE_UNIT = 110;
  * с вами» и «можете передавать» разом: ровно то, что значит тычок в аватарку — тебя окликнули,
  * и ты показываешь, что на связи и слушаешь.
  */
-export const HAIL_LETTER = 'K';
+const HAIL_LETTER = 'K';
+
+/**
+ * Передаётся оклик трижды подряд. Одна буква — это чуть больше секунды тихого мигания
+ * на своём месте в кадре, и пока смотрящий переводит взгляд с аватарки на рейд, она уже
+ * договорена: тычок вроде был, а кто отозвался — непонятно. Повтор даёт время обвести
+ * взглядом весь строй и всё-таки поймать нужную лампу.
+ */
+const HAIL_TIMES = 3;
+
+export const HAIL_SIGNAL = HAIL_LETTER.repeat(HAIL_TIMES);
 
 export interface LampSegment {
     /** Сколько держать лампу включённой (0 — не включать). */
@@ -114,3 +124,15 @@ export function charToSegments(char: string): LampSegment[] {
         off: index === code.length - 1 ? MORSE_UNIT * 3 : MORSE_UNIT,
     }));
 }
+
+/**
+ * Сколько времени займёт передача этого текста, мс. Нужно тому, кто держит повод передавать:
+ * снять его раньше, чем лампа договорила, — оборвать сигнал на полуслове.
+ */
+export const morseDuration = (text: string): number =>
+    text
+        .split('')
+        .reduce(
+            (total, char) => total + charToSegments(char).reduce((sum, segment) => sum + segment.on + segment.off, 0),
+            0
+        );

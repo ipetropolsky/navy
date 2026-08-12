@@ -21,6 +21,8 @@ interface ActionsProps {
      * уезжала бы под них.
      */
     pinned?: boolean;
+    /** Под кнопками есть приписка: тогда полоса не уносит нижнее поле хозяина. */
+    aboveFooter?: boolean;
     /** Своя отбивка сверху: черта в шторке, отступ от поля в карточке. */
     className?: string;
 }
@@ -33,8 +35,20 @@ interface ActionsProps {
  * Хозяин слота задаёт только своё: широкий он или узкий и какие у него поля — `--actions-top`
  * (отбивка сверху) и `--actions-pad` (нижнее поле, которое прилипшие кнопки уносят с собой).
  */
-export default function Actions({ children, wide = false, pinned = false, className }: ActionsProps) {
-    const look = [styles.actions, wide && styles.actionsWide, pinned && styles.actionsPinned, className]
+export default function Actions({
+    children,
+    wide = false,
+    pinned = false,
+    aboveFooter = false,
+    className,
+}: ActionsProps) {
+    const look = [
+        styles.actions,
+        wide && styles.actionsWide,
+        pinned && styles.actionsPinned,
+        aboveFooter && styles.actionsAboveFooter,
+        className,
+    ]
         .filter(Boolean)
         .join(' ');
     return <div className={look}>{children}</div>;

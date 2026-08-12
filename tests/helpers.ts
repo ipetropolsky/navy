@@ -111,8 +111,12 @@ export const ships = (page: Page) => page.locator('[class*="shipSlot"]');
 /** Свободные места на рейде: огоньки на воде, пока открыта форма корабля. */
 export const berths = (page: Page) => page.locator('[data-berth]');
 
-/** Подписи занятых мест: имена кораблей, их видно тоже только при выборе места. */
-export const shipNames = (page: Page) => page.locator('[class*="shipName"]');
+/**
+ * Подписи занятых мест: имена кораблей, их видно тоже только при выборе места. Подчёркивание
+ * в конце обязательно: подпись ездит по такой же дорожке, как корабль, и без него в набор
+ * попадала бы ещё и она.
+ */
+export const shipNames = (page: Page) => page.locator('[class*="shipName_"]');
 
 /** Убедиться, что из состояния есть выход: на экране видна кнопка, которая куда-то ведёт. */
 export const expectWayOut = async (page: Page): Promise<void> => {

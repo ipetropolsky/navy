@@ -12,7 +12,7 @@ import Button from '@/components/ui/Button';
 import IconButton from '@/components/ui/IconButton';
 import Panel from '@/components/ui/Panel';
 import { useSnackbar } from '@/components/ui/Snackbar';
-import { HAIL_LETTER } from '@/hooks/morse';
+import { HAIL_SIGNAL, morseDuration } from '@/hooks/morse';
 import { useChannel } from '@/hooks/useChannel';
 import { channelLink, useRoute } from '@/routing';
 import { Berth, MAX_MESSAGE_LENGTH, Message, MorseFeed, isSameBerth } from '@/types/channel';
@@ -21,10 +21,12 @@ import { copyText } from '@/utils/clipboard';
 import styles from './App.module.less';
 
 /**
- * Сколько оклик держится в состоянии, мс. Больше, чем длится сама буква (K — это 1.3с),
- * с запасом на то, что лампа могла в этот момент передавать что-то ещё.
+ * Сколько оклик держится в состоянии, мс: ровно на свою передачу и ещё немного сверху —
+ * лампа могла в этот момент договаривать печать, и до оклика очередь дошла не сразу.
+ * Считается по самому сигналу, а не проставляется числом: сигнал ещё будет меняться,
+ * а забытый потолок молча обрезал бы его на полуслове.
  */
-const HAIL_HOLD_MS = 2500;
+const HAIL_HOLD_MS = morseDuration(HAIL_SIGNAL) + 1200;
 
 /**
  * Три состояния сервиса, и выбираются они по адресу и по тому, кто эта вкладка:
@@ -120,10 +122,10 @@ export default function App() {
     const [hail, setHail] = useState<{ memberId: string; feed: MorseFeed } | null>(null);
     const handleHail = useCallback(
         (memberId: string) =>
-            setHail((prev) => ({ memberId, feed: { seq: (prev?.feed.seq ?? 0) + 1, text: HAIL_LETTER } })),
+            setHail((prev) => ({ memberId, feed: { seq: (prev?.feed.seq ?? 0) + 1, text: HAIL_SIGNAL } })),
         []
     );
-    // Держится оклик ровно на свою букву и снимается. Он одноразовый, и оставлять его
+    // Держится оклик ровно на свой сигнал и снимается. Он одноразовый, и оставлять его
     // в состоянии нельзя: корабль, собранный заново — сменил тип, ушёл и вернулся, — принял бы
     // висящий оклик за новый повод передавать и мигнул бы сам по себе.
     useEffect(() => {

@@ -1,4 +1,4 @@
-import { Fragment, useState } from 'react';
+import { useState } from 'react';
 
 import { ChannelError, MemberDraft } from '@/backend';
 import MemberName from '@/components/ships/MemberName';
@@ -126,23 +126,8 @@ export default function MemberForm({ mode, crew, myId, initial, onSubmit, onCanc
     return (
         <Panel
             title={mode === 'join' ? 'Встать в строй' : 'Переоснастить корабль'}
-            // Название канала уже стоит в шапке над сценой, здесь только состав. Позывные
-            // подписаны так же, как в ленте: по цвету видно, чья реплика будет чьей.
-            hint={
-                crew.length ? (
-                    <>
-                        На связи:{' '}
-                        {crew.map((member, index) => (
-                            <Fragment key={member.memberId}>
-                                {index > 0 && <span>, </span>}
-                                <MemberName name={member.name} color={member.color} />
-                            </Fragment>
-                        ))}
-                    </>
-                ) : (
-                    'На связи пока никого — ты первый'
-                )
-            }
+            // Состав здесь не перечисляем: пока форма открыта, занятые места на рейде подписаны
+            // позывными, и то же самое второй раз строкой над формой — лишнее.
             onSubmit={handleSubmit}
             // Форма длинная: корабли идут столбиком, и кнопки без этого уезжают под обрез.
             pinActions
@@ -183,16 +168,6 @@ export default function MemberForm({ mode, crew, myId, initial, onSubmit, onCanc
                     autoComplete="off"
                     onChange={(event) => setHullNumber(event.target.value.replace(/\D/g, ''))}
                 />
-            </Field>
-
-            {/* Само место выбирается не здесь, а на воде над формой: свободные отмечены
-                огоньками, выбранное обведено. Строчка нужна, чтобы человек туда посмотрел, —
-                иначе огоньки легко принять за украшение сцены. */}
-            <Field label="Место на рейде">
-                <div className={styles.berthHint}>
-                    Выбирается на рейде выше: свободные места помечены огоньками, выбранное обведено. Нажми на воду
-                    рядом с любым — одно уже выбрано за тебя.
-                </div>
             </Field>
 
             <Field label="Цвет" group>

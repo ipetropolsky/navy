@@ -38,7 +38,11 @@ export default function Panel({ title, hint, children, actions, footer, pinActio
             <h1 className={styles.title}>{title}</h1>
             {hint && <p className={styles.hint}>{hint}</p>}
             {children}
-            {actions && <Actions pinned={pinActions}>{actions}</Actions>}
+            {actions && (
+                <Actions pinned={pinActions} aboveFooter={Boolean(footer)}>
+                    {actions}
+                </Actions>
+            )}
             {footer && <p className={styles.footer}>{footer}</p>}
         </>
     );

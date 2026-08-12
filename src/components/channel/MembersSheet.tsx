@@ -53,7 +53,7 @@ export default function MembersSheet({ open, members, myId, onEditMe, onLeave, o
                 {myId && (
                     // Список бывает длиннее шторки, и кнопки уезжают под обрез так же,
                     // как в форме корабля, — значит и держим мы их так же.
-                    <Actions wide pinned className={styles.actions}>
+                    <Actions wide pinned>
                         <Button variant="secondary" onClick={onEditMe}>
                             Настроить корабль
                         </Button>
