@@ -176,7 +176,9 @@ export default function App() {
         if (typingMember) {
             return `«${typingMember.name}» передаёт…`;
         }
-        return members.length ? `${members.length} на связи` : 'на связи пока никого';
+        // Строчка нарочно короткая: на телефоне месяц стоит на её высоте, и длинный
+        // подзаголовок наезжал бы на него.
+        return members.length ? `${members.length} на связи` : 'никого нет';
     };
 
     return (

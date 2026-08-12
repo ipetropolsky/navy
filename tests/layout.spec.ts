@@ -11,6 +11,18 @@ import { ALBATROS, DEMO, openChannel, openSheet, readState, shipNames, ships } f
  * корабли жались к нижней кромке, оставляя у горизонта пустую полосу.
  */
 
+/** Прямоугольник в координатах сцены, px. */
+interface Frame {
+    top: number;
+    bottom: number;
+    left: number;
+    right: number;
+}
+
+/** Пересекаются ли два прямоугольника хоть краем. */
+const overlaps = (one: Frame, other: Frame): boolean =>
+    one.left < other.right && other.left < one.right && one.top < other.bottom && other.top < one.bottom;
+
 interface Geometry {
     scene: { width: number; height: number };
     /** Линия горизонта: верх воды, px от верха сцены. */
@@ -18,9 +30,13 @@ interface Geometry {
     /** Плитка воды: должна закрывать свою область целиком. */
     seaTile: { width: number; height: number };
     seaBox: { width: number; height: number };
-    /** Месяц: где он стоит и докуда достаёт шапка чата. */
-    moon: { top: number; bottom: number };
-    headerBottom: number;
+    /** Диск месяца целиком: он стоит рядом со строчками шапки и не должен их задевать. */
+    moon: Frame;
+    /**
+     * Строчки шапки, обмеренные по самому тексту. Блоки под них растянуты во всю ширину чата,
+     * и по блокам месяц «под текстом» всегда, хотя текст кончается задолго до лунной дорожки.
+     */
+    headerText: Frame[];
     /** Корабли: самый дальний и самый ближний, px от верха сцены. */
     farShipTop: number;
     nearShipBottom: number;
@@ -32,18 +48,34 @@ const geometry = (page: Page): Promise<Geometry> =>
         const scene = box('[class*="scene_"]');
         const sea = box('[class*="sea_"]');
         const tile = box('[class*="seaTile"]');
-        const moon = box('[class*="moon"]');
-        const status = box('[class*="chatStatus"]');
+        const moon = box('[class*="moon_"]');
         const slots = [...document.querySelectorAll('[class*="shipSlot"]')].map((el) => el.getBoundingClientRect());
         const tops = slots.map((slot) => slot.top - scene.top);
         const bottoms = slots.map((slot) => slot.bottom - scene.top);
+        // Текст строчки, а не блок под ней: Range охватывает ровно набранные буквы.
+        const textFrame = (selector: string) => {
+            const range = document.createRange();
+            range.selectNodeContents(document.querySelector(selector)!);
+            const spot = range.getBoundingClientRect();
+            return {
+                top: Math.round(spot.top - scene.top),
+                bottom: Math.round(spot.bottom - scene.top),
+                left: Math.round(spot.left - scene.left),
+                right: Math.round(spot.right - scene.left),
+            };
+        };
         return {
             scene: { width: Math.round(scene.width), height: Math.round(scene.height) },
             horizon: Math.round(sea.top - scene.top),
             seaTile: { width: Math.round(tile.width), height: Math.round(tile.height) },
             seaBox: { width: Math.round(sea.width), height: Math.round(sea.height) },
-            moon: { top: Math.round(moon.top - scene.top), bottom: Math.round(moon.bottom - scene.top) },
-            headerBottom: Math.round(status.bottom - scene.top),
+            moon: {
+                top: Math.round(moon.top - scene.top),
+                bottom: Math.round(moon.bottom - scene.top),
+                left: Math.round(moon.left - scene.left),
+                right: Math.round(moon.right - scene.left),
+            },
+            headerText: [textFrame('[class*="chatTitle"]'), textFrame('[class*="chatStatus"]')],
             farShipTop: Math.round(Math.min(...tops)),
             nearShipBottom: Math.round(Math.max(...bottoms)),
         };
@@ -313,6 +345,11 @@ const expectBerthLightGrows = async (page: Page): Promise<void> => {
  *
  * Качается подпись той же волной, что и корабль над ней, — потому и допуск ниже не нулевой.
  *
+ * По ширине подпись стоит под своим кораблём: и корпус, и имя, и точка места сдвинуты
+ * разбегом коридоров одинаково (см. --berth-shift). Однажды разбег достался только отметке
+ * с подписью, а корабль остался на оси коридора — и на ближних линиях имя уехало от корпуса
+ * на полтора десятка пикселей.
+ *
  * Написаны они позывным: цветом участника и той же меркой, что подпись под репликой в ленте.
  * Цвет проверяем не по значению — какой кому достался, решает бэкенд, — а по тому, что он
  * у каждого свой и не общий текстовый.
@@ -330,11 +367,19 @@ const expectNamesStandOnBerths = async (page: Page): Promise<void> => {
             return {
                 middle: box.top + box.height / 2,
                 berth: mark.closest('[class*="shipNameLane"]')!.getBoundingClientRect().bottom,
+                axis: mark.closest('[class*="shipNameLane"]')!.getBoundingClientRect().left,
                 size: paint.fontSize,
                 color: paint.color,
             };
         })
     );
+    // Оси корпусов: дорожка корабля и дорожка его подписи — полосы во весь кадр, сдвинутые
+    // одним и тем же смещением, поэтому сверять их можно прямо по левой кромке.
+    const hulls = await page.evaluate(() =>
+        [...document.querySelectorAll('[class*="shipLane"]')].map((lane) => lane.getBoundingClientRect().left)
+    );
+    const round = (values: number[]): number[] => [...values].map(Math.round).sort((one, other) => one - other);
+    expect(round(marks.map((mark) => mark.axis)), 'подпись стоит не под своим кораблём').toEqual(round(hulls));
     expect(marks.length, 'занятые места не подписаны вовсе').toBeGreaterThan(0);
     for (const mark of marks) {
         // Не «ровно на отметке», а «в пределах хода волны»: подпись качается вместе с кораблём,
@@ -495,8 +540,12 @@ test.describe('телефон', () => {
         const view = await geometry(page);
         expectSaneScene(view);
 
-        // Месяц стоит в просвете между нижней строкой шапки и горизонтом.
-        expect(view.moon.top, 'месяц заехал под заголовок').toBeGreaterThan(view.headerBottom);
+        // Месяц стоит на небе рядом со строчками шапки, а не под ними. На телефоне он поднят
+        // как раз на высоту строки состояния — неба там мало, — и разводит их не высота,
+        // а ширина: строчка короткая и кончается задолго до лунной дорожки.
+        for (const line of view.headerText) {
+            expect(overlaps(view.moon, line), 'месяц наехал на строчку шапки').toBe(false);
+        }
         expect(view.moon.bottom, 'месяц ушёл в воду').toBeLessThan(view.horizon);
 
         // Корабли разнесены по воде перспективой, а не собраны в кучу.
