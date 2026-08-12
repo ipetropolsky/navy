@@ -1,5 +1,7 @@
 import { Page, expect, test } from '@playwright/test';
 
+import { slotShare } from '@/types/channel';
+
 import { ALBATROS, DEMO, berths, join, openChannel, openNewChannel, readState, ships } from '@tests/helpers';
 
 /**
@@ -98,13 +100,42 @@ test('рейд подсвечивает одно место и только по
         }),
     }));
 
-    // Коридоры идут отвесно: место в коридоре стоит на своей доле ширины на любой дальности.
-    for (const corridor of ['left', 'center', 'right']) {
-        const columns = new Set(
-            view.dots.filter((dot) => dot.berth.endsWith(corridor)).map((dot) => Math.round(dot.x))
-        );
-        expect(columns.size, `коридор ${corridor} разъехался по ширине`).toBe(1);
+    // Центральный коридор идёт отвесно: его места стоят на середине кадра на любой дальности.
+    const middle = view.dots.filter((dot) => dot.berth.endsWith('center'));
+    const columns = new Set(middle.map((dot) => Math.round(dot.x)));
+    expect(columns.size, 'центральный коридор разъехался по ширине').toBe(1);
+
+    // Боковые расходятся к наблюдателю, как рельсы: на ближней линии место отстоит от середины
+    // дальше, чем на дальней, и отстоит ровно на четверть шага между коридорами.
+    //
+    // Считаем это долями ширины кадра, а не пикселями: шаг коридоров и разбег заданы в долях,
+    // и на любом окне отношение между ними одно. Сам шаг из проверки не задаём — выводим его
+    // из самой дальней доставшейся линии и смотрим, сходятся ли с ним остальные: какие места
+    // окажутся свободными, решает расстановка, и линии тут каждый раз разные.
+    const spread = (corridor: string): [number, number][] =>
+        view.dots
+            .filter((dot) => dot.berth.endsWith(corridor))
+            .map((dot): [number, number] => [Number(dot.berth.split('-')[0]), Math.abs(dot.x - middle[0].x)])
+            .sort((one, other) => one[0] - other[0]);
+
+    const steps: number[] = [];
+    for (const corridor of ['left', 'right']) {
+        const places = spread(corridor);
+        expect(places.length, `коридор ${corridor} свободными местами не размечен`).toBeGreaterThan(1);
+        // Шаг коридоров: доля ширины, на которую боковое место отстояло бы от середины,
+        // не будь разбега вовсе.
+        const step = places[0][1] / frame.width / (1 + slotShare(places[0][0]) / 4);
+        steps.push(step);
+        for (const [slot, offset] of places) {
+            expect(offset / frame.width, `место ${slot}-${corridor} отошло от середины не на свою долю`).toBeCloseTo(
+                step * (1 + slotShare(slot) / 4),
+                2
+            );
+        }
+        expect(places.at(-1)![1], `коридор ${corridor} не разошёлся к наблюдателю`).toBeGreaterThan(places[0][1]);
     }
+    // И расходятся коридоры на обе стороны одинаково: рейд симметричен.
+    expect(steps[0], 'левый и правый коридоры отстоят от середины по-разному').toBeCloseTo(steps[1], 2);
 
     // Какие места подсвечены. Подсветка — не отдельное пятно, а сама точка места, выросшая
     // в круг света, поэтому и признак у неё размерный: круг втрое шире точки. Растёт он

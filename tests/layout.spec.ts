@@ -1,7 +1,7 @@
 import { Page, expect, test } from '@playwright/test';
 
 import { MOBILE_MAX_WIDTH } from '@/config/layout';
-import { SLOT_COUNT, slotDepth } from '@/types/channel';
+import { SLOT_COUNT, slotDepth, slotScale, slotShare } from '@/types/channel';
 
 import { ALBATROS, DEMO, openChannel, readState, shipNames, ships } from '@tests/helpers';
 
@@ -240,24 +240,37 @@ const expectBerthsLieOnWater = (lights: BerthShape[]): void => {
         'точки снова растут ступеньками по целому пикселю'
     ).toBe(true);
 
-    // Место помечено светом, а не чертой: ровная заливка и ореол вокруг. Обвод — хоть сплошной,
+    // Точка помечена светом, а не чертой: ровная заливка и ореол вокруг. Обвод — хоть сплошной,
     // хоть пунктирный — на воде выглядит чужим: черта на ней не держится, вода не бумага.
-    // Градиента тоже нет: пятно маленькое, и растяжка на нём читается грязноватым краем.
-    for (const light of lights) {
-        expect(light.background, 'огонёк места разрисован градиентом').toBe('none');
-        expect(light.glow, 'у света на воде нет ореола').not.toBe('none');
-        expect(light.border, 'у места опять появился обвод').toBe('0px');
+    // Градиента у точки нет: она мелкая, и растяжка на ней читается грязноватым краем, —
+    // растянут свет у выросшего круга, и мерят его отдельно (см. expectBerthLightGrows).
+    for (const dot of dots) {
+        expect(dot.background, 'точка места разрисована градиентом').toBe('none');
+        expect(dot.glow, 'у точки на воде нет ореола').not.toBe('none');
+        expect(dot.border, 'у места опять появился обвод').toBe('0px');
     }
 };
+
+/**
+ * Мерки круга подсветки: ширина на ближней линии и сплющенность на обоих концах рейда.
+ * Продублированы из стилей (@berth-mark-near, @berth-mark-flat-near, @berth-mark-flat-far) —
+ * переменные Less в проверку не дотянуть, а мерить круг в долях от чего-то ещё не выйдет:
+ * он единственное на рейде, что задано прямо в пикселях, а не долей кадра.
+ */
+const MARK_NEAR = 50;
+const MARK_FLAT_FAR = 0.3;
+const MARK_FLAT_NEAR = 0.5;
+const markFlat = (slot: number): number => MARK_FLAT_FAR + (MARK_FLAT_NEAR - MARK_FLAT_FAR) * slotShare(slot);
 
 /**
  * Подсветка места — та же точка, выросшая в круг света: второго пятна под ней нет, иначе свет
  * на выбранном месте складывался бы из двух и горел бы вдвое ярче соседних.
  *
+ * Уходит круг в даль по той же формуле, что и корпус (slotScale): он лежит на воде рядом
+ * с кораблём и обязан мельчать с ним вровень, иначе разметка и флот живут в разных перспективах.
+ *
  * Круг лежит на воде, а не стоит в кадре, и потому сплющен. Сплющен неодинаково: чем дальше
- * место, тем острее угол, под которым видна вода, и тем площе выходит круг. Сплющенность идёт
- * за той же смягчённой перспективой, что и размер точки, — это и проверяем, потому что доля
- * сама по себе зависит от того, какие линии достались свободными, а отношение долей — нет.
+ * место, тем острее угол, под которым видна вода, и тем площе выходит круг.
  *
  * И не в черту: настоящая проекция вырождала дальнюю подсветку в двухпиксельную полоску,
  * и видно её на дальних линиях попросту переставало быть.
@@ -266,18 +279,61 @@ const expectBerthLightGrows = async (page: Page): Promise<void> => {
     const dots = [...(await berthShapes(page)).filter((light) => light.width === light.height)].sort(
         (one, other) => one.below - other.below
     );
+    const slotOf = (shape: BerthShape): number => Number(shape.key.split('-')[0]);
     const far = await hoverBerth(page, dots[0].key);
     const near = await hoverBerth(page, dots.at(-1)!.key);
 
-    expect(far.width / dots[0].width, 'подсветка дальнего места не втрое больше его точки').toBeCloseTo(3, 1);
-    expect(near.width / dots.at(-1)!.width, 'подсветка ближнего места не втрое больше его точки').toBeCloseTo(3, 1);
     expect(near.width, 'ближнее место подсвечено как дальнее').toBeGreaterThan(far.width);
+    for (const [what, mark] of [
+        ['дальнего', far],
+        ['ближнего', near],
+    ] as [string, BerthShape][]) {
+        const slot = slotOf(mark);
+        expect(mark.width, `круг ${what} места уходит в даль не так, как корпус`).toBeCloseTo(
+            MARK_NEAR * slotScale(slot),
+            1
+        );
+        expect(mark.height / mark.width, `круг ${what} места сплющен не своей перспективой`).toBeCloseTo(
+            markFlat(slot),
+            2
+        );
+        // Свет неровный: гуще к середине, к краю сходит на нет. Ровная заливка читается
+        // нашлёпкой на воде — у неё виден край; а ореол этот край бы и вернул, только светящийся.
+        expect(mark.background, `свет ${what} места залит ровно, без растяжки`).toContain('radial-gradient');
+        expect(mark.glow, `у круга ${what} места остался ореол`).toBe('none');
+    }
     expect(near.height / near.width, 'подсветка ближнего места стоит в кадре, а не лежит на воде').toBeLessThan(0.8);
-    expect(
-        far.height / far.width / (near.height / near.width),
-        'подсветка сплющена не той же перспективой, что и размер точки'
-    ).toBeCloseTo(dots[0].width / dots.at(-1)!.width, 2);
     expect(far.height, 'подсветка дальнего места выродилась в черту').toBeGreaterThan(3);
+};
+
+/**
+ * Подписи занятых мест. Стоят они там же, где у свободного места горит точка, — серединой
+ * на отметке стоянки. Раньше имя висело над мачтами, и рейд читался двумя ярусами: огоньки
+ * на воде, надписи в небе, — а сводить их приходилось глазу.
+ *
+ * Написаны они позывным: цветом участника и той же меркой, что подпись под репликой в ленте.
+ * Цвет проверяем не по значению — какой кому достался, решает бэкенд, — а по тому, что он
+ * у каждого свой и не общий текстовый.
+ */
+const expectNamesStandOnBerths = async (page: Page): Promise<void> => {
+    const marks = await page.evaluate(() =>
+        [...document.querySelectorAll<HTMLElement>('[class*="shipName"]')].map((mark) => {
+            const box = mark.getBoundingClientRect();
+            const paint = getComputedStyle(mark.firstElementChild ?? mark);
+            return {
+                middle: box.top + box.height / 2,
+                berth: mark.closest('[class*="shipLane"]')!.getBoundingClientRect().bottom,
+                size: paint.fontSize,
+                color: paint.color,
+            };
+        })
+    );
+    expect(marks.length, 'занятые места не подписаны вовсе').toBeGreaterThan(0);
+    for (const mark of marks) {
+        expect(mark.middle, 'подпись висит не на отметке стоянки').toBeCloseTo(mark.berth, 0);
+        expect(mark.size, 'подпись на воде набрана не той же меркой, что позывной в ленте').toBe('14px');
+    }
+    expect(new Set(marks.map((mark) => mark.color)).size, 'подписи на воде набраны одним цветом').toBe(marks.length);
 };
 
 /** Как устроен кадр по высоте: сцена, небо и вода, px. */
@@ -338,6 +394,7 @@ test.describe('телефон', () => {
         await expectBerthLightGrows(page);
         // Занятые места подписаны все: рейд читается целиком — где свободно, а где «Вымпел».
         await expect(shipNames(page)).toHaveCount(await ships(page).count());
+        await expectNamesStandOnBerths(page);
     });
 
     test('вода закрывает своё место, месяц не под текстом, корабли по всей воде', async ({ page }) => {
@@ -401,6 +458,7 @@ test.describe('десктоп', () => {
         expectSlotsFollowDepth(await slotLines(page));
         await expectBerthLightGrows(page);
         await expect(shipNames(page)).toHaveCount(await ships(page).count());
+        await expectNamesStandOnBerths(page);
     });
 
     // Рейд однажды уже съезжал на горизонт: вода стояла в долях сцены, окно уменьшали —
