@@ -106,31 +106,20 @@ test('рейд подсвечивает одно место и только по
         expect(columns.size, `коридор ${corridor} разъехался по ширине`).toBe(1);
     }
 
-    // Какие места размечены пятнами света. Пятна и точки лежат в разных слоях — пятна под
-    // кораблями, точки над ними, — и общего родителя у них нет, поэтому пятно узнаётся
-    // по дорожке: доля ширины и глубина слота у неё те же, что у дорожки его точки.
-    // Проявляются пятна переходом, поэтому смотреть на них надо ожидающей проверкой.
+    // Какие места подсвечены. Подсветка и точка лежат в разных слоях — подсветка под кораблями,
+    // точка над ними, — и общего родителя у них нет, поэтому место подсветки написано на ней
+    // самой. Проявляется она переходом, поэтому смотреть на неё надо ожидающей проверкой.
     //
-    // Порог низкий: горят пятна с разной силой — выбранное в полную, то, что под указателем,
-    // вполовину, — а погашенное стоит на нуле. Гаснущее пройдёт порог сверху за 160мс перехода,
-    // и ожидающая проверка это переждёт.
+    // Порог низкий: горит подсветка с разной силой — у выбранного места в полную, у того, что
+    // под указателем, вполовину, — а погашенная стоит на нуле. Гаснущая пройдёт порог сверху
+    // за 160мс перехода, и ожидающая проверка это переждёт.
     const litMarks = (): Promise<string[]> =>
-        page.evaluate(() => {
-            const lane = (element: Element): string => {
-                const style = getComputedStyle(element);
-                return `${style.getPropertyValue('--slot-left')}|${style.getPropertyValue('--slot-depth')}`;
-            };
-            const berths = new Map(
-                [...document.querySelectorAll<HTMLElement>('[data-berth]')].map((dot) => [
-                    lane(dot.parentElement!),
-                    dot.dataset.berth!,
-                ])
-            );
-            return [...document.querySelectorAll('[class*="berthMark"]')]
+        page.evaluate(() =>
+            [...document.querySelectorAll<HTMLElement>('[data-mark]')]
                 .filter((mark) => parseFloat(getComputedStyle(mark).opacity) > 0.1)
-                .map((mark) => berths.get(lane(mark.parentElement!)) ?? '?')
-                .sort();
-        });
+                .map((mark) => mark.dataset.mark!)
+                .sort()
+        );
 
     const picked = (await page.locator('[data-berth][aria-pressed="true"]').getAttribute('data-berth'))!;
     await expect.poll(litMarks, 'до наведения показано не только выбранное место').toEqual([picked]);
@@ -212,6 +201,63 @@ test('качка идёт по рейду волной, а не вразнобо
             );
         }
     }
+});
+
+test('качка идёт по одним часам, и пришедший позже попадает в ту же волну', async ({ page }) => {
+    await openChannel(page, DEMO, ALBATROS);
+    // Форма корабля открывает выбор места, и точки на воде появляются много позже кораблей.
+    // Вода у них общая, значит и часы общие: начни точка свой круг с нуля — она качалась бы
+    // вразрез с корпусом, который на неё же и встанет. Тем же держится качка перезаходящего:
+    // он появляется в кадре заново и обязан попасть в ту волну, которая уже идёт по рейду.
+    await page.locator('[class*="shipMine"]').click();
+    await expect(berths(page).first()).toBeVisible();
+
+    const clocks = await page.evaluate(() => {
+        const seconds = (value: string): number => parseFloat(value) * (value.endsWith('ms') ? 0.001 : 1);
+        return [...document.querySelectorAll<HTMLElement>('[data-wave]')].map((element) => {
+            const heave = element
+                .getAnimations()
+                .find((animation) => (animation as CSSAnimation).animationName?.includes('heave'));
+            return {
+                phase: Number(element.dataset.wave),
+                at: Number(heave?.currentTime ?? 0) / 1000,
+                cycle: seconds(getComputedStyle(element).animationDuration),
+            };
+        });
+    });
+
+    expect(clocks.length, 'качающегося в кадре нет вовсе').toBeGreaterThan(3);
+    const cycle = clocks[0].cycle;
+    expect(cycle, 'у качки нет цикла, сверять не с чем').toBeGreaterThan(0);
+
+    // У каждого своя фаза — тем волна и идёт по рейду, — но часы за этой фазой одни.
+    // Отняли фазу и получили точку общих часов: она обязана сойтись у всех.
+    const origin = ({ at, phase }: { at: number; phase: number }): number => (((at - phase) % cycle) + cycle) % cycle;
+    const first = origin(clocks[0]);
+    for (const clock of clocks) {
+        const apart = Math.abs(origin(clock) - first);
+        expect(Math.min(apart, cycle - apart), 'качка идёт по своим часам у каждого').toBeLessThan(0.05);
+    }
+});
+
+test('точка под своим кораблём гаснет, пока выбрано его же место', async ({ page }) => {
+    await openChannel(page, DEMO, ALBATROS);
+    const fleet = Object.values((await readState(page)).channels)[0].members;
+    const mine = fleet.find((member) => member.memberId === ALBATROS)!;
+    const key = `${mine.place.slot}-${mine.place.corridor}`;
+
+    await page.locator('[class*="shipMine"]').click();
+    await expect(berths(page).first()).toBeVisible();
+
+    // Своё место рейд предлагает всегда — иначе не видно, где корабль стоит сейчас, — но точки
+    // под собственным килем нет: там и без неё горит подсветка выбора.
+    await expect(page.locator(`[data-berth="${key}"]`), 'под своим кораблём горит точка').toHaveCount(0);
+    await expect(page.locator(`[data-mark="${key}"]`), 'своё место осталось без подсветки').toHaveCount(1);
+
+    // Переключились на другое — своё стало обычным свободным местом, и точка на нём загорелась:
+    // иначе вернуться на своё место было бы некуда.
+    await page.locator('[data-berth][aria-pressed="false"]').last().click();
+    await expect(page.locator(`[data-berth="${key}"]`), 'на покинутое место некуда вернуться').toHaveCount(1);
 });
 
 test('ход корабля идёт с правдоподобной скоростью и зависит от корабля', async ({ browser }) => {

@@ -1,7 +1,7 @@
 import { Page, expect, test } from '@playwright/test';
 
 import { MOBILE_MAX_WIDTH } from '@/config/layout';
-import { slotDepth } from '@/types/channel';
+import { SLOT_COUNT, slotDepth } from '@/types/channel';
 
 import { ALBATROS, DEMO, openChannel, readState, shipNames, ships } from '@tests/helpers';
 
@@ -58,18 +58,20 @@ const expectSaneScene = (view: Geometry): void => {
     expect(view.farShipTop, 'дальний корабль оторвался от воды').toBeLessThan(view.scene.height);
 };
 
-/**
- * Разметка свободного места: во что перспектива превратила круг, лежащий на воде.
- * Ширина здесь своя, до всяких поворотов, а высота — та, что вышла на экране.
- */
+/** Подсветка места на рейде: круг света вокруг точки — насколько он велик и чем нарисован. */
 interface BerthShape {
+    /** Место, которому подсветка принадлежит: по нему находится и его же точка. */
+    key: string;
     width: number;
     height: number;
-    /** Насколько отметка ниже горизонта, px: от этого и зависит, как сильно её сплющило. */
+    /** Ширина точки на этом же месте: подсветка отмеряется от неё. */
+    dot: number;
+    /** Насколько место ниже горизонта, px: по этому и видно, ближнее оно или дальнее. */
     below: number;
-    perspective: number;
-    /** Чем нарисовано место. Ждём пятно света без обвода: линия в перспективе не читается. */
+    /** Чем нарисована подсветка. Ждём ровный свет с ореолом, без градиента и без обвода. */
     background: string;
+    color: string;
+    glow: string;
     border: string;
 }
 
@@ -78,17 +80,26 @@ const berthShapes = (page: Page): Promise<BerthShape[]> =>
         // Сцена — родитель слоя воды: под этот же класс попадает обёртка в шапке приложения.
         const sea = document.querySelector('[class*="sea_"]')!;
         const horizon = sea.getBoundingClientRect().top;
-        return [...document.querySelectorAll<HTMLElement>('[class*="berthMark"]')].map((mark) => {
-            // Дорожка тянется от горизонта до точки стоянки: её верх — точка схода для овала,
-            // её низ — само место. Перспектива живёт на ней же, у каждого коридора своя.
-            const lane = mark.parentElement!;
+        // Точки лежат в своём слое, поверх кораблей, и связаны с подсветкой только местом.
+        const dots = new Map(
+            [...document.querySelectorAll<HTMLElement>('[data-berth]')].map((dot) => [
+                dot.dataset.berth!,
+                dot.getBoundingClientRect().width,
+            ])
+        );
+        return [...document.querySelectorAll<HTMLElement>('[data-mark]')].map((mark) => {
             const paint = getComputedStyle(mark);
+            const box = mark.getBoundingClientRect();
             return {
-                width: mark.offsetWidth,
-                height: mark.getBoundingClientRect().height,
-                below: lane.getBoundingClientRect().bottom - horizon,
-                perspective: parseFloat(getComputedStyle(lane).perspective),
+                key: mark.dataset.mark!,
+                width: box.width,
+                height: box.height,
+                dot: dots.get(mark.dataset.mark!) ?? 0,
+                // Нижняя кромка дорожки — сама точка стоянки, на ней подсветка и стоит серединой.
+                below: mark.parentElement!.getBoundingClientRect().bottom - horizon,
                 background: paint.backgroundImage,
+                color: paint.backgroundColor,
+                glow: paint.boxShadow,
                 border: paint.borderTopWidth,
             };
         });
@@ -107,6 +118,20 @@ const slotLines = (page: Page): Promise<[number, number][]> =>
     });
 
 /**
+ * Отдельная добавка первой линии, px. Общий подъём рейда счёту по глубине не мешает — он
+ * одинаков на всех линиях и уходит сам, когда высоты сравнивают долями. А эта добавка
+ * достаётся одной ближней линии, и её из замера вычитают. Величину берём из самих стилей:
+ * она и так заведена там в одном месте, второй раз её называть незачем.
+ */
+const nearLift = (page: Page): Promise<number> =>
+    page.evaluate(
+        () =>
+            parseFloat(
+                getComputedStyle(document.querySelector('[class*="scene_"]')!).getPropertyValue('--berth-lift-near')
+            ) || 0
+    );
+
+/**
  * Всё, что стоит на рейде, стоит по глубине слота: высота под горизонтом идёт за ней, а не
  * за номером линии. Сверху на это ложится подъём рейда в пикселях, один на все линии, поэтому
  * сравниваем не сами высоты, а их доли пройденного пути от дальней линии к ближней: подъём
@@ -114,8 +139,16 @@ const slotLines = (page: Page): Promise<[number, number][]> =>
  *
  * Так проверка не зависит ни от высоты воды, ни от подъёма, ни от того, какие именно линии
  * ей достались, — и ловит то, ради чего заведена: лесенку, разъехавшуюся с перспективой.
+ *
+ * Общей эта отговорка остаётся только для общего подъёма. Ближней линии достаётся ещё своя
+ * добавка, и из долей она сама не уходит, поэтому её здесь снимают. Заодно это и проверка
+ * добавки: не будь её в стилях, лесенка после вычитания разъехалась бы.
  */
-const expectFollowsDepth = (points: [number, number][], what: string): void => {
+const expectFollowsDepth = (measured: [number, number][], what: string, lift: number): void => {
+    const points: [number, number][] = measured.map(([slot, below]) => [
+        slot,
+        slot === SLOT_COUNT - 1 ? below + lift : below,
+    ]);
     const first = points[0];
     const last = points[points.length - 1];
     const span = slotDepth(last[0]) - slotDepth(first[0]);
@@ -139,12 +172,18 @@ const expectFollowsDepth = (points: [number, number][], what: string): void => {
  * ближние разнесены заметно шире дальних и всё же не настолько, чтобы дальняя половина рейда
  * слиплась в кашу. Обе границы здесь по делу: без нижней разметка становится лесенкой
  * в таблице, без верхней — пятачком у горизонта, каким рейд однажды и был.
+ *
+ * Шаг лесенки считаем по всем десяти линиям, а не по тем, что достались свободными: какие
+ * места заняты, решает бэкенд случаем, а на пропущенных линиях шаг усредняется по промежутку
+ * и разница между ближним и дальним концом смазывается. Пиксели при этом не выпадают
+ * из проверки — их к этой же лесенке привязывает счёт выше.
  */
-const expectSlotsFollowDepth = (lines: [number, number][]): void => {
+const expectSlotsFollowDepth = (lines: [number, number][], lift: number): void => {
     expect(lines.length, 'свободных линий слишком мало, шаг не проверить').toBeGreaterThan(3);
-    expectFollowsDepth(lines, 'линия');
+    expectFollowsDepth(lines, 'линия', lift);
 
-    const gaps = lines.slice(1).map(([slot, below], index) => (below - lines[index][1]) / (slot - lines[index][0]));
+    const ladder = [...Array(SLOT_COUNT).keys()].map(slotDepth);
+    const gaps = ladder.slice(1).map((depth, index) => depth - ladder[index]);
     expect(gaps.at(-1)!, 'ближние линии не разнесены шире дальних').toBeGreaterThan(gaps[0] * 1.8);
     expect(gaps.at(-1)!, 'дальние линии сбиты в кучу у горизонта').toBeLessThan(gaps[0] * 6);
 };
@@ -166,50 +205,58 @@ const shipWaterlines = (page: Page): Promise<number[]> =>
  * и ловит то, ради чего заведена: собранный в кучу флот или лесенку, разъехавшуюся
  * с перспективой.
  */
-const expectFleetStandsByDepth = (waterlines: number[], slots: number[]): void => {
+const expectFleetStandsByDepth = (waterlines: number[], slots: number[], lift: number): void => {
     expect(waterlines.length, 'кораблей в кадре нет').toBe(slots.length);
     const order = [...slots].sort((one, other) => one - other);
     expectFollowsDepth(
         order.map((slot, index) => [slot, waterlines[index]]),
-        'корабль на линии'
+        'корабль на линии',
+        lift
     );
 };
 
 /**
- * Места на рейде должны лежать на воде, а не стоять в кадре. Проверяем это счётом, а не
- * на глаз: круг радиуса r, уложенный плашмя на расстоянии below ниже точки схода, проекция
- * с камерой на perspective сплющивает ровно до below * P * w / (P² − r²). Сойдётся — значит
- * перспектива дошла до отметки: и сцена раздаёт её, и дорожка не расплющила её обратно
- * в плоскость экрана.
+ * Подсветка места должна лежать на воде, а не стоять в кадре, и читаться на любой дальности.
+ * Перспектива у неё в размере, а не в форме: круг втрое больше точки, а точка уже идёт
+ * за дальностью — значит и подсветка дальнего места мельче ближней ровно во столько же раз.
+ * Сплющена она при этом одинаково на всех дальностях: настоящая проекция вдали вырождала
+ * подсветку в полоску, и на дальних линиях её попросту переставало быть видно.
  *
- * Числа для обеих раскладок свои: воды в кадре на телефоне больше, и камера отодвинута дальше.
+ * Точки может и не быть — под своим кораблём её не рисуют, — тогда сверять подсветку не с чем
+ * и в счёт идёт только то, чем она нарисована.
  */
 const expectBerthsLieOnWater = (marks: BerthShape[]): void => {
     expect(marks.length, 'свободных мест на рейде не показано вовсе').toBeGreaterThan(3);
-    for (const mark of marks) {
-        const radius = mark.width / 2;
-        const lying = (mark.below * mark.perspective * mark.width) / (mark.perspective ** 2 - radius ** 2);
-        expect(Math.abs(mark.height - lying), 'отметка не легла на воду перспективой').toBeLessThan(1.5);
+    const measured = marks.filter((mark) => mark.dot > 0);
+    expect(measured.length, 'точек на рейде не видно вовсе').toBeGreaterThan(3);
+
+    for (const mark of measured) {
+        expect(mark.width / mark.dot, `подсветка места ${mark.key} не втрое больше точки`).toBeCloseTo(3, 1);
+        // Сплющено — но не в черту: доля одна на все дальности, и обе границы тут по делу.
+        expect(mark.height / mark.width, `подсветка места ${mark.key} лежит не на воде`).toBeCloseTo(0.5, 1);
     }
 
-    // И перспектива именно перспектива: ближнее место раскрыто заметно шире дальнего.
-    const byDepth = [...marks].sort((one, other) => one.below - other.below);
-    const far = byDepth[0];
-    const near = byDepth[byDepth.length - 1];
-    expect(near.height / near.width, 'ближнее место сплющено как дальнее').toBeGreaterThan(
-        (far.height / far.width) * 1.5
-    );
+    // И перспектива именно перспектива: с дальностью подсветка только растёт, а ближняя
+    // заметно крупнее дальней. Порог здесь в пикселях, а не в разах: точка округляется
+    // до целого пикселя, а какие именно линии останутся свободными — дело случая, и на
+    // соседних линиях любая доля оказывается на волосок от границы.
+    const byDepth = [...measured].sort((one, other) => one.below - other.below);
+    for (const [index, mark] of byDepth.entries()) {
+        if (index > 0) {
+            expect(mark.width, `подсветка места ${mark.key} мельче, чем у места дальше`).toBeGreaterThanOrEqual(
+                byDepth[index - 1].width
+            );
+        }
+    }
+    expect(byDepth.at(-1)!.width - byDepth[0].width, 'ближнее место подсвечено как дальнее').toBeGreaterThanOrEqual(3);
 
-    // Но и не вид сверху: корабли в сцене нарисованы строго сбоку, то есть с высоты собственной
-    // ватерлинии, — а раскрытый овал говорит, что на рейд смотрят с высоты. Верхняя граница
-    // и держит эти две высоты в одной сцене.
-    expect(near.height / near.width, 'на рейд смотрят сверху, а на корабли сбоку').toBeLessThan(0.2);
-
-    // Место помечено светом, а не чертой. Обвод — хоть сплошной, хоть пунктирный — в перспективе
-    // выглядит чужим: у лежащего круга дальняя половина сжата вчетверо против ближней, и ровная
-    // по чертежу линия идёт по экрану неровно, а вдали вырождается в полоску поперёк воды.
+    // Место помечено светом, а не чертой: ровная заливка и ореол вокруг. Обвод — хоть сплошной,
+    // хоть пунктирный — на воде выглядит чужим: черта на ней не держится, вода не бумага.
+    // Градиента тоже нет: пятно маленькое, и растяжка на нём читается грязноватым краем.
     for (const mark of marks) {
-        expect(mark.background, 'место помечено не светом на воде').toContain('radial-gradient');
+        expect(mark.background, 'подсветка места разрисована градиентом').toBe('none');
+        expect(mark.color, 'место помечено не светом на воде').toMatch(/^rgba\(/);
+        expect(mark.glow, 'у света на воде нет ореола').not.toBe('none');
         expect(mark.border, 'у места опять появился обвод').toBe('0px');
     }
 };
@@ -239,7 +286,7 @@ test.describe('телефон', () => {
     test('места на рейде лежат на воде, а занятые подписаны', async ({ page }) => {
         await openChannel(page, DEMO);
         expectBerthsLieOnWater(await berthShapes(page));
-        expectSlotsFollowDepth(await slotLines(page));
+        expectSlotsFollowDepth(await slotLines(page), await nearLift(page));
         // Занятые места подписаны все: рейд читается целиком — где свободно, а где «Вымпел».
         await expect(shipNames(page)).toHaveCount(await ships(page).count());
     });
@@ -257,7 +304,8 @@ test.describe('телефон', () => {
         const fleet = Object.values((await readState(page)).channels)[0].members;
         expectFleetStandsByDepth(
             await shipWaterlines(page),
-            fleet.map((member) => member.place.slot)
+            fleet.map((member) => member.place.slot),
+            await nearLift(page)
         );
     });
 });
@@ -281,7 +329,7 @@ test.describe('десктоп', () => {
     test('места на рейде лежат на воде, а занятые подписаны', async ({ page }) => {
         await openChannel(page, DEMO);
         expectBerthsLieOnWater(await berthShapes(page));
-        expectSlotsFollowDepth(await slotLines(page));
+        expectSlotsFollowDepth(await slotLines(page), await nearLift(page));
         await expect(shipNames(page)).toHaveCount(await ships(page).count());
     });
 
