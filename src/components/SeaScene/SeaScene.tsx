@@ -742,7 +742,11 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
                         .map((other) => other.place)
                 );
                 const leavePath = pathToEdge(shown, width, leave.side, LEAVE_GUARD);
-                const enterSeconds = sailSeconds(enterPath, member.place.slot, member.shipKind, false);
+                // Заход обычно носом вперёд, но не всегда: на дальних слотах слева остров,
+                // и корабль, которому назначен курс на остров, подходит справа задним ходом.
+                // Видно это по месту: нос смотрит туда же, откуда корабль пришёл.
+                const enterAstern = member.place.facing === member.place.enterFrom;
+                const enterSeconds = sailSeconds(enterPath, member.place.slot, member.shipKind, enterAstern);
                 // Задний ход отличается только длительностью: кривая та же, а скорость ниже.
                 const leaveSeconds = sailSeconds(leavePath, member.place.slot, member.shipKind, leave.astern);
                 // Куда корабль идёт: уходящий — в свою сторону, остальные — той же, которой

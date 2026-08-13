@@ -19,6 +19,7 @@ import {
     SHIP_KIND_LABELS,
     SHIP_SPECS,
     ShipKind,
+    Side,
     isValidHullNumber,
     shipSizeShare,
 } from '@/types/channel';
@@ -46,6 +47,35 @@ interface MemberFormProps {
 }
 
 const randomHullNumber = (): string => String(Math.floor(Math.random() * 900) + 100);
+
+/**
+ * Курс, с которым открывается форма: монетка. Осмысленного умолчания тут нет — куда смотреть
+ * носом, дело вкуса, — а один и тот же курс у всех выстроил бы рейд в кильватерную колонну.
+ */
+const randomCourse = (): Side => (Math.random() < 0.5 ? 'left' : 'right');
+
+/** Порядок кнопок курса — как на компасе, каким его видит глаз: влево слева, вправо справа. */
+const COURSES: Side[] = ['left', 'right'];
+
+/** Стрелка курса. Рисуется влево, вправо разворачивается отражением: линии у них одни и те же. */
+const CourseArrow = ({ side }: { side: Side }) => (
+    <svg
+        viewBox="0 0 24 24"
+        width="22"
+        height="22"
+        aria-hidden="true"
+        style={{ scale: side === 'right' ? '-1 1' : '' }}
+    >
+        <path
+            d="M20 12H5M11 6l-6 6 6 6"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+        />
+    </svg>
+);
 
 /**
  * Размер силуэта в списке — тем же правилом, что и в сцене (shipSizeShare): самый длинный
@@ -116,6 +146,9 @@ export default function MemberForm({
     const [color, setColor] = useState(
         initial?.color ?? MEMBER_COLORS.find((option) => !takenColors.includes(option)) ?? MEMBER_COLORS[0]
     );
+    // Курс живёт в форме, а не снаружи: от него, в отличие от силуэта, не зависит ничего,
+    // кроме самого корабля, — свободных мест на рейде он не меняет.
+    const [facing, setFacing] = useState<Side>(initial?.facing ?? randomCourse);
     const [busy, setBusy] = useState(false);
     // Отклик выбранного корабля: ткнули в кнопку — он мигнул лампой ровно так же, как чужой
     // корабль в кадре на тычок в аватарку. Держится он в состоянии, а не собирается на каждый
@@ -137,7 +170,7 @@ export default function MemberForm({
         }
         setBusy(true);
         try {
-            await onSubmit({ name: name.trim(), hullNumber, shipKind, color });
+            await onSubmit({ name: name.trim(), hullNumber, shipKind, color, facing });
         } catch (failure) {
             // Занятый позывной или полный канал — это ответ бэкенда, а не поломка. Снекбаром,
             // чтобы отказ не раздвигал форму: кнопка должна остаться там, куда целились.
@@ -211,6 +244,27 @@ export default function MemberForm({
                 </div>
             </Field>
 
+            {/* Курс идёт перед силуэтами, потому что силуэты им и развёрнуты: сперва решаем,
+                куда корабль смотрит, и дальше выбираем из кораблей, стоящих на этом курсе.
+                Обратный порядок заставлял бы выбирать силуэт, а потом смотреть, как весь
+                список переворачивается. */}
+            <Field label="Курс" group>
+                <div className={styles.courses}>
+                    {COURSES.map((side) => (
+                        <button
+                            key={side}
+                            type="button"
+                            className={side === facing ? styles.courseActive : styles.course}
+                            aria-label={side === 'left' ? 'Курс влево' : 'Курс вправо'}
+                            aria-pressed={side === facing}
+                            onClick={() => setFacing(side)}
+                        >
+                            <CourseArrow side={side} />
+                        </button>
+                    ))}
+                </div>
+            </Field>
+
             <Field label="Корабль" group>
                 {/* Корабли в столбик: они вытянутые, в ряд превратились бы в нечитаемые полоски.
                     Зато в столбик каждому достаётся вся ширина панели — силуэт видно как следует. */}
@@ -242,7 +296,7 @@ export default function MemberForm({
                                         kind={kind}
                                         name={SHIP_KIND_LABELS[kind]}
                                         hullNumber=""
-                                        facing="right"
+                                        facing={facing}
                                         mode={kind === shipKind ? 'underway' : 'anchored'}
                                         morseFeed={kind === shipKind ? reply : null}
                                     />

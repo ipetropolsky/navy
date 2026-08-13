@@ -56,6 +56,18 @@ export default function App() {
     // ссылку каждый раз и заставлял пересчитывать всё, что от него зависит.
     const members = useMemo(() => channel?.members ?? [], [channel]);
     const me = members.find((member) => member.memberId === myId) ?? null;
+    // Чем форма заполняется при переоснащении. Собираем заявку руками, а не отдаём участника
+    // целиком: курс у него лежит в месте на рейде, и без этой сборки форма открывалась бы
+    // со случайным курсом у корабля, который уже на что-то смотрит.
+    const myDraft: MemberDraft | undefined = me
+        ? {
+              name: me.name,
+              hullNumber: me.hullNumber,
+              shipKind: me.shipKind,
+              color: me.color,
+              facing: me.place.facing,
+          }
+        : undefined;
     const inChat = Boolean(channel && me && !editing);
     // Место на рейде выбирают в форме корабля и только в ней: это её поле, просто вынесенное
     // на воду. На главной канала ещё нет, вставать некуда и не в чем — там рейд пустой
@@ -292,7 +304,7 @@ export default function App() {
                         mode={editing ? 'edit' : 'join'}
                         crew={members}
                         myId={myId}
-                        initial={me ?? undefined}
+                        initial={myDraft}
                         shipKind={shipKind}
                         onShipKind={setPickedKind}
                         onSubmit={handleMemberSubmit}

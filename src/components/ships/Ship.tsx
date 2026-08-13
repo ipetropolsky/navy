@@ -74,7 +74,9 @@ export default function Ship({
     const aftGlow = flip ? styles.glowLeft : styles.glowRight;
 
     return (
-        <div className={styles.ship}>
+        // data-facing — по той же причине, что и data-light ниже: курс виден только по тому,
+        // в какую сторону отражена картинка, и со стороны его иначе не спросить.
+        <div className={styles.ship} data-facing={facing}>
             <img
                 className={flip ? styles.spriteFlipped : styles.sprite}
                 style={haze}

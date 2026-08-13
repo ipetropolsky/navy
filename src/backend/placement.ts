@@ -339,7 +339,9 @@ const berthAt = (slot: number, corridor: Corridor): Berth => ({
 });
 
 /**
- * С какой стороны корабль заходит на рейд.
+ * С какой стороны корабль заходит на рейд, когда курс ему не назначили. Тем, кто заходит
+ * из формы, курс назначен всегда, и сторона считается от него (см. placeAt); сюда попадает
+ * только состав, заведённый без человека, — демо-канал.
  *
  * На дальних слотах выбора нет: с той стороны остров, и корабль прошёл бы прямо по нему.
  * А там, где выбор есть, он не честная монетка, а противовес: чем больше кораблей уже пришло
@@ -362,13 +364,22 @@ const enterSide = (slot: number, taken: Standing[]): Side => {
 };
 
 /**
- * Место с назначенной стороной захода: откуда корабль придёт и куда будет смотреть носом.
+ * Место со стороной захода и курсом: откуда корабль придёт и куда будет смотреть носом.
  * Само место к этому моменту уже выбрано — человеком в форме или расстановкой.
+ *
+ * Ведёт тут курс, а не сторона: его человек выбирает в форме, и корабль обязан встать
+ * именно так. Заход из курса и следует — заходят носом вперёд, то есть с противоположного
+ * борта. Курса не назвали (демо-состав) — тогда наоборот, курс достаётся от стороны захода
+ * и её противовеса.
+ *
+ * Дальние слоты — исключение: слева остров, и подойти оттуда нельзя ни при каком курсе.
+ * Корабль с курсом на остров подходит справа задним ходом — это дороже и медленнее, но это
+ * единственный способ выполнить приказ, не пройдя по суше.
  */
-const placeAt = (berth: Berth, taken: Standing[]): ShipPlacement => {
-    const enterFrom = enterSide(berth.slot, taken);
-    // Пришёл справа — значит идёт влево, носом вперёд.
-    return { ...berth, facing: enterFrom === 'right' ? 'left' : 'right', enterFrom };
+const placeAt = (berth: Berth, taken: Standing[], course?: Side): ShipPlacement => {
+    const facing = course ?? otherSide(enterSide(berth.slot, taken));
+    const enterFrom = berth.slot < ISLAND_FREE_SLOT ? otherSide(ISLAND_SIDE) : otherSide(facing);
+    return { ...berth, facing, enterFrom };
 };
 
 /**
@@ -518,7 +529,7 @@ export const suggestBerth = (kind: ShipKind, taken: Standing[]): Berth | null =>
  * Возвращает null, если свободных мест нет: при пяти участниках на десять слотов это
  * невозможно, но проверка дешевле, чем разбирательство, если однажды станет возможно.
  */
-export const placeShip = (kind: ShipKind, taken: Standing[], wanted?: Berth): ShipPlacement | null => {
+export const placeShip = (kind: ShipKind, taken: Standing[], wanted?: Berth, course?: Side): ShipPlacement | null => {
     const berth = wanted && isBerthFree(wanted, kind, taken) ? wanted : suggestBerth(kind, taken);
-    return berth && placeAt(berth, taken);
+    return berth && placeAt(berth, taken, course);
 };

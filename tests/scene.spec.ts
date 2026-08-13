@@ -97,6 +97,51 @@ test('место на рейде выбирается щелчком по вод
     expect(`${member.place.slot}-${member.place.corridor}`).toBe(chosen);
 });
 
+/**
+ * Курс выбирает человек, и выбор этот сквозной: силуэты в форме разворачиваются сразу,
+ * корабль встаёт на рейде тем же носом, а заходит с противоположного борта — носом вперёд.
+ * Раньше курс доставался кораблю от стороны захода, которую разыгрывал бэкенд, и повлиять
+ * на него было нечем.
+ */
+test('курс выбирается в форме, и корабль встаёт на рейде именно так', async ({ page }) => {
+    await openNewChannel(page, 'kurs');
+
+    // Курс уже какой-то выбран — форма открывается с монеткой, а не с пустым местом.
+    await expect(page.locator('[aria-pressed="true"][aria-label^="Курс"]')).toHaveCount(1);
+
+    // Ставим курс вправо и смотрим на список кораблей: силуэты в кнопках стоят на этом курсе.
+    await page.getByLabel('Курс вправо').click();
+    const inForm = page.locator('[class*="kindShip"] [data-facing]');
+    expect(await inForm.count(), 'силуэтов в форме не видно').toBeGreaterThan(1);
+    await expect(inForm.first()).toHaveAttribute('data-facing', 'right');
+    await expect(inForm.last()).toHaveAttribute('data-facing', 'right');
+
+    // Место берём ближнее: на дальних слева остров, и оттуда зайти нельзя ни при каком курсе.
+    await page.locator('[data-berth="9-center"]').click();
+    await join(page, 'Гроза', '777');
+
+    await expect(ships(page).locator('[data-facing]')).toHaveAttribute('data-facing', 'right');
+    const afterJoin = await readState(page);
+    const [joined] = Object.values(afterJoin.channels).find((one) => one.channel.slug === 'kurs')!.members;
+    expect(joined.place.facing, 'корабль встал не тем курсом, который выбрали').toBe('right');
+    expect(joined.place.enterFrom, 'заход должен быть с противоположного борта, носом вперёд').toBe('left');
+
+    // Переоснащение открывается с тем курсом, которым корабль стоит, — а не с новой монеткой.
+    await page.getByLabel('Корабли на связи').click();
+    await page.getByRole('button', { name: 'Настроить корабль' }).click();
+    await expect(page.getByLabel('Курс вправо')).toHaveAttribute('aria-pressed', 'true');
+
+    // И курс можно переменить, оставшись на месте: корабль разворачивается там, где стоит.
+    await page.getByLabel('Курс влево').click();
+    await page.locator('button[type=submit]').click();
+    await expect(ships(page).locator('[data-facing]')).toHaveAttribute('data-facing', 'left');
+
+    const afterRefit = await readState(page);
+    const [turned] = Object.values(afterRefit.channels).find((one) => one.channel.slug === 'kurs')!.members;
+    expect(turned.place.facing, 'корабль не развернулся').toBe('left');
+    expect(`${turned.place.slot}-${turned.place.corridor}`, 'разворот сдвинул корабль с места').toBe('9-center');
+});
+
 test('на одной линии помещаются двое, и борта не налезают друг на друга', async ({ page }) => {
     // Двое на одной дальности были в правилах и раньше, но сходились едва ли не случайно:
     // вместимость линии считалась числом, а не размером кораблей. Теперь это решает геометрия,

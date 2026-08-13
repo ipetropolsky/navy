@@ -287,7 +287,7 @@ export function createLocalBackend(): ChannelBackend {
             // Место на рейде назначаем здесь, а не в сцене: тогда оно уедет вместе с участником
             // во все вкладки, и корабль у всех окажется в одном и том же месте. Выбранное
             // в форме место — пожелание: занято, значит корабль встанет на свободное.
-            const place = placeShip(draft.shipKind, snapshot.members, draft.berth);
+            const place = placeShip(draft.shipKind, snapshot.members, draft.berth, draft.facing);
             if (!place) {
                 throw new ChannelError('channel-full', 'На рейде не осталось свободного места');
             }
@@ -345,7 +345,12 @@ export function createLocalBackend(): ChannelBackend {
                 const wanted = draft.berth ?? member.place;
                 const stays = isSameBerth(member.place, wanted) && isBerthFree(member.place, draft.shipKind, others);
                 if (!stays) {
-                    member.place = placeShip(draft.shipKind, others, wanted) ?? member.place;
+                    member.place = placeShip(draft.shipKind, others, wanted, draft.facing) ?? member.place;
+                } else if (draft.facing && draft.facing !== member.place.facing) {
+                    // Место оставили, а курс сменили: корабль разворачивается там, где стоит,
+                    // никуда не идя. Сторону захода при этом не трогаем — она про то, откуда
+                    // он сюда пришёл, и разворот на якоре её не отменяет.
+                    member.place = { ...member.place, facing: draft.facing };
                 }
                 return { ...member };
             });
