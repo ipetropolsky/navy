@@ -150,6 +150,49 @@ test('на одной линии помещаются двое, и борта н
     }
 });
 
+test('свободные места на рейде зависят от выбранного корабля', async ({ page }) => {
+    // Вместимость линии считается размером кораблей, а значит, свободные места у катера
+    // и у корабля в полсотни метров разные. Знать об этом должна не форма, а сцена: силуэт
+    // выбирают в форме, а огоньки на воде обязаны тут же пересчитаться.
+    //
+    // Рейд для этого строим сами, а не берём демо-канал: там расстановка каждый раз своя,
+    // и попадётся ли в ней линия, где катеру место есть, а кораблю нет, — как повезёт.
+    // Здесь же ровно один сосед и ровно на той дальности, где разница и должна быть видна.
+    await openNewChannel(page, 'razmer');
+    await page.getByText('Сторожевой катер', { exact: true }).click();
+    await page.locator('[data-berth="5-center"]').click();
+    await join(page, 'Малыш', '111');
+
+    // Возвращаемся тем, кого в канале нет: форма открывается заново, а катер остаётся стоять.
+    await openChannel(page, 'razmer', 'gost');
+
+    const offered = async (ship: string): Promise<string[]> => {
+        await page.getByText(ship, { exact: true }).click();
+        return berths(page).evaluateAll((dots) => dots.map((dot) => (dot as HTMLElement).dataset.berth ?? '').sort());
+    };
+
+    const forCutter = await offered('Сторожевой катер');
+    const forShip = await offered('Малый ракетный корабль');
+
+    // Рядом с катером на пятой линии второму катеру место есть — в обоих соседних коридорах.
+    expect(forCutter, 'катеру не предложили место борт о борт').toContain('5-left');
+    expect(forCutter, 'катеру не предложили место борт о борт').toContain('5-right');
+
+    // А кораблю в полсотни метров — нет: между серединами соседних коридоров треть кадра,
+    // и его корпус этой трети не оставляет. Линия занята им целиком.
+    expect(
+        forShip.filter((berth) => berth.startsWith('5-')),
+        'крупному кораблю предложили занятую линию'
+    ).toHaveLength(0);
+
+    // И это не единственная потеря, но и не произвол: всё, что осталось кораблю, есть и у катера.
+    expect(forShip.length, 'крупному кораблю предложили не меньше мест, чем катеру').toBeLessThan(forCutter.length);
+    expect(
+        forShip.filter((berth) => !forCutter.includes(berth)),
+        'кораблю предложили место, которого нет у катера'
+    ).toHaveLength(0);
+});
+
 test('рейд подсвечивает одно место и только под указателем на воде', async ({ page }) => {
     await openNewChannel(page, 'podskazka');
     const scene = page.locator('[class*="scene_"]').first();

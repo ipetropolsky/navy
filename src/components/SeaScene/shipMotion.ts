@@ -263,29 +263,49 @@ export const crossesIsland = (slot: number, side: 'left' | 'right'): boolean =>
  */
 const NEIGHBOUR_REACH = 1;
 
-/** Стоит ли на пути чужой корабль — на соседней дальности и с той стороны, куда идём. */
-const shipInTheWay = (place: ShipPlacement, others: ShipPlacement[], side: 'left' | 'right'): boolean =>
-    others.some(
+/** Кто стоит на пути — на своей или соседней дальности и с той стороны, куда идём. */
+const shipsInTheWay = (place: ShipPlacement, others: ShipPlacement[], side: 'left' | 'right'): ShipPlacement[] =>
+    others.filter(
         (other) =>
             Math.abs(other.slot - place.slot) <= NEIGHBOUR_REACH &&
             (side === 'left' ? other.left < place.left : other.left > place.left)
     );
 
 /**
- * В какую сторону корабль уходит из кадра и задним ли ходом. Обычно — вперёд, куда смотрит
- * нос: разворачиваться посреди рейда незачем. Но если впереди остров или корабль на соседней
- * дальности, уходит задним ходом, кормой вперёд — медленнее, зато не по суше и не в чужой борт.
+ * Чем плох уход в эту сторону. Не «да/нет», а лесенка, потому что выбирать иногда приходится
+ * из плохого: чисто, мимо соседа по соседней линии, сквозь стоящего на своей, по берегу.
  *
- * Заперт с обеих сторон — пойдёт мимо соседа, но не на берег: с соседом разойтись можно,
- * с островом нет.
+ * Порядок в ней не случаен. Сосед через линию отличается по глубине и размеру — корабль
+ * проходит перед ним или за ним, и в кадре это видно именно так. Сосед по своей линии стоит
+ * на той же воде и того же размера: пройти его насквозь ничем не прикроешь. Ну а берег
+ * не обойти вовсе.
+ */
+const courseCost = (place: ShipPlacement, others: ShipPlacement[], side: 'left' | 'right'): number => {
+    if (crossesIsland(place.slot, side)) {
+        return 3;
+    }
+    const ships = shipsInTheWay(place, others, side);
+    if (ships.some((other) => other.slot === place.slot)) {
+        return 2;
+    }
+    return ships.length > 0 ? 1 : 0;
+};
+
+/**
+ * В какую сторону корабль уходит из кадра и задним ли ходом. Обычно — вперёд, куда смотрит
+ * нос: разворачиваться посреди рейда незачем. Но если впереди остров или чужой корабль,
+ * уходит задним ходом, кормой вперёд — медленнее, зато не по суше и не в чужой борт.
+ *
+ * Заперт с обеих сторон — идёт туда, где помеха меньше, и при равных помехах остаётся
+ * при своём курсе: разворот сам по себе ничего не исправляет. Так рейд из двоих на линии
+ * и соседа через линию разбирается в пользу соседа: пройти перед ним — обычное дело,
+ * а сквозь стоящего борт о борт — уже нет.
  */
 export const leaveCourse = (
     place: ShipPlacement,
     others: ShipPlacement[]
 ): { side: 'left' | 'right'; astern: boolean } => {
     const back = otherSide(place.facing);
-    const isClear = (side: 'left' | 'right'): boolean =>
-        !crossesIsland(place.slot, side) && !shipInTheWay(place, others, side);
-    const goBack = !isClear(place.facing) && (isClear(back) || crossesIsland(place.slot, place.facing));
+    const goBack = courseCost(place, others, back) < courseCost(place, others, place.facing);
     return { side: goBack ? back : place.facing, astern: goBack };
 };
