@@ -738,3 +738,38 @@ test.describe('кнопки у нижней кромки', () => {
         ).not.toBeInViewport();
     });
 });
+
+/**
+ * Где на картинке острова лежит его ватерлиния — доля высоты. Ось отражения стоит на 168-й
+ * строке из 325, ей же задан и сдвиг острова в стилях. Число продублировано сюда нарочно:
+ * проверка должна знать, что считать берегом, сама по себе — возьми она долю из стилей,
+ * ошибка именно в этой доле осталась бы незамеченной, а с неё всё и началось.
+ */
+const ISLAND_WATERLINE = 168 / 325;
+
+/** На сколько пикселей ниже горизонта лежит берег острова. */
+const islandBelowHorizon = (page: Page): Promise<number> =>
+    page.evaluate((waterline) => {
+        const island = document.querySelector('img[class*="island"]')!.getBoundingClientRect();
+        const sky = document.querySelector('[class*="sky"]')!.getBoundingClientRect();
+        return island.top + waterline * island.height - sky.bottom;
+    }, ISLAND_WATERLINE);
+
+/**
+ * Берег острова стоит на своей дальности и никуда с неё не сходит. Отступ ему задан от горизонта
+ * в пикселях, а сдвиг картинки — долей её собственной высоты, и высота эта идёт за шириной сцены.
+ * Пока доля верна, одно гасит другое; наврали в доле — и остаток растёт вместе с экраном.
+ * Так и было: 19px под горизонтом на десктопе против 22px на телефоне при одном заданном числе.
+ */
+test('берег острова стоит на горизонте, а не отъезжает от него вместе с шириной экрана', async ({ page }) => {
+    await openChannel(page, DEMO);
+    const wide = await islandBelowHorizon(page);
+    expect(wide, 'берег вылез на небо').toBeGreaterThan(0);
+    expect(wide, 'берег уехал от горизонта на середину рейда').toBeLessThan(30);
+
+    await page.setViewportSize({ width: MOBILE_MAX_WIDTH - 90, height: 844 });
+    expect(await islandBelowHorizon(page), 'на телефоне берег встал не там, где на десктопе').toBeCloseTo(wide, 0);
+
+    await page.setViewportSize({ width: 330, height: 700 });
+    expect(await islandBelowHorizon(page), 'в узком кадре берег отошёл от горизонта').toBeCloseTo(wide, 0);
+});
