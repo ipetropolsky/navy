@@ -1,7 +1,7 @@
 import { Page, expect, test } from '@playwright/test';
 
 import { EDGE_MARGIN } from '@/backend/placement';
-import { MOBILE_MAX_WIDTH, PINNED_ACTIONS_MIN_HEIGHT, SHADE_PEEK_HEIGHT } from '@/config/layout';
+import { MOBILE_MAX_WIDTH, PINNED_ACTIONS_MIN_HEIGHT, SHADE_PEEK_HEIGHT, SHADE_TOP_GAP } from '@/config/layout';
 import { SLOT_COUNT, slotDepth, slotShare } from '@/types/channel';
 
 import {
@@ -935,9 +935,108 @@ test('на форме настройки корабля разворот раз�
         .toBeGreaterThan(tight * 1.5);
     // Мест ровно столько же: развернулась картинка, а не расклад рейда.
     await expect(marks, 'вместе с кадром изменился и расклад мест').toHaveCount(count);
-    // Форма осталась под сценой и работает: в неё можно домотать и выбрать место.
+    // Форма никуда не делась и работает: она в шторке под кадром, и место в ней выбирается.
     await marks.first().click();
-    await expect(page.getByRole('button', { name: 'Готово' }), 'форма под сценой потерялась').toBeVisible();
+    await expect(page.getByRole('button', { name: 'Готово' }), 'форма в шторке потерялась').toBeVisible();
+});
+
+/**
+ * Шторка полноэкранного вида. Три ступени — щёлка, половина, верх, — и обещаны они так:
+ * «дёргаем — выезжает до половины, ещё раз двигаем — до верха, можно сразу дотянуть до верха
+ * одним движением».
+ *
+ * Отдельного кода под каждое из этих движений нет: отпущенная шторка встаёт на ближайшую
+ * ступень, и короткий рывок оказывается рядом с той, откуда тянули, а длинный — рядом с верхом.
+ * Проверять поэтому надо не «сработал ли шаг», а именно расстояния: рывок на четверть пути
+ * возвращает назад, рывок за середину переставляет на соседнюю, длинный доводит до верха.
+ * Арифметика ступеней покрыта юнитами (`shadeStops.test.ts`); здесь — что палец и нажатие
+ * доходят до неё живыми.
+ */
+const SHADE_HANDLE = /шторку/;
+
+const shadeHeight = async (page: Page): Promise<number> => {
+    const box = await page.getByRole('region').first().boundingBox();
+    return Math.round(box!.height);
+};
+
+/** Ступени в пикселях для окна такой высоты — те же числа, что считает `shadeStops`. */
+const shadeStops = (height: number) => ({
+    peek: SHADE_PEEK_HEIGHT,
+    half: Math.round(height / 2),
+    full: height - SHADE_TOP_GAP,
+});
+
+/** Потянуть за ручку вверх на `by` пикселей и отпустить. */
+const dragShade = async (page: Page, by: number): Promise<void> => {
+    const box = (await page.getByRole('button', { name: SHADE_HANDLE }).boundingBox())!;
+    const x = box.x + box.width / 2;
+    const y = box.y + box.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    // Шагами, а не прыжком: перетаскивание считается по pointermove, и одного события
+    // хватило бы шторке, но не браузеру — он на прыжок курсора отвечает не всегда.
+    await page.mouse.move(x, y - by, { steps: 12 });
+    await page.mouse.up();
+};
+
+const expectShade = (page: Page, height: number, message: string) =>
+    expect.poll(() => shadeHeight(page), { message }).toBe(height);
+
+test('шторка ходит по ступеням от нажатия на ручку', async ({ page }) => {
+    await openChannel(page, DEMO, ALBATROS);
+    await page.getByRole('button', { name: 'Развернуть сцену' }).click();
+    const stops = shadeStops(page.viewportSize()!.height);
+
+    await expectShade(page, stops.peek, 'развёрнутая сцена открылась не со щёлкой');
+    await page.getByRole('button', { name: SHADE_HANDLE }).click();
+    await expectShade(page, stops.half, 'с первого нажатия шторка не дошла до половины');
+    await page.getByRole('button', { name: SHADE_HANDLE }).click();
+    await expectShade(page, stops.full, 'со второго нажатия шторка не дошла до верха');
+    await page.getByRole('button', { name: SHADE_HANDLE }).click();
+    await expectShade(page, stops.peek, 'с верхней ступени шторка не вернулась в щёлку');
+});
+
+test('шторку можно дотянуть до верха одним движением, а коротким рывком — не сдвинуть', async ({ page }) => {
+    await openChannel(page, DEMO, ALBATROS);
+    await page.getByRole('button', { name: 'Развернуть сцену' }).click();
+    const stops = shadeStops(page.viewportSize()!.height);
+    await expectShade(page, stops.peek, 'развёрнутая сцена открылась не со щёлкой');
+
+    // Четверть пути до половины: ближе к тому месту, откуда тянули.
+    await dragShade(page, Math.round((stops.half - stops.peek) / 4));
+    await expectShade(page, stops.peek, 'короткий рывок сдвинул шторку со ступени');
+
+    // За середину промежутка — на соседнюю ступень.
+    await dragShade(page, Math.round((stops.half - stops.peek) * 0.75));
+    await expectShade(page, stops.half, 'рывок за середину не переставил шторку на половину');
+
+    // И одним длинным движением — сразу до верха, минуя половину.
+    await expectShade(page, stops.half, 'шторка не успокоилась на половине');
+    await dragShade(page, stops.full - stops.half);
+    await expectShade(page, stops.full, 'длинное движение не довело шторку до верха');
+});
+
+/**
+ * Клавиатура. Определить её нечем — браузер о ней не сообщает, — поэтому ориентир один:
+ * фокус в текстовом поле. Пока он там, считаем, что клавиатура выехала и съела пол-экрана,
+ * и держим шторку раскрытой до верха; ушёл фокус — возвращаем ту ступень, на которой шторку
+ * оставил человек, а не ту, с которой начинали.
+ */
+test('фокус в поле поднимает шторку до верха, а уход из поля возвращает её как было', async ({ page }) => {
+    await openChannel(page, DEMO, ALBATROS);
+    await page.getByRole('button', { name: 'Развернуть сцену' }).click();
+    const stops = shadeStops(page.viewportSize()!.height);
+
+    // Человек выставил половину — это и есть то, что придётся вернуть.
+    await page.getByRole('button', { name: SHADE_HANDLE }).click();
+    await expectShade(page, stops.half, 'шторка не встала на половину');
+
+    const input = page.getByPlaceholder('Сообщение');
+    await input.click();
+    await expectShade(page, stops.full, 'с фокусом в поле шторка не раскрылась до верха');
+
+    await input.blur();
+    await expectShade(page, stops.half, 'без фокуса шторка не вернулась на половину');
 });
 
 /**

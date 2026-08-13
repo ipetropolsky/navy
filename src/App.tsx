@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { FocusEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { ChannelDraft, ChannelError, MemberDraft, backend, freeBerths, suggestBerth } from '@/backend';
 import { DEMO_CHANNEL_SLUG } from '@/backend/seed';
@@ -20,6 +20,7 @@ import { useChannel } from '@/hooks/useChannel';
 import { channelLink, useRoute } from '@/routing';
 import { Berth, MAX_MESSAGE_LENGTH, Message, MorseFeed, ShipKind, isSameBerth } from '@/types/channel';
 import { copyText } from '@/utils/clipboard';
+import { isTextField } from '@/utils/keyboard';
 
 import styles from './App.module.less';
 
@@ -61,12 +62,53 @@ export default function App() {
     // На какой ступени стоит шторка полноэкранного вида. Держим здесь, а не в самой шторке:
     // её положение отнимает и возвращает клавиатура (см. ниже), а отнять можно только чужое.
     const [shadeStop, setShadeStop] = useState<ShadeStop>('peek');
+    // На какой ступени шторка стояла до того, как в поле ввода встал фокус. Пока тут не null,
+    // считается, что шторку подняла клавиатура, а не человек, и поднятое надо будет вернуть.
+    const shadeBeforeKeyboard = useRef<ShadeStop | null>(null);
 
     // Разворачиваем — шторка опускается в щёлку: человек нажал кнопку ради кадра, и открывать
     // ему поверх кадра ленту во весь экран значит не показать ничего.
     const toggleFullscreen = (): void => {
         setFullscreen((on) => !on);
         setShadeStop('peek');
+        shadeBeforeKeyboard.current = null;
+    };
+
+    // Шторку двигает человек — значит, это и есть то положение, которое надо потом вернуть.
+    // Долг перед клавиатурой на этом списывается: вернуть прежнее теперь означало бы отменить
+    // то, что он только что сделал сам.
+    const handleShadeStop = (next: ShadeStop): void => {
+        shadeBeforeKeyboard.current = null;
+        setShadeStop(next);
+    };
+
+    // Клавиатуру браузер не показывает никак, поэтому ориентир — фокус в текстовом поле
+    // (см. utils/keyboard). Встал фокус — поднимаем шторку до верха: клавиатура съедает
+    // пол-экрана, и поле ввода в шторке на половине оказалось бы под ней.
+    //
+    // Слушаем не сами поля, а всё приложение: полей в нём с десяток — позывной, номер, поле
+    // сообщения, — и вешать на каждое по паре обработчиков значит однажды завести одиннадцатое
+    // и забыть. React отдаёт focusin/focusout всплывающими, так что хватает одной пары наверху.
+    const handleFocusIn = (event: FocusEvent<HTMLDivElement>): void => {
+        if (!fullscreen || !isTextField(event.target)) {
+            return;
+        }
+        // Прыжок из поля в поле — не новый заход клавиатуры: она и не убиралась. Прежнее
+        // положение при этом сохраняем то, самое первое.
+        if (shadeBeforeKeyboard.current === null) {
+            shadeBeforeKeyboard.current = shadeStop;
+        }
+        setShadeStop('full');
+    };
+
+    const handleFocusOut = (event: FocusEvent<HTMLDivElement>): void => {
+        const before = shadeBeforeKeyboard.current;
+        // relatedTarget — куда фокус ушёл. Ушёл в другое поле — клавиатура остаётся на месте.
+        if (before === null || isTextField(event.relatedTarget)) {
+            return;
+        }
+        shadeBeforeKeyboard.current = null;
+        setShadeStop(before);
     };
 
     // Пустой список — тоже список, но новый на каждой отрисовке: без useMemo он менял бы
@@ -324,7 +366,11 @@ export default function App() {
     };
 
     return (
-        <div className={[styles.app, fullscreen ? styles.appFull : ''].filter(Boolean).join(' ')}>
+        <div
+            className={[styles.app, fullscreen ? styles.appFull : ''].filter(Boolean).join(' ')}
+            onFocus={handleFocusIn}
+            onBlur={handleFocusOut}
+        >
             <header className={styles.header}>
                 <div className={styles.scene}>
                     <SeaScene
@@ -413,7 +459,7 @@ export default function App() {
                 </div>
             </header>
             {fullscreen ? (
-                <Shade stop={shadeStop} onStop={setShadeStop} label={shadeLabel()}>
+                <Shade stop={shadeStop} onStop={handleShadeStop} label={shadeLabel()}>
                     <div className={styles.shadePanel}>{shadeIsMembers ? membersList : panelContent}</div>
                 </Shade>
             ) : (
