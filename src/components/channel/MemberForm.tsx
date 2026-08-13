@@ -182,7 +182,7 @@ export default function MemberForm({
 
     return (
         <Panel
-            title={mode === 'join' ? 'Встать в строй' : 'Переоснастить корабль'}
+            title={mode === 'join' ? 'Встать в строй' : 'Настроить корабль'}
             // Состав здесь не перечисляем: пока форма открыта, занятые места на рейде подписаны
             // позывными, и то же самое второй раз строкой над формой — лишнее.
             onSubmit={handleSubmit}
@@ -204,6 +204,7 @@ export default function MemberForm({
             <Field label="Позывной">
                 <Input
                     value={name}
+                    half
                     maxLength={20}
                     placeholder="Гром"
                     autoComplete="off"

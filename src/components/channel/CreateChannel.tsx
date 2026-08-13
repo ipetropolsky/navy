@@ -110,6 +110,7 @@ export default function CreateChannel({ onCreate, demoHref, onOpenDemo }: Create
             <Field label="Название">
                 <Input
                     value={title}
+                    half
                     maxLength={40}
                     placeholder="Эскадра «Полночь»"
                     autoComplete="off"
@@ -125,6 +126,7 @@ export default function CreateChannel({ onCreate, demoHref, onOpenDemo }: Create
                 <Input
                     value={slug}
                     invalid={Boolean(slug) && !slugOk}
+                    half
                     maxLength={SLUG_MAX_LENGTH}
                     placeholder="eskadra-polnoch"
                     autoComplete="off"

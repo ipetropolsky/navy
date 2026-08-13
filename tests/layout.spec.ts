@@ -523,11 +523,22 @@ test.describe('телефон', () => {
     // Ширина заведомо мобильная: точка перехода одна на стили и на код, и берём мы её оттуда же.
     test.use({ viewport: { width: MOBILE_MAX_WIDTH - 90, height: 844 } });
 
-    test('форма занимает ширину целиком и без скруглений', async ({ page }) => {
+    test('форма занимает ширину целиком и без скруглений, и поле на одно слово тоже', async ({ page }) => {
         await openChannel(page, DEMO);
         const panel = await panelBox(page);
         expect(panel.width, 'форма не дотянулась до краёв').toBe(panel.parentWidth);
         expect(panel.radius, 'на всю ширину скругления не нужны').toBe(0);
+
+        // Мерка «половина, но не уже 350px» на телефоне сходится к ширине формы: отдельного
+        // правила для узкого экрана нет, и проверяем мы как раз то, что оно не понадобилось.
+        const field = await page.getByPlaceholder('Гром').evaluate((input) => {
+            const form = input.closest('[class*="card"]')!;
+            return {
+                width: input.getBoundingClientRect().width,
+                inner: form.clientWidth - 2 * parseFloat(getComputedStyle(form).paddingLeft),
+            };
+        });
+        expect(field.width, 'поле позывного не заняло ширину формы').toBeCloseTo(field.inner, 0);
     });
 
     test('кнопки берут всю ширину: в строку, пока подписи влезают, и столбиком, когда нет', async ({ page }) => {
@@ -699,11 +710,22 @@ test.describe('десктоп', () => {
         expect(bySize.at(-1)!.shipWidth).toBeCloseTo(bySize.at(-1)!.buttonWidth, 0);
     });
 
-    test('форма — карточка, а не полоса во всю панель', async ({ page }) => {
+    // Плашка формы одна на все экраны: карточки по центру на широком больше нет. Тянется
+    // за ней не всё — поле на одно слово держит половину ширины, но не уже 350px, иначе
+    // строка под позывной читалась бы полем для абзаца.
+    test('форма занимает ширину целиком, а поле на одно слово — половину', async ({ page }) => {
         await openChannel(page, DEMO);
         const panel = await panelBox(page);
-        expect(panel.width, 'карточка растеклась по всей панели').toBeLessThan(panel.parentWidth);
-        expect(panel.radius, 'у карточки должны быть скруглённые края').toBeGreaterThan(0);
+        expect(panel.width, 'форма не дотянулась до краёв').toBe(panel.parentWidth);
+        expect(panel.radius, 'на всю ширину скругления не нужны').toBe(0);
+
+        const field = await page.getByPlaceholder('Гром').evaluate((input) => {
+            const form = input.closest('[class*="card"]')!;
+            const inner = form.clientWidth - 2 * parseFloat(getComputedStyle(form).paddingLeft);
+            return { width: input.getBoundingClientRect().width, inner };
+        });
+        expect(field.width, 'поле позывного уже половины формы').toBeCloseTo(field.inner / 2, 0);
+        expect(field.width, 'поле позывного не дотянуло до нижней мерки').toBeGreaterThanOrEqual(350);
     });
 
     // Раскладка кнопок идёт от ширины блока, а не от ширины экрана: в широком блоке им незачем
@@ -719,11 +741,11 @@ test.describe('десктоп', () => {
         expect(bar.buttons[0].left, 'кнопки отошли от левого края').toBeCloseTo(0, 0);
     });
 
-    test('в карточке формы кнопки делят ширину так же, как на телефоне', async ({ page }) => {
+    test('в форме кнопки делят ширину так же, как на телефоне', async ({ page }) => {
         await openChannel(page, DEMO);
         const bar = await actionsBar(page);
         expectBandLooksLikePanel(bar);
-        expect(bar.buttons[0].width, 'одинокая кнопка не заняла ширину карточки').toBeCloseTo(bar.width, 0);
+        expect(bar.buttons[0].width, 'одинокая кнопка не заняла ширину формы').toBeCloseTo(bar.width, 0);
     });
 });
 
