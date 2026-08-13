@@ -126,10 +126,22 @@ export default function Shade({ stop, onStop, label, children }: ShadeProps) {
 
     return (
         <>
-            {/* Затемнение — только затемнение: нажимать на него нечего. Единственное, что
-                из-под полностью выехавшей шторки видно, — шапка канала, и она обязана
-                остаться нажимаемой, поэтому лежит выше (см. z-index в App.module.less). */}
-            <div className={styles.backdrop} style={{ opacity: dim }} aria-hidden="true" />
+            {/* Затемнение, оно же «мимо шторки»: нажатие по нему опускает её в щёлку.
+                Ловит оно только пока темнит, то есть на верхней ступени. Ниже кадр под ним
+                живой — по воде выбирают место на рейде, и делают это как раз при открытой
+                наполовину шторке с формой корабля, — поэтому там затемнение выключено вовсе,
+                а не просто прозрачно.
+                Шапка канала при этом нажимаема на любой ступени: она лежит выше затемнения
+                (см. z-index в App.module.less), и кнопка «Свернуть сцену» из-под шторки
+                достаётся по-прежнему. */}
+            <button
+                type="button"
+                className={styles.backdrop}
+                style={{ opacity: dim }}
+                disabled={dim === 0}
+                aria-label="Закрыть шторку"
+                onClick={() => onStop('peek')}
+            />
             <section
                 className={look}
                 style={dragHeight === null ? undefined : { height: `${dragHeight}px` }}

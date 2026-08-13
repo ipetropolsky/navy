@@ -958,7 +958,8 @@ test('на форме настройки корабля разворот раз�
  * Арифметика ступеней покрыта юнитами (`shadeStops.test.ts`); здесь — что палец и нажатие
  * доходят до неё живыми.
  */
-const SHADE_HANDLE = /шторку/;
+// Именно ручка: слово «шторку» стоит ещё и на затемнении, которым её закрывают нажатием мимо.
+const SHADE_HANDLE = /(Поднять|Опустить) шторку/;
 
 const shadeHeight = async (page: Page): Promise<number> => {
     const box = await page.getByRole('region').first().boundingBox();
@@ -1065,6 +1066,33 @@ test('на широком окне шторка держит колонку, а 
     await page.getByRole('button', { name: SHADE_HANDLE }).click();
     await expectShade(page, stops.peek, 'шторка не вернулась в щёлку');
     expect(await actionsPosition(page), 'в щёлке кнопки всё равно прилипли').toBe('static');
+});
+
+/**
+ * Нажатие мимо шторки её закрывает — но только с той ступени, где «мимо» и правда мимо.
+ * Полностью выехавшая шторка накрывает всё, и кроме неё в кадре одно затемнение; на половине
+ * же под ней живой кадр, по которому выбирают место на рейде, — и нажатие по воде там
+ * означает выбор места, а не «закрой».
+ */
+test('нажатие мимо шторки опускает её в щёлку, а с половины — не трогает', async ({ page }) => {
+    await openChannel(page, DEMO, ALBATROS);
+    await page.getByRole('button', { name: 'Развернуть сцену' }).click();
+    const stops = shadeStops(page.viewportSize()!.height);
+    await expectShade(page, stops.peek, 'развёрнутая сцена открылась не со щёлкой');
+
+    // Точка у левого края: мимо шторки она и на половине, и на верхней ступени — шторка
+    // держит колонку по центру.
+    const aside = { x: 60, y: 300 };
+
+    await page.getByRole('button', { name: SHADE_HANDLE }).click();
+    await expectShade(page, stops.half, 'шторка не встала на половину');
+    await page.mouse.click(aside.x, aside.y);
+    await expectShade(page, stops.half, 'нажатие по живому кадру опустило шторку с половины');
+
+    await page.getByRole('button', { name: SHADE_HANDLE }).click();
+    await expectShade(page, stops.full, 'шторка не дошла до верха');
+    await page.mouse.click(aside.x, aside.y);
+    await expectShade(page, stops.peek, 'нажатие мимо шторки не опустило её в щёлку');
 });
 
 /**

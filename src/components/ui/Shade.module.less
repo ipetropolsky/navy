@@ -65,9 +65,17 @@
     position: absolute;
     inset: 0;
     z-index: 10;
+    border: 0;
     background: var(--color-bg-overlay);
-    pointer-events: none;
+    cursor: default;
     transition: opacity @shade-seconds @shade-easing;
+
+    // Пока не темнит — не существует для указателя. Выключенная кнопка нажатия и так
+    // не отдаёт, но кадр под ней остался бы под стеклом: курсор над водой перестал бы
+    // меняться на указывающий, а выбор места живёт именно там.
+    &:disabled {
+        pointer-events: none;
+    }
 }
 
 // Ручка занимает всю ширину шторки, а не только полоску посередине: тянут её пальцем,
