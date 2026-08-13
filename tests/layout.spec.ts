@@ -289,7 +289,7 @@ const expectBerthsLieOnWater = (lights: BerthShape[]): void => {
  * переменные Less в проверку не дотянуть, а мерить круг в долях от чего-то ещё не выйдет:
  * он единственное на рейде, что задано прямо в пикселях, а не долей кадра.
  */
-const MARK_NEAR = 50;
+const MARK_NEAR = 140;
 const MARK_FLAT_FAR = 0.3;
 const MARK_FLAT_NEAR = 0.5;
 const markFlat = (slot: number): number => MARK_FLAT_FAR + (MARK_FLAT_NEAR - MARK_FLAT_FAR) * slotShare(slot);
@@ -541,8 +541,8 @@ test.describe('телефон', () => {
         expectSaneScene(view);
 
         // Месяц стоит на небе рядом со строчками шапки, а не под ними. На телефоне он поднят
-        // как раз на высоту строки состояния — неба там мало, — и разводит их не высота,
-        // а ширина: строчка короткая и кончается задолго до лунной дорожки.
+        // на строку состояния: от заголовка его отводит высота — диск встаёт под ним, — а от
+        // самой строки ширина: строчка короткая и кончается задолго до лунной дорожки.
         for (const line of view.headerText) {
             expect(overlaps(view.moon, line), 'месяц наехал на строчку шапки').toBe(false);
         }

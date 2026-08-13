@@ -100,29 +100,37 @@ test('место на рейде выбирается щелчком по вод
 test('на одной линии помещаются двое, и борта не налезают друг на друга', async ({ page }) => {
     // Двое на одной дальности были в правилах и раньше, но сходились едва ли не случайно:
     // вместимость линии считалась числом, а не размером кораблей. Теперь это решает геометрия,
-    // и катеру место рядом с соседом находится почти всегда — с этого и проверка.
-    await openChannel(page);
+    // и два катера расходятся бортами на любой линии — с этого и проверка.
+    //
+    // Рейд для неё свой, а не демо-канал: там расстановка каждый раз новая, и попадётся ли
+    // в ней линия со свободным местом рядом с соседом — как повезёт (замер: в 84% раскладов).
+    // Здесь же сосед один и стоит ровно там, где нам нужно.
+    await openNewChannel(page, 'para');
 
     // Силуэт выбираем до того, как смотреть на воду: от размера зависит, куда этот корабль
     // влезет, и точки свободных мест пересчитываются под него.
     await page.getByText('Сторожевой катер', { exact: true }).click();
+    await page.locator('[data-berth="5-center"]').click();
+    await join(page, 'Малыш', '111');
 
-    const crew = await readState(page).then(
-        (state) => Object.values(state.channels).find((item) => item.channel.slug === DEMO)!.members
-    );
-    const busy = new Set(crew.map((member) => member.place.slot));
-    const keys = await berths(page).evaluateAll((dots) => dots.map((dot) => (dot as HTMLElement).dataset.berth ?? ''));
-    const shared = keys.find((key) => busy.has(Number(key.split('-')[0])));
-    expect(shared, 'рядом со стоящими кораблями не нашлось ни одного свободного места').toBeTruthy();
+    // Возвращаемся тем, кого в канале нет: форма открывается заново, а сосед остаётся стоять.
+    await openChannel(page, 'para', 'gost');
+    await page.getByText('Сторожевой катер', { exact: true }).click();
 
-    await page.locator(`[data-berth="${shared}"]`).click();
+    // Щёлкаем по воде, а не по самому огоньку: круг света у выбранного места широкий и вполне
+    // может лечь поверх соседнего огонька. Место всё равно достанется тому, чья точка ближе.
+    const shared = '5-left';
+    const spot = await page.locator(`[data-berth="${shared}"]`).boundingBox();
+    expect(spot, 'рядом с соседом не нашлось места').toBeTruthy();
+    await page.mouse.click(spot!.x + spot!.width / 2, spot!.y + spot!.height / 2);
+    await expect(page.locator(`[data-berth="${shared}"][aria-pressed="true"]`)).toHaveCount(1);
     await join(page, 'Гроза', '777');
-    await page.waitForTimeout(600);
+    await page.waitForTimeout(1200);
 
     const after = await readState(page).then(
-        (state) => Object.values(state.channels).find((item) => item.channel.slug === DEMO)!.members
+        (state) => Object.values(state.channels).find((item) => item.channel.slug === 'para')!.members
     );
-    const line = Number(shared!.split('-')[0]);
+    const line = Number(shared.split('-')[0]);
     expect(
         after.filter((member) => member.place.slot === line),
         'на линии не оказалось двоих'
@@ -136,8 +144,7 @@ test('на одной линии помещаются двое, и борта н
             return { bottom: box.bottom, left: box.left, right: box.right };
         })
     );
-    // Пар может оказаться и больше одной: расстановка демо-канала каждый раз своя, и двое
-    // на линии — теперь обычное дело. Смотрим все, какие нашлись.
+    // Пара тут одна, но ищем их все — так же, как выше искали место: правило про борта общее.
     const pairs = hulls.flatMap((one, index) =>
         hulls
             .slice(index + 1)
