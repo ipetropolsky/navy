@@ -856,3 +856,86 @@ test('корабль не встаёт бортом на обрез кадра, 
     await page.setViewportSize({ width: 330, height: 700 });
     expect(await edgeGap(page), 'в узком кадре поле вышло другой доли кадра').toBeCloseTo(phone, 0);
 });
+
+/**
+ * Сцена во весь экран. Кадр у сцены в обычной раскладке узкий — приложение держит колонку
+ * в 760px, — и выбирать в нём место на рейде тесно: отметки стоят близко, на телефоне
+ * попасть в нужную трудно. Разворот снимает ограничение колонки: кадр занимает окно целиком,
+ * и та же геометрия рейда раскладывается на всю его ширину и высоту.
+ *
+ * Меряется здесь не картинка, а три обещания: кадр действительно вырос до окна и вернулся
+ * обратно; шапка выросла вместе с ним; страница осталась страницей — под сценой всё так же
+ * чат, до которого можно домотать.
+ */
+const sceneBox = async (page: Page): Promise<{ width: number; height: number }> => {
+    const box = await page.locator('[class*="scene"]').first().boundingBox();
+    return { width: Math.round(box!.width), height: Math.round(box!.height) };
+};
+
+/** Ширина кнопки в шапке: на укрупнённой раскладке круг больше. */
+const buttonWidth = async (page: Page): Promise<number> => {
+    const box = await page.getByRole('button', { name: 'Корабли на связи' }).boundingBox();
+    return Math.round(box!.width);
+};
+
+test('сцена разворачивается во весь экран и сворачивается обратно', async ({ page }) => {
+    await openChannel(page, DEMO, ALBATROS);
+    const window = page.viewportSize()!;
+    const small = await sceneBox(page);
+    expect(small.width, 'сцена и без разворота во всю ширину окна').toBeLessThan(window.width);
+    const smallButton = await buttonWidth(page);
+
+    await page.getByRole('button', { name: 'Развернуть сцену' }).click();
+    // Разворот плавный, и сразу после нажатия кадр ещё в пути. Ждём не срок, а конец перехода:
+    // размер перестаёт меняться сам, когда сцена дошла до окна.
+    await expect
+        .poll(async () => (await sceneBox(page)).width, { message: 'сцена не разошлась на всю ширину окна' })
+        .toBe(window.width);
+    expect((await sceneBox(page)).height, 'сцена не заняла окно по высоте').toBe(window.height);
+    expect(await buttonWidth(page), 'кнопки в шапке остались прежними').toBeGreaterThan(smallButton);
+
+    // Полноэкранная сцена не съедает остальное: чат никуда не делся, он под ней.
+    const composer = page.getByPlaceholder('Сообщение');
+    await composer.scrollIntoViewIfNeeded();
+    await expect(composer, 'под развёрнутой сценой не осталось чата').toBeVisible();
+
+    await page.getByRole('button', { name: 'Свернуть сцену' }).click();
+    await expect
+        .poll(async () => (await sceneBox(page)).width, { message: 'сцена не вернулась в колонку' })
+        .toBe(small.width);
+    expect(await buttonWidth(page), 'кнопки в шапке остались крупными').toBe(smallButton);
+});
+
+/**
+ * Главный случай разворота — форма настройки корабля: место на рейде выбирают именно там.
+ * Режим один на всё приложение, поэтому с формой он не сбрасывается, а отметки свободных мест
+ * разъезжаются вместе с кадром — ровно ради этого всё и затевалось.
+ */
+const berthSpan = (page: Page): Promise<number> =>
+    page.evaluate(() => {
+        const marks = [...document.querySelectorAll('[data-berth]')].map((el) => el.getBoundingClientRect());
+        const top = Math.min(...marks.map((mark) => mark.top));
+        const bottom = Math.max(...marks.map((mark) => mark.bottom));
+        return bottom - top;
+    });
+
+test('на форме настройки корабля разворот разводит отметки мест', async ({ page }) => {
+    await page.setViewportSize({ width: MOBILE_MAX_WIDTH - 90, height: 844 });
+    await openChannel(page, DEMO, ALBATROS);
+    await openSheet(page);
+    await page.getByRole('button', { name: 'Настроить корабль' }).click();
+    const marks = page.locator('[data-berth]');
+    const count = await marks.count();
+    expect(count, 'на форме не показали свободных мест').toBeGreaterThan(0);
+    const tight = await berthSpan(page);
+
+    await page.getByRole('button', { name: 'Развернуть сцену' }).click();
+    await expect
+        .poll(() => berthSpan(page), { message: 'рейд на форме не растянулся вместе с кадром' })
+        .toBeGreaterThan(tight * 1.5);
+    // Мест ровно столько же: развернулась картинка, а не расклад рейда.
+    await expect(marks, 'вместе с кадром изменился и расклад мест').toHaveCount(count);
+    // Форма осталась под сценой и работает: в неё можно домотать и выбрать место.
+    await marks.first().click();
+    await expect(page.getByRole('button', { name: 'Готово' }), 'форма под сценой потерялась').toBeVisible();
+});

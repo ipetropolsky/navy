@@ -212,10 +212,16 @@ interface SeaSceneProps {
      * заплывёт ли следующий корабль в кадр или просто окажется на месте.
      */
     ready: boolean;
+    /**
+     * Кадр развёрнут во весь экран. Сцене от этого меняются только те мерки, что были
+     * пиксельными: доля воды в кадре и высота месяца — см. .sceneFull в стилях. Вся остальная
+     * геометрия рейда отмерена долями кадра и разъезжается сама.
+     */
+    full?: boolean;
 }
 
 /** Ночное море: слои неба, месяца, облаков, острова и воды с кораблями-участниками. */
-export default function SeaScene({ members, myId, morseFeeds, ready, berths, onEditShip }: SeaSceneProps) {
+export default function SeaScene({ members, myId, morseFeeds, ready, berths, onEditShip, full }: SeaSceneProps) {
     // Кто уже был в кадре. Заплывает только тот, кто вошёл при нас; те, что стояли на рейде
     // до нашего прихода, просто оказываются на месте — въезжать им неоткуда, мы пришли к ним.
     //
@@ -681,7 +687,12 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
     };
 
     return (
-        <div className={painted ? `${styles.scene} ${styles.scenePainted}` : styles.scene} ref={sceneRef}>
+        <div
+            className={[styles.scene, painted ? styles.scenePainted : '', full ? styles.sceneFull : '']
+                .filter(Boolean)
+                .join(' ')}
+            ref={sceneRef}
+        >
             <div className={styles.sky}>
                 {/* Небо-текстура: соседние плитки зеркальны друг другу, поэтому стыки незаметны. */}
                 <div className={styles.skyStrip}>

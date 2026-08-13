@@ -19,6 +19,12 @@ interface IconButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
     variant?: IconButtonVariant;
     /** Делать нечего: кнопка сжимается и гаснет, не перехватывая нажатий. */
     inactive?: boolean;
+    /**
+     * Кнопка на укрупнённой раскладке: круг больше, значок в нём — тоже. Нужна там, где
+     * вырос сам кадр под кнопкой, — в шапке над полноэкранной сценой; на обычной раскладке
+     * такая кнопка была бы просто крупной кнопкой без причины.
+     */
+    large?: boolean;
     'aria-label': string;
 }
 
@@ -29,8 +35,19 @@ const VARIANT_CLASS: Record<IconButtonVariant, string> = {
     inField: styles.inField,
 };
 
-export default function IconButton({ variant = 'plain', inactive = false, type = 'button', ...rest }: IconButtonProps) {
-    const className = [styles.iconButton, VARIANT_CLASS[variant], inactive ? styles.inactive : '']
+export default function IconButton({
+    variant = 'plain',
+    inactive = false,
+    large = false,
+    type = 'button',
+    ...rest
+}: IconButtonProps) {
+    const className = [
+        styles.iconButton,
+        VARIANT_CLASS[variant],
+        large ? styles.large : '',
+        inactive ? styles.inactive : '',
+    ]
         .filter(Boolean)
         .join(' ');
     return <button {...rest} type={type} className={className} />;

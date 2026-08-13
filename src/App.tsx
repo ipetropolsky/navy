@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { ChannelDraft, ChannelError, MemberDraft, backend, freeBerths, suggestBerth } from '@/backend';
 import { DEMO_CHANNEL_SLUG } from '@/backend/seed';
@@ -51,6 +51,20 @@ export default function App() {
     const [sheetOpen, setSheetOpen] = useState(false);
     const [editing, setEditing] = useState(false);
     const notify = useSnackbar();
+
+    // Развёрнутая сцена. Режим один на всё приложение, а не на экран: развернул в чате —
+    // открыл форму корабля и выбираешь место на том же большом кадре. Ради этого он и заведён.
+    const [fullscreen, setFullscreen] = useState(false);
+    const appRef = useRef<HTMLDivElement>(null);
+
+    // На развороте и на сворачивании страница возвращается к началу. Промотанная вниз, она
+    // после сворачивания оставила бы человека где-то в середине ленты, а после разворота —
+    // ниже кадра, ради которого он кнопку и нажал. Рывком, а не плавно: разворот и так
+    // движение, и второе поверх него читалось бы дёрганьем.
+    const toggleFullscreen = (): void => {
+        setFullscreen((on) => !on);
+        appRef.current?.scrollTo({ top: 0 });
+    };
 
     // Пустой список — тоже список, но новый на каждой отрисовке: без useMemo он менял бы
     // ссылку каждый раз и заставлял пересчитывать всё, что от него зависит.
@@ -219,13 +233,14 @@ export default function App() {
     };
 
     return (
-        <div className={styles.app}>
+        <div className={[styles.app, fullscreen ? styles.appFull : ''].filter(Boolean).join(' ')} ref={appRef}>
             <header className={styles.header}>
                 <div className={styles.scene}>
                     <SeaScene
                         members={members}
                         myId={myId ?? ''}
                         morseFeeds={morseFeeds}
+                        full={fullscreen}
                         ready={!loading && Boolean(channel)}
                         // Щелчок по своему кораблю открывает ту же форму, что и переоснащение:
                         // и корабль, и место на рейде меняются в одном месте.
@@ -235,7 +250,7 @@ export default function App() {
                         }
                     />
                 </div>
-                <div className={styles.headerBar}>
+                <div className={[styles.headerBar, fullscreen ? styles.headerBarFull : ''].filter(Boolean).join(' ')}>
                     <div className={styles.headerInfo}>
                         {/* Название канала — это и кнопка «позвать остальных»: по нажатию
                             ссылка уходит в буфер. Показывать сам адрес негде, он длинный. */}
@@ -256,7 +271,11 @@ export default function App() {
                     {/* Кнопки идут вплотную: это один блок действий, а не два разных. */}
                     <div className={styles.headerActions}>
                         {inChat && (
-                            <IconButton onClick={() => setSheetOpen(true)} aria-label="Корабли на связи">
+                            <IconButton
+                                large={fullscreen}
+                                onClick={() => setSheetOpen(true)}
+                                aria-label="Корабли на связи"
+                            >
                                 <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
                                     <path
                                         d="M9 11a3.2 3.2 0 1 0 0-6.4A3.2 3.2 0 0 0 9 11zm7 .4a2.7 2.7 0 1 0 0-5.4 2.7 2.7 0 0 0 0 5.4zM9 13c-3 0-6 1.5-6 3.6V19h12v-2.4C15 14.5 12 13 9 13zm7 .8c-.5 0-1 .05-1.5.16 1.1.86 1.8 1.96 1.8 3.24V19H22v-2c0-1.8-2.6-3.2-6-3.2z"
@@ -265,19 +284,29 @@ export default function App() {
                                 </svg>
                             </IconButton>
                         )}
-                        {/* Плюс уводит на главную: там и создаётся следующий канал связи. */}
-                        {channel && (
-                            <IconButton onClick={route.openHome} aria-label="Новый канал связи">
-                                <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
-                                    <path
-                                        d="M12 5v14M5 12h14"
-                                        stroke="currentColor"
-                                        strokeWidth="2.2"
-                                        strokeLinecap="round"
-                                    />
-                                </svg>
-                            </IconButton>
-                        )}
+                        {/* Разворот сцены. Значок — стрелки по диагонали: в разные стороны, когда
+                            разворачивать, и к середине, когда сворачивать. Диагональ у обоих одна,
+                            меняются только концы, и переключение читается как одно движение. */}
+                        <IconButton
+                            large={fullscreen}
+                            onClick={toggleFullscreen}
+                            aria-label={fullscreen ? 'Свернуть сцену' : 'Развернуть сцену'}
+                        >
+                            <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+                                <path
+                                    d={
+                                        fullscreen
+                                            ? 'M20 10h-6V4M4 14h6v6M14 10l6-6M10 14l-6 6'
+                                            : 'M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7'
+                                    }
+                                    stroke="currentColor"
+                                    strokeWidth="2"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    fill="none"
+                                />
+                            </svg>
+                        </IconButton>
                     </div>
                 </div>
             </header>
