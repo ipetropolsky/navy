@@ -128,6 +128,11 @@ const NOD_SECONDS = 1.2;
 // под остановившимся корпусом успокаивается не сразу.
 const NOD_LEAD = 0.8;
 
+// Сколько гаснет слой выбора места, мс. Сама длительность живёт в стилях (@berth-fade),
+// здесь она нужна затем, чтобы вовремя снять разметку: пока переход идёт, слой обязан
+// оставаться в кадре, а после — исчезнуть, иначе он навсегда останется в разметке прозрачным.
+const BERTH_FADE_MS = 200;
+
 /** Ждёт загрузки картинки. Не сложилось — тоже ответ: сцену показываем в любом случае. */
 const preload = (url: string): Promise<void> =>
     new Promise((resolve) => {
@@ -583,7 +588,37 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
     //
     // Считать по долям кадра нельзя — место в кадре проходит ещё и через clamp у краёв, —
     // поэтому меряем сами дорожки: где они встали, там коридор и есть.
-    const berthOptions = berths?.options;
+    // Последний состав мест: из пропа он уходит тем же кадром, каким закрылась форма,
+    // а слою нужно ещё догореть.
+    const lastBerths = useRef<BerthChoice | null>(null);
+    if (berths) {
+        lastBerths.current = berths;
+    }
+    const [berthsClosing, setBerthsClosing] = useState(false);
+    useEffect(() => {
+        if (berths) {
+            setBerthsClosing(false);
+            return undefined;
+        }
+        if (!lastBerths.current) {
+            return undefined;
+        }
+        setBerthsClosing(true);
+        const timer = window.setTimeout(() => {
+            lastBerths.current = null;
+            setBerthsClosing(false);
+        }, BERTH_FADE_MS);
+        return () => window.clearTimeout(timer);
+    }, [berths]);
+
+    // Разметка, которую сейчас видно. Это не всегда то же, что berths: закрывшись, слой ещё
+    // держится в кадре, пока догорает переход, — потому и состав мест хранится у себя. React
+    // снял бы разметку тем же кадром, а гаснуть должно то, что в кадре есть.
+    //
+    // Флота это не касается: корабли возвращаются из призрака сразу по berths, и оба перехода
+    // идут вместе. Порознь они и выглядели неправильно.
+    const shownBerths = berths ?? (berthsClosing ? lastBerths.current : null);
+    const berthOptions = shownBerths?.options;
     // Места, под которыми стоит корабль: точку там не зажигаем. Занятые места рейд и так
     // не предлагает, но корабль в кадре живёт дольше своего места в списке — уходящий ещё
     // виден, а место под ним уже свободно, — и точка загоралась бы у него под килем.
@@ -594,7 +629,10 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
     // место, и своё становится обычным свободным: точка на нём нужна, иначе некуда вернуться.
     const berthTaken = new Set(
         placed
-            .filter((member) => member.memberId !== myId || !berths?.picked || isSameBerth(member.place, berths.picked))
+            .filter(
+                (member) =>
+                    member.memberId !== myId || !shownBerths?.picked || isSameBerth(member.place, shownBerths.picked)
+            )
             .map((member) => berthKey(member.place))
     );
     const takenKeys = [...berthTaken].sort().join(' ');
@@ -859,9 +897,9 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
             {/* Слой выбора места: он поверх кораблей, потому что точки должны быть видны
                 и сквозь корпус — иначе занятая половина рейда выглядит так, будто мест там нет.
                 Указатель ловит вся вода, а достаётся нажатие ближайшей точке. */}
-            {berths && (
+            {shownBerths && (
                 <div
-                    className={styles.berthField}
+                    className={[styles.berthField, berths ? '' : styles.berthFieldGone].filter(Boolean).join(' ')}
                     onPointerMove={trackBerth}
                     onPointerLeave={() => setNearBerth(null)}
                     onClick={pickNearestBerth}
@@ -903,8 +941,8 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
                             </span>
                         </div>
                     ))}
-                    {berths.options.map((berth) => {
-                        const picked = Boolean(berths.picked && isSameBerth(berth, berths.picked));
+                    {shownBerths.options.map((berth) => {
+                        const picked = Boolean(shownBerths.picked && isSameBerth(berth, shownBerths.picked));
                         const near = Boolean(nearBerth && isSameBerth(berth, nearBerth));
                         const key = berthKey(berth);
                         // Под кораблём разметки не рисуем — см. berthTaken. Заодно место
@@ -945,7 +983,7 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
                                     // координат, а без них ближайшее место не найти.
                                     onClick={(event) => {
                                         event.stopPropagation();
-                                        berths.onPick(berth);
+                                        berths?.onPick(berth);
                                     }}
                                     style={
                                         {

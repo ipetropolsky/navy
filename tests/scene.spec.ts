@@ -461,6 +461,28 @@ test('под своим кораблём разметки нет, а отошё�
     await expect.poll(flatness, { message: 'покинутое место осталось подсвеченным' }).toBeCloseTo(1, 1);
 });
 
+test('разметка гаснет вместе с флотом, а не кадром', async ({ page }) => {
+    await openChannel(page, DEMO, ALBATROS);
+    await page.locator('[class*="shipMine"]').click();
+    await expect(berths(page).first()).toBeVisible();
+
+    // Точки и подписи стоят у самых кораблей, и пропади они разом, пока корпуса возвращаются
+    // из призрака, — на корабле это читалось бы вспышкой. Поэтому после закрытия формы слой
+    // ещё в кадре и догорает: он уходит тем же переходом и за то же время, что и высветление.
+    await page.getByText('Отмена', { exact: true }).click();
+    const layer = page.locator('[class*="berthField"]');
+    await expect(layer, 'разметка пропала кадром, не догорев').toHaveCount(1);
+    const fading = await layer.evaluate((field) => {
+        const style = getComputedStyle(field);
+        return { opacity: Number.parseFloat(style.opacity), duration: style.transitionDuration };
+    });
+    expect(fading.opacity, 'разметка не начала гаснуть').toBeLessThan(1);
+    expect(fading.duration, 'разметка гаснет не в срок высветления').toBe('0.2s');
+
+    // И уходит из разметки совсем: иначе прозрачный слой навсегда остался бы поверх сцены.
+    await expect(layer, 'догоревшая разметка осталась в кадре').toHaveCount(0);
+});
+
 test('подпись стоит на точке своего места, даже когда корабль отведён от края кадра', async ({ page }) => {
     // Подпись подписывает место, а не корпус. Корабль над ней может стоять чуть в стороне:
     // у края кадра его отодвигает внутрь собственная ширина (shownLeft), а на тесной линии
