@@ -1,7 +1,13 @@
 import { Page, expect, test } from '@playwright/test';
 
 import { EDGE_MARGIN } from '@/backend/placement';
-import { MOBILE_MAX_WIDTH, PINNED_ACTIONS_MIN_HEIGHT, SHADE_PEEK_HEIGHT, SHADE_TOP_GAP } from '@/config/layout';
+import {
+    COLUMN_WIDTH,
+    MOBILE_MAX_WIDTH,
+    PINNED_ACTIONS_MIN_HEIGHT,
+    SHADE_PEEK_HEIGHT,
+    SHADE_TOP_GAP,
+} from '@/config/layout';
 import { SLOT_COUNT, slotDepth, slotShare } from '@/types/channel';
 
 import {
@@ -1017,12 +1023,62 @@ test('шторку можно дотянуть до верха одним дви
 });
 
 /**
+ * Шторка на широком окне. Кадр в полноэкранном режиме раскинут на всё окно, а шторка — нет:
+ * во весь экран просили сцену, и лента сообщений на два монитора этого обещания не исполняет.
+ * Ширину она держит ту же, что колонка в обычном виде, и стоит по центру кадра.
+ *
+ * Второе обещание — про кнопки внутри. Прилипшая полоса кнопок в щёлке заняла бы почти всю
+ * видимую часть, и вместо «видно, что там лежит» из-под кадра торчали бы одни кнопки. Поэтому
+ * в щёлке прилипание снято, а с половины и выше возвращается — там уже есть что листать.
+ */
+const actionsPosition = (page: Page): Promise<string> =>
+    page
+        .locator('[class*="actionsPinned"]')
+        .first()
+        .evaluate((node) => getComputedStyle(node).position);
+
+test('на широком окне шторка держит колонку, а кнопки в ней липнут не раньше половины', async ({ page }) => {
+    // Окно шире колонки вдвое: на нём и видно, что шторка за кадром не растянулась. Высота
+    // выше отсечки прилипания, иначе кнопки не липли бы ни на одной ступени.
+    await page.setViewportSize({ width: 2 * COLUMN_WIDTH, height: PINNED_ACTIONS_MIN_HEIGHT + 100 });
+    await openChannel(page, DEMO, ALBATROS);
+    await page.getByRole('button', { name: 'Развернуть сцену' }).click();
+    const window = page.viewportSize()!;
+    const stops = shadeStops(window.height);
+    await expectShade(page, stops.peek, 'развёрнутая сцена открылась не со щёлкой');
+
+    const box = (await page.getByRole('region').first().boundingBox())!;
+    expect(Math.round(box.width), 'шторка растянулась вслед за кадром').toBe(COLUMN_WIDTH);
+    expect(Math.round(box.x + box.width / 2), 'шторка встала не по центру кадра').toBe(window.width / 2);
+
+    // Список кораблей — там кнопки как раз прилипающие. Открывается он сразу на половине:
+    // из щёлки списка не видно.
+    await openSheet(page);
+    await expectShade(page, stops.half, 'список кораблей открылся не на половине');
+    expect(await actionsPosition(page), 'на половине кнопки не прилипли').toBe('sticky');
+
+    // Половина → верх → щёлка: список остаётся тот же, меняется только ступень.
+    await page.getByRole('button', { name: SHADE_HANDLE }).click();
+    await expectShade(page, stops.full, 'шторка не дошла до верха');
+    expect(await actionsPosition(page), 'на верхней ступени кнопки не прилипли').toBe('sticky');
+
+    await page.getByRole('button', { name: SHADE_HANDLE }).click();
+    await expectShade(page, stops.peek, 'шторка не вернулась в щёлку');
+    expect(await actionsPosition(page), 'в щёлке кнопки всё равно прилипли').toBe('static');
+});
+
+/**
  * Клавиатура. Определить её нечем — браузер о ней не сообщает, — поэтому ориентир один:
  * фокус в текстовом поле. Пока он там, считаем, что клавиатура выехала и съела пол-экрана,
  * и держим шторку раскрытой до верха; ушёл фокус — возвращаем ту ступень, на которой шторку
  * оставил человек, а не ту, с которой начинали.
+ *
+ * Окно телефонное нарочно: правило работает только в мобильном виде. На десктопе экранной
+ * клавиатуры нет, а фокус в поле есть — и шторка уезжала бы до верха от каждой формы,
+ * которая сама встаёт фокусом в первое поле.
  */
 test('фокус в поле поднимает шторку до верха, а уход из поля возвращает её как было', async ({ page }) => {
+    await page.setViewportSize({ width: MOBILE_MAX_WIDTH - 90, height: 844 });
     await openChannel(page, DEMO, ALBATROS);
     await page.getByRole('button', { name: 'Развернуть сцену' }).click();
     const stops = shadeStops(page.viewportSize()!.height);

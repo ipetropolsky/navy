@@ -5,7 +5,13 @@ import { defineConfig } from 'vite';
 // Путь относительный нарочно: конфиг собирается раньше, чем становится известен алиас '@',
 // который в нём же и объявлен.
 // eslint-disable-next-line no-restricted-imports
-import { MOBILE_MAX_WIDTH, PINNED_ACTIONS_MIN_HEIGHT, SHADE_PEEK_HEIGHT, SHADE_TOP_GAP } from './src/config/layout';
+import {
+    COLUMN_WIDTH,
+    MOBILE_MAX_WIDTH,
+    PINNED_ACTIONS_MIN_HEIGHT,
+    SHADE_PEEK_HEIGHT,
+    SHADE_TOP_GAP,
+} from './src/config/layout';
 
 export default defineConfig({
     plugins: [react()],
@@ -18,7 +24,8 @@ export default defineConfig({
                     `@mobile-width: ${MOBILE_MAX_WIDTH}px;\n` +
                     `@pinned-actions-height: ${PINNED_ACTIONS_MIN_HEIGHT}px;\n` +
                     `@shade-peek: ${SHADE_PEEK_HEIGHT}px;\n` +
-                    `@shade-top-gap: ${SHADE_TOP_GAP}px;\n`,
+                    `@shade-top-gap: ${SHADE_TOP_GAP}px;\n` +
+                    `@column-width: ${COLUMN_WIDTH}px;\n`,
             },
         },
     },

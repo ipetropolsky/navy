@@ -21,6 +21,7 @@ import { channelLink, useRoute } from '@/routing';
 import { Berth, MAX_MESSAGE_LENGTH, Message, MorseFeed, ShipKind, isSameBerth } from '@/types/channel';
 import { copyText } from '@/utils/clipboard';
 import { isTextField } from '@/utils/keyboard';
+import { useIsMobile } from '@/utils/viewport';
 
 import styles from './App.module.less';
 
@@ -55,6 +56,7 @@ export default function App() {
     const [sheetOpen, setSheetOpen] = useState(false);
     const [editing, setEditing] = useState(false);
     const notify = useSnackbar();
+    const mobile = useIsMobile();
 
     // Развёрнутая сцена. Режим один на всё приложение, а не на экран: развернул в чате —
     // открыл форму корабля и выбираешь место на том же большом кадре. Ради этого он и заведён.
@@ -86,11 +88,16 @@ export default function App() {
     // (см. utils/keyboard). Встал фокус — поднимаем шторку до верха: клавиатура съедает
     // пол-экрана, и поле ввода в шторке на половине оказалось бы под ней.
     //
+    // Только в телефонном виде. На десктопе экранной клавиатуры нет вовсе, а фокус в поле есть
+    // — и на этом уже наступили: форма корабля сама встаёт фокусом в позывной, и шторка от
+    // этого уезжала до верха, закрывая ровно тот кадр, ради которого её и разворачивали.
+    // Мерка та же, по которой форма решает, ставить ли фокус сразу (см. utils/viewport).
+    //
     // Слушаем не сами поля, а всё приложение: полей в нём с десяток — позывной, номер, поле
     // сообщения, — и вешать на каждое по паре обработчиков значит однажды завести одиннадцатое
     // и забыть. React отдаёт focusin/focusout всплывающими, так что хватает одной пары наверху.
     const handleFocusIn = (event: FocusEvent<HTMLDivElement>): void => {
-        if (!fullscreen || !isTextField(event.target)) {
+        if (!fullscreen || !mobile || !isTextField(event.target)) {
             return;
         }
         // Прыжок из поля в поле — не новый заход клавиатуры: она и не убиралась. Прежнее
