@@ -382,7 +382,7 @@ test('качка идёт по одним часам, и пришедший по
     }
 });
 
-test('точка под своим кораблём разгорается в круг, пока выбрано его же место', async ({ page }) => {
+test('под своим кораблём разметки нет, а отошёл — место снова помечено точкой', async ({ page }) => {
     await openChannel(page, DEMO, ALBATROS);
     const fleet = Object.values((await readState(page)).channels)[0].members;
     const mine = fleet.find((member) => member.memberId === ALBATROS)!;
@@ -391,23 +391,20 @@ test('точка под своим кораблём разгорается в к
     await page.locator('[class*="shipMine"]').click();
     await expect(berths(page).first()).toBeVisible();
 
-    // Своё место рейд предлагает всегда — иначе не видно, где корабль стоит сейчас, — и,
-    // пока выбрано оно же, огонёк на нём вырос в круг света: подсветка выбора и есть эта
-    // самая точка, убрать её значит убрать сам выбор.
-    // Круг лежит на воде и потому сплющен: по этому его от точки и отличаем — у точки
-    // ширина с высотой равны, у круга ширина заметно больше.
+    // Пока выбрано своё же место, под килем не горит ничего: круг света показывает, куда
+    // корабль переедет, а где он стоит сейчас — видно по самому кораблю.
+    await expect(page.locator(`[data-berth="${key}"]`), 'под своим кораблём горит разметка').toHaveCount(0);
+
+    // Переключились на другое — своё стало обычным свободным местом, и точка на нём
+    // загорелась: иначе некуда возвращаться. Точка, а не круг: выбрано теперь не оно.
+    // Круг лежит на воде и потому сплющен — по этому его от точки и отличаем.
+    await page.locator('[data-berth][aria-pressed="false"]').last().click();
+    await expect(page.locator(`[data-berth="${key}"]`), 'на покинутое место некуда вернуться').toHaveCount(1);
     const flatness = (): Promise<number> =>
         page.locator(`[data-lit="${key}"]`).evaluate((light) => {
             const box = light.getBoundingClientRect();
             return box.width / box.height;
         });
-    await expect(page.locator(`[data-lit="${key}"]`), 'своё место осталось без огонька').toHaveCount(1);
-    await expect.poll(flatness, { message: 'своё место осталось без подсветки' }).toBeGreaterThan(1.5);
-
-    // Переключились на другое — своё стало обычным свободным местом, и огонёк на нём осел
-    // обратно в точку: иначе непонятно, куда возвращаться.
-    await page.locator('[data-berth][aria-pressed="false"]').last().click();
-    await expect(page.locator(`[data-berth="${key}"]`), 'на покинутое место некуда вернуться').toHaveCount(1);
     await expect.poll(flatness, { message: 'покинутое место осталось подсвеченным' }).toBeCloseTo(1, 1);
 });
 

@@ -1,7 +1,7 @@
 import { Page, expect, test } from '@playwright/test';
 
 import { MOBILE_MAX_WIDTH, PINNED_ACTIONS_MIN_HEIGHT } from '@/config/layout';
-import { SLOT_COUNT, slotDepth, slotScale, slotShare } from '@/types/channel';
+import { SLOT_COUNT, slotDepth, slotShare } from '@/types/channel';
 
 import { ALBATROS, DEMO, openChannel, openSheet, readState, shipNames, ships } from '@tests/helpers';
 
@@ -284,22 +284,21 @@ const expectBerthsLieOnWater = (lights: BerthShape[]): void => {
 };
 
 /**
- * Мерки круга подсветки: ширина на ближней линии и сплющенность на обоих концах рейда.
- * Продублированы из стилей (@berth-mark-near, @berth-mark-flat-near, @berth-mark-flat-far) —
- * переменные Less в проверку не дотянуть, а мерить круг в долях от чего-то ещё не выйдет:
- * он единственное на рейде, что задано прямо в пикселях, а не долей кадра.
+ * Мерки круга подсветки: во сколько раз он больше точки и насколько сплющен на обоих концах
+ * рейда. Продублированы из стилей (@berth-mark-times, @berth-mark-flat-near,
+ * @berth-mark-flat-far) — переменные Less в проверку не дотянуть.
  */
-const MARK_NEAR = 140;
-const MARK_FLAT_FAR = 0.3;
-const MARK_FLAT_NEAR = 0.5;
+const MARK_TIMES = 4;
+const MARK_FLAT_FAR = 0.26;
+const MARK_FLAT_NEAR = 0.36;
 const markFlat = (slot: number): number => MARK_FLAT_FAR + (MARK_FLAT_NEAR - MARK_FLAT_FAR) * slotShare(slot);
 
 /**
  * Подсветка места — та же точка, выросшая в круг света: второго пятна под ней нет, иначе свет
  * на выбранном месте складывался бы из двух и горел бы вдвое ярче соседних.
  *
- * Уходит круг в даль по той же формуле, что и корпус (slotScale): он лежит на воде рядом
- * с кораблём и обязан мельчать с ним вровень, иначе разметка и флот живут в разных перспективах.
+ * Уходит круг в даль вместе с точкой, потому что он и есть она: размер задан кратностью, одной
+ * и той же на любой линии, — значит перспектива у них общая, а не две согласованные лесенки.
  *
  * Круг лежит на воде, а не стоит в кадре, и потому сплющен. Сплющен неодинаково: чем дальше
  * место, тем острее угол, под которым видна вода, и тем площе выходит круг.
@@ -316,13 +315,13 @@ const expectBerthLightGrows = async (page: Page): Promise<void> => {
     const near = await hoverBerth(page, dots.at(-1)!.key);
 
     expect(near.width, 'ближнее место подсвечено как дальнее').toBeGreaterThan(far.width);
-    for (const [what, mark] of [
-        ['дальнего', far],
-        ['ближнего', near],
-    ] as [string, BerthShape][]) {
+    for (const [what, dot, mark] of [
+        ['дальнего', dots[0], far],
+        ['ближнего', dots.at(-1)!, near],
+    ] as [string, BerthShape, BerthShape][]) {
         const slot = slotOf(mark);
-        expect(mark.width, `круг ${what} места уходит в даль не так, как корпус`).toBeCloseTo(
-            MARK_NEAR * slotScale(slot),
+        expect(mark.width, `круг ${what} места вырос из точки не во столько раз`).toBeCloseTo(
+            dot.width * MARK_TIMES,
             1
         );
         expect(mark.height / mark.width, `круг ${what} места сплющен не своей перспективой`).toBeCloseTo(
