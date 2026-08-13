@@ -7,6 +7,7 @@ import {
     bubbles,
     join,
     openChannel,
+    openNewChannel,
     readState,
     send,
     ships,
@@ -98,6 +99,34 @@ test('переоснащение пишет в ленту, что было и ч
     await join(page, 'Буран', '512', 'Тральщик');
 
     await expect(systemLines(page).last()).toHaveText('Сторожевой катер «Альбатрос» 317 теперь тральщик «Буран» 512');
+});
+
+test('набранный номер стоит на выбранном корабле, и только на нём', async ({ page }) => {
+    await openNewChannel(page, 'nomer-na-bortu');
+    await page.locator('input[inputmode="numeric"]').fill('317');
+
+    // Спрашиваем не «есть ли номер на выбранном», а «на скольких он вообще есть»: правило
+    // тут в том, что борт с номером один, — на всех сразу номер читался бы как часть рисунка.
+    const onHulls = (): Promise<string[]> =>
+        page
+            .locator('[class*="kindShip"] [class*="hullNumber"]')
+            .evaluateAll((nodes) => nodes.map((node) => node.textContent ?? '').filter(Boolean));
+
+    expect(await onHulls(), 'номер сел не на один борт').toEqual(['317']);
+    await expect(
+        page.locator('[class*="kindActive"] [class*="hullNumber"]'),
+        'номер стоит не на выбранном корабле'
+    ).toHaveText('317');
+
+    // Выбрали другой силуэт — номер перешёл вместе с выбором, прежний борт остался чистым.
+    const kinds = page.locator('button:has([class*="kindShip"])');
+    await kinds.nth(3).click();
+    expect(await onHulls(), 'номер остался на прежнем борту').toEqual(['317']);
+    await expect(kinds.nth(3).locator('[class*="hullNumber"]'), 'номер не перешёл на новый выбор').toHaveText('317');
+
+    // И правится он тут же: борт показывает набранное, а не то, с чем форма открылась.
+    await page.locator('input[inputmode="numeric"]').fill('42');
+    await expect(kinds.nth(3).locator('[class*="hullNumber"]'), 'борт не пошёл за набором').toHaveText('42');
 });
 
 /**
