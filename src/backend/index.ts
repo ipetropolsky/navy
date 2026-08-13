@@ -21,5 +21,5 @@ export * from '@/backend/types';
  * модулям, и рано или поздно расстановка пустила бы на линию пару, которую сцена развести
  * не сумеет.
  */
-export { freeBerths, spreadAside } from '@/backend/placement';
+export { freeBerths, fleetLefts, restingLeft } from '@/backend/placement';
 export type { Anchored } from '@/backend/placement';

@@ -15,7 +15,7 @@ import islandUrl from '@/assets/scene/island.png';
 import moonUrl from '@/assets/scene/moon.png';
 import seaUrl from '@/assets/scene/sea.png';
 import skyUrl from '@/assets/scene/sky.png';
-import { spreadAside } from '@/backend';
+import { fleetLefts, restingLeft } from '@/backend';
 import MemberName from '@/components/ships/MemberName';
 import Ship from '@/components/ships/Ship';
 import { SHIP_SPRITES } from '@/components/ships/shipSprites';
@@ -32,7 +32,6 @@ import {
     isSameBerth,
     otherSide,
     shipWidthPercent,
-    shownLeft,
     slotDepth,
     slotScale,
     slotShare,
@@ -365,13 +364,13 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
         ...leavingById.current.values(),
     ].sort((a, b) => a.place.slot - b.place.slot);
 
-    // На сколько корабли расходятся, уступая друг другу воду на тесной линии. Считается
-    // по каналу, а не по кадру: уходящий корабль в кадре ещё виден, но давить на соседа уже
-    // перестал — тот отпускает резинку и идёт обратно на своё место, не дожидаясь, пока
-    // ушедший скроется за кромкой. Уходящему расхождения не достаётся по той же причине:
+    // Где корабли стоят в кадре: разброс внутри своей полосы да расхождение с тесным соседом.
+    // Считается по каналу, а не по кадру: уходящий корабль в кадре ещё виден, но давить
+    // на соседа уже перестал — тот отпускает резинку и идёт обратно на свою точку, не дожидаясь,
+    // пока ушедший скроется за кромкой. Уходящему расхождения не достаётся по той же причине:
     // в списке канала его уже нет, и он снимается со своей точки, а не с отжатой.
-    const aside = spreadAside(members, zoom);
-    const asideOf = (member: Member): number => aside[member.memberId] ?? 0;
+    const lefts = fleetLefts(members, zoom);
+    const leftOf = (member: Member): number => lefts[member.memberId] ?? restingLeft(member, zoom);
 
     // Пока вкладка в фоне, браузер не рисует кадров, и анимации в ней стоят. Само событие
     // доходит вовремя — useChannel применяет его сразу, — и разметка обновляется, а движение
@@ -530,18 +529,18 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
 
     /**
      * Дорожка: где она стоит по кадру и какой ширины то, что по ней ездит. Одна и та же
-     * и для корабля, и для овала свободного места — оттого место и оказывается ровно там,
-     * где потом встанет корабль, включая отступ от края кадра.
+     * и для корабля, и для овала свободного места, только встают они по ней по-разному:
+     * отметка — на оси своего коридора, корабль — там, где ему насчитала расстановка
+     * (см. fleetLefts), то есть с разбросом внутри полосы и с оглядкой на тесного соседа.
      */
-    const laneStyle = (place: Berth, width: number, aside = 0): CSSProperties => {
+    const laneStyle = (place: Berth, width: number, left = place.left): CSSProperties => {
         // Доля пути от дальней линии к ближней. Считается от концов рейда, а не от глубины:
         // сами концы приколочены к горизонту и к нижней кромке кадра, а перспектива
         // распределяет линии между ними.
         const share = slotShare(place.slot);
         return {
-            // Ширину и кламп «не подходить к краям кадра» досчитывает CSS: там же живёт
-            // масштаб для телефонов и отступ от краёв.
-            '--slot-left': `${place.left.toFixed(2)}%`,
+            // Ширину досчитывает CSS: там же живёт масштаб для телефонов.
+            '--slot-left': `${left.toFixed(2)}%`,
             '--slot-width': `${width}%`,
             '--slot-half': `${width / 2}%`,
             // Перспектива нужна и стилям — двумя мерками сразу. Доля отмеряет то, у чего
@@ -551,10 +550,6 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
             '--slot-scale': slotScale(place.slot).toFixed(4),
             // В какую сторону от своего коридора отходит отметка места, см. --berth-shift.
             '--corridor-side': CORRIDOR_SIDE[place.corridor],
-            // На сколько корабль отошёл от своей точки, уступая тесному соседу. Ни у отметки
-            // места, ни у подписи этого слагаемого нет: они остаются там, где место, — отходит
-            // корабль, а не стоянка.
-            '--slot-aside': `${aside.toFixed(2)}%`,
             // Чем дальше корабль, тем выше он стоит в кадре — это и есть перспектива. Рейд
             // натянут между двумя отметками: дальняя линия стоит на --berth-far ниже горизонта,
             // ближняя — на --berth-near выше нижней кромки кадра, а между ними линии расходятся
@@ -736,9 +731,10 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
                 const motionKind = (leaving && 'leaving') || (entering && 'entering') || '';
                 const motion = motionKind ? MOTION_CLASS[motionKind] : '';
                 // Заход: с той стороны, откуда пришёл, ровно до кромки кадра и ни шагом дальше.
-                // Считаем от того места, где корабль на самом деле стоит: стили не дают ему
-                // подойти к краю кадра вплотную, и от выбранной точки настоящая отличается.
-                const shown = shownLeft(member.place.left, width, zoom);
+                // Считаем от того места, где корабль на самом деле стоит: на оси своего коридора
+                // он не стоит — там стоит отметка места, а корабль разбросан внутри полосы
+                // и мог ещё и отойти от тесного соседа.
+                const shown = leftOf(member);
                 const enterPath = pathToEdge(shown, width, zoom, member.place.enterFrom, ENTER_GUARD);
                 // Уход: вперёд, а если нос смотрит в остров — задним ходом в другую сторону.
                 const leave = leaveCourse(
@@ -811,7 +807,7 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
                         data-motion={motionKind || undefined}
                         style={
                             {
-                                ...laneStyle(member.place, width, asideOf(member)),
+                                ...laneStyle(member.place, width, shown),
                                 // Ближний перекрывает дальнего: порядок наложения идёт от слота.
                                 zIndex: member.place.slot + 1,
                                 // Ход в процентах ширины кадра: столько корабль смещён от своего

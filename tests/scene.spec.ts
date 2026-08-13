@@ -157,57 +157,166 @@ test('на одной линии помещаются двое, и борта н
     }
 });
 
-test('тесному соседу корабль уступает воду и возвращается, когда тот ушёл', async ({ page }) => {
-    // Рейд предлагает и такие линии, где двоим на серединах коридоров не разойтись: место
-    // там есть, просто вставать придётся теснее. Кто уже стоял, тот и подвинется — а когда
-    // сосед уйдёт, вернётся на свою точку. Сохранённое место при этом не меняется: расхождение
-    // живёт только в кадре.
+test('на тесной линии первым уступает тот, кто мельче, и он же отпускает резинку', async ({ page }) => {
+    // Проверка длиннее общего срока: в ней два захода на рейд подряд, и каждый идёт по морю
+    // своим настоящим ходом — ждать приходится дважды по полминуты.
+    test.setTimeout(150_000);
+
+    // Рейд предлагает и такие линии, где двоим не разойтись, стоя каждый в своей полосе: место
+    // там есть, просто вставать придётся теснее. Уступает первым тот, кто мельче: ему и ходу
+    // меньше. Не хватило его хода — остаток добирает крупный. Ушёл сосед — резинка отпустила,
+    // и катер пошёл обратно на свою точку, а сохранённое место всё это время оставалось прежним.
     await openNewChannel(page, 'rezinka');
     await page.getByText('Малый ракетный корабль', { exact: true }).click();
-    await page.locator('[data-berth="5-center"]').click();
+    await page.locator('[data-berth="8-center"]').click();
     await join(page, 'Гром', '404');
 
-    // Меряем самый широкий корпус в кадре: на линию встанет катер, и спутать их не с чем.
-    const bigShip = (): Promise<{ middle: number; width: number }> =>
-        page.evaluate(() => {
-            const boxes = [...document.querySelectorAll('[class*="shipSlot"]')].map((slot) =>
-                slot.getBoundingClientRect()
-            );
-            const widest = boxes.sort((one, other) => other.width - one.width)[0];
-            return { middle: widest.left + widest.width / 2, width: widest.width };
-        });
+    // Корабли по ширине корпуса: катер и корабль в полсотни метров спутать не с чем. Кроме
+    // самого корпуса берём и мерки его дорожки: где стоит корабль (--slot-left) и половина
+    // его ширины (--slot-half) — обе в процентах кадра. Уступить дальше кромки нельзя,
+    // и «уступил всё, что мог» — это ровно --slot-left, равный --slot-half.
+    const hulls = (): Promise<
+        { left: number; right: number; middle: number; width: number; at: number; half: number }[]
+    > =>
+        page.evaluate(() =>
+            [...document.querySelectorAll<HTMLElement>('[class*="shipLane"]')]
+                .map((lane) => {
+                    const box = lane.querySelector('[class*="shipSlot"]')!.getBoundingClientRect();
+                    return {
+                        left: box.left,
+                        right: box.right,
+                        middle: box.left + box.width / 2,
+                        width: box.width,
+                        at: parseFloat(lane.style.getPropertyValue('--slot-left')),
+                        half: parseFloat(lane.style.getPropertyValue('--slot-half')),
+                    };
+                })
+                .sort((one, other) => one.width - other.width)
+        );
 
+    // Корпуса, когда они отстоялись. Движений здесь два, и они разной длины: ход по морю
+    // у заходящего и подработка у борта у обоих, — поэтому ждём не срок, а приход на место.
+    // Куда корабль идёт, известно сразу: расстановка кладёт это в --slot-left на дорожке
+    // и меняет одним махом, а по кадру корпус едет переходом. Значит и признак покоя простой —
+    // корпус стоит серединой ровно там, куда указывает его же дорожка.
+    //
+    // Уходящий корабль в счёт не идёт: он виден в кадре ещё полминуты после того, как снялся
+    // с рейда, а сосед отпускает резинку сразу, как только тот пропал из списка канала.
+    // Помечен уходящий своим классом движения, по нему и отличаем.
+    const settled = async (): Promise<Awaited<ReturnType<typeof hulls>>> => {
+        await expect
+            .poll(
+                () =>
+                    page.evaluate(() => {
+                        const scene = document.querySelector('[class*="_scene_"]')!.getBoundingClientRect();
+                        return [...document.querySelectorAll<HTMLElement>('[class*="shipLane"]:not([data-motion])')]
+                            .map((lane) => {
+                                const box = lane.querySelector('[class*="shipSlot"]')!.getBoundingClientRect();
+                                const left = parseFloat(lane.style.getPropertyValue('--slot-left'));
+                                return Math.abs(box.left + box.width / 2 - scene.left - (left / 100) * scene.width);
+                            })
+                            .every((off) => off < 1);
+                    }),
+                { message: 'корабли так и не встали на свои места', timeout: 30000 }
+            )
+            .toBe(true);
+        return hulls();
+    };
+
+    // Ждём, пока корабль закончит заход: мерить его на ходу — мерить кромку кадра.
+    await expect(page.locator('[data-motion]'), 'корабль так и не встал на место').toHaveCount(0, { timeout: 30000 });
+    const [aloneBig] = await settled();
+
+    // Второй встаёт слева от соседа. Куда именно внутри своей полосы — заранее неизвестно:
+    // разброс считается по позывному, а позывной выдаёт бэкенд при постановке в строй.
+    // Проверять поэтому будем не расстояния в пикселях, а то, что от разброса не зависит:
+    // тесная линия у этой пары такая, что воды катеру не хватает при любом разбросе.
     await openChannel(page, 'rezinka', 'gost');
     await page.getByText('Сторожевой катер', { exact: true }).click();
-    const alone = await bigShip();
-
-    // Встаём слева от него — на линию, где вдвоём тесно.
-    const spot = await page.locator('[data-berth="5-left"]').boundingBox();
+    const spot = await page.locator('[data-berth="8-left"]').boundingBox();
     expect(spot, 'слева от соседа не нашлось места').toBeTruthy();
     await page.mouse.click(spot!.x + spot!.width / 2, spot!.y + spot!.height / 2);
     await join(page, 'Малыш', '111');
-    await page.waitForTimeout(4000);
+    await expect(page.locator('[data-motion]'), 'катер так и не встал на место').toHaveCount(0, { timeout: 30000 });
 
-    // Отошёл, и отошёл вправо — от соседа, а не куда попало. Мерка в долях собственной ширины:
-    // на другом экране и корпус, и расхождение считаются в процентах кадра.
-    const pressed = await bigShip();
-    expect((pressed.middle - alone.middle) / pressed.width, 'корабль не уступил воду тесному соседу').toBeGreaterThan(
-        0.08
-    );
+    const [tightSmall, tightBig] = await settled();
+    expect(tightSmall.right, 'корабли на тесной линии налезли друг на друга').toBeLessThan(tightBig.left);
 
-    // А место осталось прежним: в канале корабль по-прежнему стоит на середине своего коридора.
+    // Первым уступает мелкий, и на этой линии ему приходится отдать всё до последнего:
+    // он стоит вплотную к кромке кадра, дальше уступать некуда.
+    expect(tightSmall.at, 'катер уступил не всё, что у него было').toBeCloseTo(tightSmall.half, 1);
+
+    // А остаток добирает крупный: с середины своего коридора он отходит наружу — сам бы он
+    // с места не тронулся, места ему хватало.
+    expect(tightBig.at, 'крупный не добрал остаток').toBeGreaterThan(aloneBig.at + 0.05);
+    expect(tightBig.middle, 'крупный не тронулся с места в кадре').toBeGreaterThan(aloneBig.middle + 2);
+
+    // Место в канале от расхождения не меняется: разошлись они только в кадре.
     const fleet = await readState(page).then(
         (state) => Object.values(state.channels).find((item) => item.channel.slug === 'rezinka')!.members
     );
     const resident = fleet.find((member) => member.name === 'Гром')!;
-    expect(`${resident.place.slot}-${resident.place.corridor}`, 'расхождение переписало место').toBe('5-center');
+    expect(`${resident.place.slot}-${resident.place.corridor}`, 'расхождение переписало место').toBe('8-center');
 
-    // Сосед ушёл — резинка тянет корабль обратно на свою точку.
+    // Крупный уходит — и катер отпускает резинку. Уходить приходится его же вкладкой: с рейда
+    // корабль снимает только свой хозяин.
+    await openChannel(page, 'rezinka', resident.memberId);
     await page.getByLabel('Корабли на связи').click();
     await page.getByRole('button', { name: 'Уйти с рейда' }).click();
-    await page.waitForTimeout(4000);
-    const back = await bigShip();
-    expect(Math.abs(back.middle - alone.middle) / back.width, 'корабль не вернулся на своё место').toBeLessThan(0.05);
+
+    const [freeSmall] = await settled();
+    expect(freeSmall.at, 'катер так и остался прижатым к кромке').toBeGreaterThan(freeSmall.half + 0.05);
+    expect(freeSmall.middle, 'катер не отошёл от кромки обратно').toBeGreaterThan(tightSmall.middle + 2);
+});
+
+test('разброс по коридору у всех вкладок одинаковый', async ({ page }) => {
+    // Внутри своей полосы корабль стоит не по оси, а вразброс — иначе строй выглядит
+    // построенным. Разброс этот считает сцена, у каждой вкладки свой экран, и потому он
+    // обязан быть чистой функцией от того, что пришло с бэкенда: участник и его место.
+    // Возьмись он от Math.random — один и тот же рейд у двух собеседников выглядел бы
+    // по-разному, и «твой корабль вон тот, слева» перестало бы значить хоть что-нибудь.
+    await openNewChannel(page, 'razbros');
+    await join(page, 'Гром', '404');
+    await openChannel(page, 'razbros', 'vtoroy');
+    await join(page, 'Вымпел', '303', 'Сторожевой катер');
+    await openChannel(page, 'razbros', 'tretiy');
+    await join(page, 'Резвый', '202', 'Торпедный катер');
+
+    // Смотрим глазами двух участников: у каждого свой корабль и своя вкладка. Соседняя
+    // вкладка того же контекста делит с этой хранилище, то есть видит тот же рейд.
+    const fleet = await readState(page).then(
+        (state) => Object.values(state.channels).find((item) => item.channel.slug === 'razbros')!.members
+    );
+    expect(fleet, 'на рейде не собралось трёх кораблей').toHaveLength(3);
+
+    // Что сравнивать: дальность корабля и середину его корпуса по ширине кадра. Дальность
+    // берём из порядка наложения — он и есть номер линии, — а середина и есть то число,
+    // которое двигает разброс. Подписей в обычном кадре нет, они живут в разметке выбора,
+    // поэтому корабли различаем линией и шириной корпуса, а не именем.
+    const picture = (tab: Page): Promise<{ slot: number; middle: number; width: number }[]> =>
+        tab.evaluate(() =>
+            [...document.querySelectorAll<HTMLElement>('[class*="shipLane"]')]
+                .map((lane) => {
+                    const box = lane.querySelector('[class*="shipSlot"]')!.getBoundingClientRect();
+                    return {
+                        slot: Number(lane.style.zIndex) - 1,
+                        middle: Math.round((box.left + box.width / 2) * 100) / 100,
+                        width: Math.round(box.width * 100) / 100,
+                    };
+                })
+                .sort((one, other) => one.slot - other.slot || one.middle - other.middle)
+        );
+
+    await openChannel(page, 'razbros', fleet[0].memberId);
+    const mine = await picture(page);
+
+    const other = await page.context().newPage();
+    await other.setViewportSize(page.viewportSize()!);
+    await openChannel(other, 'razbros', fleet[2].memberId);
+    const theirs = await picture(other);
+    await other.close();
+
+    expect(theirs, 'у второй вкладки рейд оказался другим').toEqual(mine);
 });
 
 test('свободные места на рейде зависят от выбранного корабля', async ({ page }) => {
@@ -217,10 +326,11 @@ test('свободные места на рейде зависят от выбр
     //
     // Рейд для этого строим сами, а не берём демо-канал: там расстановка каждый раз своя,
     // и попадётся ли в ней линия, где катеру место есть, а кораблю нет, — как повезёт.
-    // Здесь же ровно один сосед и ровно на той дальности, где разница и должна быть видна.
+    // Здесь же ровно один сосед и ровно на той дальности, где разница и должна быть видна:
+    // у самого наблюдателя корпуса написаны крупнее всего, и кадра на двоих хватает не всем.
     await openNewChannel(page, 'razmer');
     await page.getByText('Сторожевой катер', { exact: true }).click();
-    await page.locator('[data-berth="5-center"]').click();
+    await page.locator('[data-berth="9-center"]').click();
     await join(page, 'Малыш', '111');
 
     // Возвращаемся тем, кого в канале нет: форма открывается заново, а катер остаётся стоять.
@@ -234,14 +344,15 @@ test('свободные места на рейде зависят от выбр
     const forCutter = await offered('Сторожевой катер');
     const forShip = await offered('Малый ракетный корабль');
 
-    // Рядом с катером на пятой линии второму катеру место есть — в обоих соседних коридорах.
-    expect(forCutter, 'катеру не предложили место борт о борт').toContain('5-left');
-    expect(forCutter, 'катеру не предложили место борт о борт').toContain('5-right');
+    // Рядом с катером на девятой линии второму катеру место есть — в обоих соседних коридорах:
+    // два катера, разойдясь по бортам, в кадр помещаются.
+    expect(forCutter, 'катеру не предложили место борт о борт').toContain('9-left');
+    expect(forCutter, 'катеру не предложили место борт о борт').toContain('9-right');
 
-    // А кораблю в полсотни метров — нет: между серединами соседних коридоров треть кадра,
-    // и его корпус этой трети не оставляет. Линия занята им целиком.
+    // А кораблю в полсотни метров — нет: вместе с катером он шире кадра, и разводить их
+    // некуда. Линия занята им целиком, в каком бы коридоре катер ни стоял.
     expect(
-        forShip.filter((berth) => berth.startsWith('5-')),
+        forShip.filter((berth) => berth.startsWith('9-')),
         'крупному кораблю предложили занятую линию'
     ).toHaveLength(0);
 
@@ -484,13 +595,13 @@ test('разметка гаснет вместе с флотом, а не кад
 });
 
 test('подпись стоит на точке своего места, даже когда корабль отведён от края кадра', async ({ page }) => {
-    // Подпись подписывает место, а не корпус. Корабль над ней может стоять чуть в стороне:
-    // у края кадра его отодвигает внутрь собственная ширина (shownLeft), а на тесной линии
-    // он уступает воду соседу. Возьми подпись мерки корпуса — у ближних боковых мест имя
-    // уехало бы вместе с ним и повисло между двумя стоянками.
+    // Подпись подписывает место, а не корпус. Корабль над ней почти никогда не стоит ровно:
+    // внутри своего коридора он разбросан по хешу, у края кадра его отодвигает внутрь
+    // собственная ширина, а на тесной линии он уступает воду соседу. Возьми подпись мерки
+    // корпуса — у ближних боковых мест имя уехало бы вместе с ним и повисло между стоянками.
     //
-    // Берём для этого самый крупный корабль на ближней боковой линии: там отступ от края
-    // кадра больше всего, и разойтись корпусу с точкой есть куда.
+    // Берём для этого самый крупный корабль на ближней боковой линии: он там шире своего
+    // коридора, кадр вдавливает его внутрь целиком, и с точкой они расходятся заведомо.
     await openNewChannel(page, 'podpis');
     await page.getByText('Малый ракетный корабль', { exact: true }).click();
     const mine = '9-left';
