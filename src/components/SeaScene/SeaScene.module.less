@@ -665,7 +665,6 @@
     width: calc(var(--slot-width) * var(--ship-zoom));
     translate: -50%;
     transform-origin: 50% 82%;
-    transition: opacity @berth-fade;
     pointer-events: none;
 }
 
@@ -946,6 +945,18 @@
     animation: heave @wave-duration @wave-ease infinite;
     animation-delay: var(--wave-start, 0s);
     pointer-events: none;
+}
+
+// Корпус с номером и огнями, без тени на воде. Отдельный блок нужен ровно за тем, чтобы
+// высветление призрака (.shipAside) досталось кораблю и не досталось тени: тень тёмная,
+// и то же осветление вывернуло бы её в светлое пятно под кораблём.
+//
+// Переход держится здесь, а не на классе призрака: класс приходит и уходит, а плавность
+// нужна в обе стороны.
+.shipBody {
+    transition:
+        opacity @berth-fade,
+        filter @berth-fade;
 }
 
 // Пока открыта форма, весь флот отходит на второй план: человек разбирается с рейдом,

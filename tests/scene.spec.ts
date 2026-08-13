@@ -508,9 +508,21 @@ test('пока выбирают место, призраками становя�
     // Свой корабль высветляется наравне с чужими: место под ним закрыто им же, и, останься
     // он плотным, единственной невидимой стоянкой на рейде была бы как раз его собственная.
     const solid = await page
-        .locator('[class*="shipSlot"]')
-        .evaluateAll((slots) => slots.filter((slot) => getComputedStyle(slot).filter === 'none').length);
+        .locator('[class*="shipBody"]')
+        .evaluateAll((bodies) => bodies.filter((body) => getComputedStyle(body).filter === 'none').length);
     expect(solid, 'кто-то из кораблей остался плотным').toBe(0);
+
+    // Высветляется корпус, а не тень: тень тёмная, и то же осветление вывернуло бы её
+    // в светлое пятно под кораблём. Свой размывающий фильтр у тени есть всегда, поэтому
+    // сравнивать не с «none», а с отсутствием осветления.
+    const shadows = await page
+        .locator('[class*="shipShadow"]')
+        .evaluateAll((marks) => marks.map((mark) => getComputedStyle(mark).filter));
+    expect(shadows.length, 'теней в кадре не нашлось, проверять нечего').toBeGreaterThan(0);
+    expect(
+        shadows.every((filter) => !filter.includes('brightness')),
+        'тень на воде высветлилась вместе с кораблём'
+    ).toBe(true);
 
     // Имя написано на воде: волна поднимает и опускает его вместе с корпусом, но крена ему
     // не передаёт — тангаж качает корабль, а не надпись под ним.

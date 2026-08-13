@@ -789,17 +789,7 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
                         }
                     >
                         <div
-                            className={[
-                                styles.shipSlot,
-                                canEdit ? styles.shipMine : '',
-                                // Пока выбирают место, весь флот отходит на второй план: речь
-                                // сейчас про рейд, и вода должна читаться сквозь любой корпус.
-                                // Свой корабль тут не исключение — его как раз и разбирают,
-                                // и место под ним закрыто им же.
-                                berths ? styles.shipAside : '',
-                            ]
-                                .filter(Boolean)
-                                .join(' ')}
+                            className={[styles.shipSlot, canEdit ? styles.shipMine : ''].filter(Boolean).join(' ')}
                             // Чужие корабли не трогаем: рейд общий, но распоряжаться там можно
                             // только собой.
                             onClick={canEdit ? onEditShip : undefined}
@@ -838,18 +828,28 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
                                 >
                                     {/* Тень идёт перед кораблём в разметке, поэтому корпус её перекрывает. */}
                                     <div className={styles.shipShadow} />
-                                    <Ship
-                                        kind={member.shipKind}
-                                        name={member.name}
-                                        hullNumber={member.hullNumber}
-                                        facing={member.place.facing}
-                                        // Идёт — ходовые огни, стоит на рейде — якорные. Это про всех
-                                        // в кадре, а не только про свой корабль: огни у корабля не зависят
-                                        // от того, из чьей вкладки на него смотрят.
-                                        mode={motionKind ? 'underway' : 'anchored'}
-                                        depth={depth}
-                                        morseFeed={morseFeeds[member.memberId] ?? null}
-                                    />
+                                    {/* Пока выбирают место, весь флот отходит на второй план: речь
+                                        сейчас про рейд, и вода должна читаться сквозь любой корпус.
+                                        Свой корабль тут не исключение — его как раз и разбирают,
+                                        и место под ним закрыто им же.
+                                        Высветляется при этом только корпус. Тень на воде осталась
+                                        снаружи нарочно: она тёмная, и то же осветление вывернуло бы
+                                        её в светлое пятно под кораблём — вместо «отошёл на второй
+                                        план» вышло бы «подсвечен снизу». */}
+                                    <div className={[styles.shipBody, berths ? styles.shipAside : ''].join(' ').trim()}>
+                                        <Ship
+                                            kind={member.shipKind}
+                                            name={member.name}
+                                            hullNumber={member.hullNumber}
+                                            facing={member.place.facing}
+                                            // Идёт — ходовые огни, стоит на рейде — якорные. Это про всех
+                                            // в кадре, а не только про свой корабль: огни у корабля не зависят
+                                            // от того, из чьей вкладки на него смотрят.
+                                            mode={motionKind ? 'underway' : 'anchored'}
+                                            depth={depth}
+                                            morseFeed={morseFeeds[member.memberId] ?? null}
+                                        />
+                                    </div>
                                 </div>
                             </div>
                         </div>
