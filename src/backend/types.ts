@@ -101,6 +101,7 @@ export type ChannelErrorCode =
     | 'name-taken'
     | 'hull-taken'
     | 'member-not-found'
+    | 'not-senior'
     | 'message-too-long';
 
 export class ChannelError extends Error {
@@ -139,6 +140,15 @@ export interface ChannelBackend {
     join(request: ChannelAddress & { member: MemberDraft }): Promise<{ member: Member }>;
     updateMember(request: MemberAddress & { member: MemberDraft }): Promise<{ member: Member }>;
     leave(request: MemberAddress): Promise<void>;
+    /**
+     * Высадить чужой корабль с рейда. Адресует запрос тот, кто высаживает, — и это должен быть
+     * старший на рейде (`channel.owner`), иначе `not-senior`. Кого высаживают, идёт ссылкой
+     * в теле: это содержимое запроса, а не его адрес.
+     *
+     * Отдельным методом, а не флагом у `leave`: уйти самому и быть высаженным — разные события
+     * и для правил (одно доступно каждому, другое одному), и для ленты.
+     */
+    kick(request: MemberAddress & { member: MemberRef }): Promise<void>;
 
     sendMessage(request: MemberAddress & { message: MessageDraft }): Promise<{ message: Message }>;
     setTyping(request: MemberAddress & { typing: { chars: string } }): Promise<void>;

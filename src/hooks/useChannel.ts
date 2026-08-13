@@ -33,6 +33,8 @@ export interface ChannelController {
     join: (draft: MemberDraft) => Promise<void>;
     updateMe: (draft: MemberDraft) => Promise<void>;
     leave: () => Promise<void>;
+    /** Высадить чужой корабль. Доступно только старшему на рейде — это проверяет бэкенд. */
+    kick: (memberId: string) => Promise<void>;
     sendMessage: (draft: MessageDraft) => Promise<void>;
     reportTyping: (chars: string) => void;
 }
@@ -186,6 +188,15 @@ export function useChannel(slug: string | null, memberIdFromUrl: string | null):
         }
     }, [channelId, myId]);
 
+    const kick = useCallback(
+        async (memberId: string) => {
+            if (channelId && myId) {
+                await backend.kick({ channelId, memberId: myId, member: { memberId } });
+            }
+        },
+        [channelId, myId]
+    );
+
     const sendMessage = useCallback(
         async (draft: MessageDraft) => {
             if (channelId && myId) {
@@ -204,5 +215,5 @@ export function useChannel(slug: string | null, memberIdFromUrl: string | null):
         [channelId, myId]
     );
 
-    return { loading, channel, myId, typing, join, updateMe, leave, sendMessage, reportTyping };
+    return { loading, channel, myId, typing, join, updateMe, leave, kick, sendMessage, reportTyping };
 }

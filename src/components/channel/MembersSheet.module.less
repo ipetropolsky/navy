@@ -105,3 +105,17 @@
     color: var(--color-text-muted);
     font-size: var(--font-size-base);
 }
+
+// Старший на рейде. Не подпись в строчку с типом корабля, а отдельная плашка: это не про
+// корабль, а про его место в канале, и путать одно с другим не стоит. Ширина по тексту —
+// плашка на всю строку читалась бы полосой состояния, а не отметкой у позывного.
+.badge {
+    align-self: flex-start;
+    margin-top: 4px;
+    padding: 1px 8px;
+    border-radius: 999px;
+    background: var(--color-accent-faint);
+    color: var(--color-accent);
+    font-size: var(--font-size-caption);
+    white-space: nowrap;
+}

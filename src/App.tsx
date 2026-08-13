@@ -315,6 +315,7 @@ export default function App() {
                 open={sheetOpen}
                 members={members}
                 myId={myId}
+                seniorId={channel?.channel.owner?.memberId ?? null}
                 onEditMe={() => {
                     setSheetOpen(false);
                     setEditing(true);
@@ -323,6 +324,9 @@ export default function App() {
                     setSheetOpen(false);
                     void channelState.leave();
                 }}
+                // Шторка остаётся открытой: высадив один корабль, старший чаще всего смотрит
+                // на список дальше, а не уходит из него.
+                onKick={(memberId) => void channelState.kick(memberId)}
                 onClose={() => setSheetOpen(false)}
                 onHail={handleHail}
             />

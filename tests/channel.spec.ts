@@ -90,3 +90,47 @@ test('переоснащение пишет в ленту, что было и ч
 
     await expect(systemLines(page).last()).toHaveText('Сторожевой катер «Альбатрос» 317 теперь тральщик «Буран» 512');
 });
+
+/**
+ * Старший на рейде. Правило простое: старший в канале один, это тот, кто встал первым,
+ * и только он может высадить чужой корабль. Проверяем обе стороны — что старшему это можно
+ * и что остальным нечем даже попробовать.
+ */
+test('старший на рейде отмечен бэджем и высаживает чужие корабли', async ({ page }) => {
+    await openChannel(page, DEMO, ALBATROS);
+    await expect(ships(page)).toHaveCount(3);
+
+    await page.getByLabel('Корабли на связи').click();
+    await expect(page.getByText('Старший на рейде')).toHaveCount(1);
+
+    // Высадка — из строчки того, кого высаживают: свою кнопку старший в списке не находит.
+    await expect(page.getByLabel(/^Высадить/)).toHaveCount(2);
+    await page.getByLabel('Высадить «Вымпел»').click();
+
+    // Считаем не корабли в кадре, а канал: высаженный ещё уходит за кромку и висит в сцене
+    // столько же, сколько ушедший сам.
+    await expect(systemLines(page).last()).toHaveText('Малый ракетный корабль «Вымпел» 561 выдворен с рейда');
+    const crew = await readState(page);
+    expect(crew.channels['ch-demo'].members.map((member) => member.memberId)).not.toContain(VYMPEL);
+});
+
+test('не старшему высаживать нечем, а после его ухода старшинство переходит дальше', async ({ page }) => {
+    await openChannel(page, DEMO, VYMPEL);
+    await page.getByLabel('Корабли на связи').click();
+    await expect(page.getByLabel(/^Высадить/)).toHaveCount(0);
+
+    // Старший ушёл — канал не остаётся без него: старшинство берёт тот, кто дольше всех
+    // из оставшихся. Иначе высаживать было бы уже некому.
+    await openChannel(page, DEMO, ALBATROS);
+    await page.getByLabel('Корабли на связи').click();
+    await page.getByRole('button', { name: 'Уйти с рейда' }).click();
+    await expect(page.getByPlaceholder('Гром')).toBeVisible();
+
+    const state = await readState(page);
+    expect(state.channels['ch-demo'].channel.owner?.memberId).toBe(VYMPEL);
+
+    // И это видно в списке: бэдж переехал на нового старшего, а с ним и кнопки высадки.
+    await openChannel(page, DEMO, VYMPEL);
+    await page.getByLabel('Корабли на связи').click();
+    await expect(page.getByLabel(/^Высадить/)).toHaveCount(1);
+});

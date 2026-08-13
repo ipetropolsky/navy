@@ -91,7 +91,11 @@ export interface StoredState {
     version: number;
     channels: Record<
         string,
-        { channel: { channelId: string; slug: string }; members: StoredMember[]; messages: StoredMessage[] }
+        {
+            channel: { channelId: string; slug: string; owner?: { memberId: string } };
+            members: StoredMember[];
+            messages: StoredMessage[];
+        }
     >;
 }
 

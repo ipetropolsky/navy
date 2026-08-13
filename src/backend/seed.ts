@@ -78,6 +78,9 @@ export const createDemoChannel = (): ChannelSnapshot => ({
         slug: DEMO_CHANNEL_SLUG,
         title: 'Эскадра «Полночь»',
         createdAt: minutesAfterMidnight(21, 30),
+        // Старший — тот, кто встал первым: в настоящем канале это выходит само собой,
+        // и демо не должно быть устроено иначе.
+        owner: { memberId: DEMO_CREW[0].memberId },
     },
     members: placeDemoCrew(),
     messages: [

@@ -43,7 +43,7 @@ const BROADCAST_NAME = 'kilvater';
  * Здесь должна появиться миграция раньше, чем в канале заведётся первый неигрушечный разговор.
  * Подробно — в docs/BACKEND-API.md, раздел «К чужим данным — бережно».
  */
-const STORAGE_VERSION = 10;
+const STORAGE_VERSION = 11;
 
 /** Ключ, под которым состояние лежало до появления версии. Чистим, чтобы не мусорить. */
 const LEGACY_STORAGE_KEY = 'kilvater.v1';
@@ -209,6 +209,32 @@ export function createLocalBackend(): ChannelBackend {
         }
     };
 
+    /**
+     * Вычеркнуть корабль из канала и передать старшинство, если ушёл сам старший. Общее
+     * для ухода и высадки: событий это два разных, а происходит одно и то же.
+     *
+     * Старшинство переходит к тому, кто дольше всех на рейде. Оставлять канал без старшего
+     * нельзя: высаживать тогда некому, и первый же ушедший запирал бы правило навсегда.
+     * Ушли все — старшего снова нет, и им станет тот, кто придёт следующим.
+     */
+    const dropMember = (channelId: string, memberId: string): Member | null => {
+        const { gone, channel } = mutate(channelId, (snapshot) => {
+            const member = snapshot.members.find((item) => item.memberId === memberId) ?? null;
+            snapshot.members = snapshot.members.filter((item) => item.memberId !== memberId);
+            if (snapshot.channel.owner?.memberId !== memberId) {
+                return { gone: member, channel: null };
+            }
+            const senior = [...snapshot.members].sort((one, other) => one.joinedAt - other.joinedAt)[0];
+            snapshot.channel.owner = senior ? { memberId: senior.memberId } : undefined;
+            return { gone: member, channel: { ...snapshot.channel } };
+        });
+        emit(channelId, { type: 'member-left', member: { memberId } });
+        if (channel) {
+            emit(channelId, { type: 'channel-updated', channel });
+        }
+        return gone;
+    };
+
     return {
         getChannel: ({ channelId }) => delay(readState().channels[channelId] ?? null),
 
@@ -274,8 +300,20 @@ export function createLocalBackend(): ChannelBackend {
                 place,
                 joinedAt: Date.now(),
             };
-            mutate(channelId, (current) => current.members.push(member));
+            // Первый вставший на рейд становится старшим: канал заводят пустым, и до этого
+            // мига отвечать за него некому.
+            const channel = mutate(channelId, (current) => {
+                current.members.push(member);
+                if (current.channel.owner) {
+                    return null;
+                }
+                current.channel.owner = { memberId: member.memberId };
+                return { ...current.channel };
+            });
             emit(channelId, { type: 'member-joined', member });
+            if (channel) {
+                emit(channelId, { type: 'channel-updated', channel });
+            }
             // Вход отмечается в ленте: корабль заплывает в кадр молча, и без строчки в чате
             // непонятно, кто пришёл. Текст складывает бэкенд — тогда он останется прежним,
             // даже если корабль потом сменит позывной.
@@ -322,16 +360,31 @@ export function createLocalBackend(): ChannelBackend {
         leave: async ({ channelId, memberId }) => {
             // Кем корабль был, узнаём до того, как вычеркнем его: после вычёркивания
             // называть в строчке будет нечего.
-            const gone = mutate(channelId, (snapshot) => {
-                const member = snapshot.members.find((item) => item.memberId === memberId) ?? null;
-                snapshot.members = snapshot.members.filter((item) => item.memberId !== memberId);
-                return member;
-            });
-            emit(channelId, { type: 'member-left', member: { memberId } });
+            const gone = dropMember(channelId, memberId);
             if (gone) {
                 // «Сняться с рейда» — это и значит покинуть якорную стоянку: подняли якорь
                 // и пошли. Ровно то, что происходит в кадре, и ровно так об этом и говорят.
                 postNotice(channelId, memberId, `${shipTitle(gone)} снялся с рейда`, Date.now());
+            }
+            return delay(undefined);
+        },
+
+        kick: async ({ channelId, memberId, member: { memberId: targetId } }) => {
+            const snapshot = requireChannel(channelId);
+            if (snapshot.channel.owner?.memberId !== memberId) {
+                throw new ChannelError('not-senior', 'Высадить корабль может только старший на рейде');
+            }
+            if (targetId === memberId) {
+                throw new ChannelError('not-senior', 'Старший снимается с рейда сам, а не высаживает себя');
+            }
+            if (!snapshot.members.some((item) => item.memberId === targetId)) {
+                throw new ChannelError('member-not-found', 'Такого корабля в канале нет');
+            }
+            const gone = dropMember(channelId, targetId);
+            if (gone) {
+                // Строчка от старшего, а не от высаженного: распорядился он, и по цвету
+                // позывного в ленте это видно.
+                postNotice(channelId, memberId, `${shipTitle(gone)} выдворен с рейда`, Date.now());
             }
             return delay(undefined);
         },
