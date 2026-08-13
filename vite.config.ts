@@ -9,6 +9,7 @@ import {
     COLUMN_WIDTH,
     MOBILE_MAX_WIDTH,
     PINNED_ACTIONS_MIN_HEIGHT,
+    SHADE_DESK_PEEK_HEIGHT,
     SHADE_PEEK_HEIGHT,
     SHADE_TOP_GAP,
 } from './src/config/layout';
@@ -24,6 +25,7 @@ export default defineConfig({
                     `@mobile-width: ${MOBILE_MAX_WIDTH}px;\n` +
                     `@pinned-actions-height: ${PINNED_ACTIONS_MIN_HEIGHT}px;\n` +
                     `@shade-peek: ${SHADE_PEEK_HEIGHT}px;\n` +
+                    `@shade-desk-peek: ${SHADE_DESK_PEEK_HEIGHT}px;\n` +
                     `@shade-top-gap: ${SHADE_TOP_GAP}px;\n` +
                     `@column-width: ${COLUMN_WIDTH}px;\n`,
             },

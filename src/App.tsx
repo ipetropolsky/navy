@@ -14,7 +14,7 @@ import IconButton from '@/components/ui/IconButton';
 import Panel from '@/components/ui/Panel';
 import Shade from '@/components/ui/Shade';
 import { useSnackbar } from '@/components/ui/Snackbar';
-import { ShadeStop } from '@/components/ui/shadeStops';
+import { ShadeStop, nextStop } from '@/components/ui/shadeStops';
 import { HAIL_SIGNAL, morseDuration } from '@/hooks/morse';
 import { useChannel } from '@/hooks/useChannel';
 import { channelLink, useRoute } from '@/routing';
@@ -431,10 +431,10 @@ export default function App() {
                                 onClick={() => {
                                     setSheetOpen((on) => !on);
                                     // Открывать список в щёлке незачем: там видно один
-                                    // заголовок. Поднимаем до половины, а выше человек
-                                    // дотянет сам.
+                                    // заголовок. Поднимаем на ступень выше, а дальше человек
+                                    // дотянет сам; на десктопе ступень эта сразу верхняя.
                                     if (!sheetOpen && shadeStop === 'peek') {
-                                        setShadeStop('half');
+                                        setShadeStop(nextStop('peek', mobile));
                                     }
                                 }}
                                 aria-label="Корабли на связи"

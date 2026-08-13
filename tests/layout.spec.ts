@@ -5,6 +5,7 @@ import {
     COLUMN_WIDTH,
     MOBILE_MAX_WIDTH,
     PINNED_ACTIONS_MIN_HEIGHT,
+    SHADE_DESK_PEEK_HEIGHT,
     SHADE_PEEK_HEIGHT,
     SHADE_TOP_GAP,
 } from '@/config/layout';
@@ -897,8 +898,10 @@ test('сцена разворачивается во весь экран и св
     await expect
         .poll(async () => (await sceneBox(page)).width, { message: 'сцена не разошлась на всю ширину окна' })
         .toBe(window.width);
-    // Не всё окно: снизу сцену поджимает щёлка шторки — из-под кадра всегда торчит её край.
-    expect((await sceneBox(page)).height, 'сцена не заняла окно по высоте').toBe(window.height - SHADE_PEEK_HEIGHT);
+    // Не всё окно: снизу сцену поджимает сложенная шторка — из-под кадра всегда торчит её край.
+    expect((await sceneBox(page)).height, 'сцена не заняла окно по высоте').toBe(
+        window.height - SHADE_DESK_PEEK_HEIGHT
+    );
     expect(await buttonWidth(page), 'кнопки в шапке остались прежними').toBeGreaterThan(smallButton);
 
     // Полноэкранная сцена не съедает остальное: чат никуда не делся, он в щёлке шторки,
@@ -966,9 +969,12 @@ const shadeHeight = async (page: Page): Promise<number> => {
     return Math.round(box!.height);
 };
 
-/** Ступени в пикселях для окна такой высоты — те же числа, что считает `shadeStops`. */
-const shadeStops = (height: number) => ({
-    peek: SHADE_PEEK_HEIGHT,
+/**
+ * Ступени в пикселях для окна такой высоты — те же числа, что считает `shadeStops`.
+ * Промежуточная возвращается всегда, но ходит по ней шторка только на телефоне.
+ */
+const shadeStops = (height: number, mobile: boolean) => ({
+    peek: mobile ? SHADE_PEEK_HEIGHT : SHADE_DESK_PEEK_HEIGHT,
     half: Math.round(height / 2),
     full: height - SHADE_TOP_GAP,
 });
@@ -989,12 +995,25 @@ const dragShade = async (page: Page, by: number): Promise<void> => {
 const expectShade = (page: Page, height: number, message: string) =>
     expect.poll(() => shadeHeight(page), { message }).toBe(height);
 
-test('шторка ходит по ступеням от нажатия на ручку', async ({ page }) => {
+test('шторка ходит по ступеням от нажатия на ручку, и лестниц этих две', async ({ page }) => {
     await openChannel(page, DEMO, ALBATROS);
     await page.getByRole('button', { name: 'Развернуть сцену' }).click();
-    const stops = shadeStops(page.viewportSize()!.height);
+    const desk = shadeStops(page.viewportSize()!.height, false);
 
-    await expectShade(page, stops.peek, 'развёрнутая сцена открылась не со щёлкой');
+    // На широком окне ступени две: сложена или во весь кадр. Промежуточной там нет —
+    // от сложенной шторки она отличается на полосу, ради которой не стоит лишнее движение.
+    await expectShade(page, desk.peek, 'развёрнутая сцена открылась не сложенной шторкой');
+    await page.getByRole('button', { name: SHADE_HANDLE }).click();
+    await expectShade(page, desk.full, 'с первого нажатия шторка не дошла до верха');
+    await page.getByRole('button', { name: SHADE_HANDLE }).click();
+    await expectShade(page, desk.peek, 'с верхней ступени шторка не сложилась обратно');
+
+    // На телефоне между ними есть половина: там весь экран с ладонь, и с половины видно
+    // сразу и кадр, и переписку.
+    const phone = { width: MOBILE_MAX_WIDTH - 90, height: 844 };
+    await page.setViewportSize(phone);
+    const stops = shadeStops(phone.height, true);
+    await expectShade(page, stops.peek, 'на телефоне шторка не ужалась до щёлки');
     await page.getByRole('button', { name: SHADE_HANDLE }).click();
     await expectShade(page, stops.half, 'с первого нажатия шторка не дошла до половины');
     await page.getByRole('button', { name: SHADE_HANDLE }).click();
@@ -1004,9 +1023,12 @@ test('шторка ходит по ступеням от нажатия на р�
 });
 
 test('шторку можно дотянуть до верха одним движением, а коротким рывком — не сдвинуть', async ({ page }) => {
+    // Телефонное окно: ступеней там три, и на трёх видно и короткий рывок, и длинный бросок
+    // через промежуточную.
+    await page.setViewportSize({ width: MOBILE_MAX_WIDTH - 90, height: 844 });
     await openChannel(page, DEMO, ALBATROS);
     await page.getByRole('button', { name: 'Развернуть сцену' }).click();
-    const stops = shadeStops(page.viewportSize()!.height);
+    const stops = shadeStops(page.viewportSize()!.height, true);
     await expectShade(page, stops.peek, 'развёрнутая сцена открылась не со щёлкой');
 
     // Четверть пути до половины: ближе к тому месту, откуда тянули.
@@ -1028,9 +1050,10 @@ test('шторку можно дотянуть до верха одним дви
  * во весь экран просили сцену, и лента сообщений на два монитора этого обещания не исполняет.
  * Ширину она держит ту же, что колонка в обычном виде, и стоит по центру кадра.
  *
- * Второе обещание — про кнопки внутри. Прилипшая полоса кнопок в щёлке заняла бы почти всю
- * видимую часть, и вместо «видно, что там лежит» из-под кадра торчали бы одни кнопки. Поэтому
- * в щёлке прилипание снято, а с половины и выше возвращается — там уже есть что листать.
+ * Второе обещание — про кнопки внутри. На широком окне сложенная шторка рабочая, а не щёлка:
+ * в ней помещаются последние реплики с полем ввода, и полоса кнопок липнет к нижней кромке
+ * на любой ступени. Снято прилипание только в телефонной щёлке — там прилипшая полоса заняла
+ * бы почти всю видимую часть (см. отдельную проверку ниже).
  */
 const actionsPosition = (page: Page): Promise<string> =>
     page
@@ -1038,31 +1061,49 @@ const actionsPosition = (page: Page): Promise<string> =>
         .first()
         .evaluate((node) => getComputedStyle(node).position);
 
-test('на широком окне шторка держит колонку, а кнопки в ней липнут не раньше половины', async ({ page }) => {
+test('на широком окне шторка держит колонку, а кнопки в ней липнут на любой ступени', async ({ page }) => {
     // Окно шире колонки вдвое: на нём и видно, что шторка за кадром не растянулась. Высота
     // выше отсечки прилипания, иначе кнопки не липли бы ни на одной ступени.
     await page.setViewportSize({ width: 2 * COLUMN_WIDTH, height: PINNED_ACTIONS_MIN_HEIGHT + 100 });
     await openChannel(page, DEMO, ALBATROS);
     await page.getByRole('button', { name: 'Развернуть сцену' }).click();
     const window = page.viewportSize()!;
-    const stops = shadeStops(window.height);
-    await expectShade(page, stops.peek, 'развёрнутая сцена открылась не со щёлкой');
+    const stops = shadeStops(window.height, false);
+    await expectShade(page, stops.peek, 'развёрнутая сцена открылась не сложенной шторкой');
 
     const box = (await page.getByRole('region').first().boundingBox())!;
     expect(Math.round(box.width), 'шторка растянулась вслед за кадром').toBe(COLUMN_WIDTH);
     expect(Math.round(box.x + box.width / 2), 'шторка встала не по центру кадра').toBe(window.width / 2);
 
-    // Список кораблей — там кнопки как раз прилипающие. Открывается он сразу на половине:
-    // из щёлки списка не видно.
+    // Список кораблей — там кнопки как раз прилипающие. Открывается он сразу до верха:
+    // на широком окне следующая ступень за сложенной — она же и последняя.
+    await openSheet(page);
+    await expectShade(page, stops.full, 'список кораблей открылся не до верха');
+    expect(await actionsPosition(page), 'на верхней ступени кнопки не прилипли').toBe('sticky');
+
+    await page.getByRole('button', { name: SHADE_HANDLE }).click();
+    await expectShade(page, stops.peek, 'шторка не сложилась обратно');
+    expect(await actionsPosition(page), 'в сложенной шторке кнопки отлипли').toBe('sticky');
+});
+
+/**
+ * Телефонная щёлка — единственное место, где прилипание снято: прилипшая полоса кнопок
+ * заняла бы почти всю видимую часть, и вместо обещанного «видно, что там лежит» из-под кадра
+ * торчали бы одни кнопки. С половины и выше прилипание возвращается — там уже есть что листать.
+ */
+test('в телефонной щёлке кнопки не липнут, а с половины липнут', async ({ page }) => {
+    // Высота выше отсечки прилипания, иначе кнопки не липли бы ни на одной ступени.
+    await page.setViewportSize({ width: MOBILE_MAX_WIDTH - 90, height: PINNED_ACTIONS_MIN_HEIGHT + 100 });
+    await openChannel(page, DEMO, ALBATROS);
+    await page.getByRole('button', { name: 'Развернуть сцену' }).click();
+    const stops = shadeStops(page.viewportSize()!.height, true);
+    await expectShade(page, stops.peek, 'развёрнутая сцена открылась не со щёлкой');
+
     await openSheet(page);
     await expectShade(page, stops.half, 'список кораблей открылся не на половине');
     expect(await actionsPosition(page), 'на половине кнопки не прилипли').toBe('sticky');
 
-    // Половина → верх → щёлка: список остаётся тот же, меняется только ступень.
     await page.getByRole('button', { name: SHADE_HANDLE }).click();
-    await expectShade(page, stops.full, 'шторка не дошла до верха');
-    expect(await actionsPosition(page), 'на верхней ступени кнопки не прилипли').toBe('sticky');
-
     await page.getByRole('button', { name: SHADE_HANDLE }).click();
     await expectShade(page, stops.peek, 'шторка не вернулась в щёлку');
     expect(await actionsPosition(page), 'в щёлке кнопки всё равно прилипли').toBe('static');
@@ -1070,29 +1111,26 @@ test('на широком окне шторка держит колонку, а 
 
 /**
  * Нажатие мимо шторки её закрывает — но только с той ступени, где «мимо» и правда мимо.
- * Полностью выехавшая шторка накрывает всё, и кроме неё в кадре одно затемнение; на половине
- * же под ней живой кадр, по которому выбирают место на рейде, — и нажатие по воде там
+ * Полностью выехавшая шторка накрывает всё, и кроме неё в кадре одно затемнение; сложенная
+ * же оставляет живой кадр, по которому выбирают место на рейде, — и нажатие по воде там
  * означает выбор места, а не «закрой».
  */
-test('нажатие мимо шторки опускает её в щёлку, а с половины — не трогает', async ({ page }) => {
+test('нажатие мимо шторки складывает её, а сложенную — не трогает', async ({ page }) => {
     await openChannel(page, DEMO, ALBATROS);
     await page.getByRole('button', { name: 'Развернуть сцену' }).click();
-    const stops = shadeStops(page.viewportSize()!.height);
-    await expectShade(page, stops.peek, 'развёрнутая сцена открылась не со щёлкой');
+    const stops = shadeStops(page.viewportSize()!.height, false);
+    await expectShade(page, stops.peek, 'развёрнутая сцена открылась не сложенной шторкой');
 
-    // Точка у левого края: мимо шторки она и на половине, и на верхней ступени — шторка
-    // держит колонку по центру.
+    // Точка у левого края: мимо шторки она на любой ступени — шторка держит колонку по центру.
     const aside = { x: 60, y: 300 };
 
-    await page.getByRole('button', { name: SHADE_HANDLE }).click();
-    await expectShade(page, stops.half, 'шторка не встала на половину');
     await page.mouse.click(aside.x, aside.y);
-    await expectShade(page, stops.half, 'нажатие по живому кадру опустило шторку с половины');
+    await expectShade(page, stops.peek, 'нажатие по живому кадру сдвинуло сложенную шторку');
 
     await page.getByRole('button', { name: SHADE_HANDLE }).click();
     await expectShade(page, stops.full, 'шторка не дошла до верха');
     await page.mouse.click(aside.x, aside.y);
-    await expectShade(page, stops.peek, 'нажатие мимо шторки не опустило её в щёлку');
+    await expectShade(page, stops.peek, 'нажатие мимо шторки не сложило её обратно');
 });
 
 /**
@@ -1109,7 +1147,7 @@ test('фокус в поле поднимает шторку до верха, а
     await page.setViewportSize({ width: MOBILE_MAX_WIDTH - 90, height: 844 });
     await openChannel(page, DEMO, ALBATROS);
     await page.getByRole('button', { name: 'Развернуть сцену' }).click();
-    const stops = shadeStops(page.viewportSize()!.height);
+    const stops = shadeStops(page.viewportSize()!.height, true);
 
     // Человек выставил половину — это и есть то, что придётся вернуть.
     await page.getByRole('button', { name: SHADE_HANDLE }).click();

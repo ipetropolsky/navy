@@ -1,6 +1,8 @@
 import { PointerEvent as ReactPointerEvent, ReactNode, useRef, useState } from 'react';
 
-import { ShadeStop, nearestStop, nextStop, stopHeight } from '@/components/ui/shadeStops';
+import { useIsMobile } from '@/utils/viewport';
+
+import { ShadeStop, nearestStop, nextStop, shadeStops, stopHeight } from '@/components/ui/shadeStops';
 
 import styles from './Shade.module.less';
 
@@ -30,8 +32,9 @@ interface ShadeProps {
 const clamp = (value: number, min: number, max: number): number => Math.min(Math.max(value, min), max);
 
 /**
- * Шторка: содержимое приложения, выезжающее снизу поверх сцены. Три положения — щёлка,
- * половина, верх, — и путь между ними один и тот же, тянут её пальцем или нажимают на ручку.
+ * Шторка: содержимое приложения, выезжающее снизу поверх сцены. На телефоне у неё три
+ * положения — щёлка, половина, верх, — на десктопе два: сложена или раскрыта (см. shadeStops).
+ * Путь между ними один и тот же, тянут её пальцем или нажимают на ручку.
  *
  * Ступени не переключаются по одной: отпущенная шторка встаёт на ближайшую к тому месту, где
  * её бросили (см. `nearestStop`). Отсюда сразу оба движения — коротким рывком уходишь на
@@ -46,6 +49,7 @@ const clamp = (value: number, min: number, max: number): number => Math.min(Math
  * отнять и не вернуть, а отнимать придётся — на время клавиатуры (см. App).
  */
 export default function Shade({ stop, onStop, label, children }: ShadeProps) {
+    const mobile = useIsMobile();
     const shadeRef = useRef<HTMLElement>(null);
     // Высота, пока шторку тянут. Она стоит inline-стилем и идёт за пальцем без перехода;
     // отпустили — стиль убираем, и высоту снова задаёт класс ступени, уже с анимацией.
@@ -83,7 +87,7 @@ export default function Shade({ stop, onStop, label, children }: ShadeProps) {
         }
         // Вверх — растём: экранный y уменьшается, а высота прибавляется.
         const height = drag.startHeight + (drag.startY - event.clientY);
-        setDragHeight(clamp(height, stopHeight('peek', drag.frame), stopHeight('full', drag.frame)));
+        setDragHeight(clamp(height, stopHeight('peek', drag.frame, mobile), stopHeight('full', drag.frame, mobile)));
     };
 
     const handlePointerUp = () => {
@@ -95,7 +99,7 @@ export default function Shade({ stop, onStop, label, children }: ShadeProps) {
             return;
         }
         draggedRef.current = true;
-        onStop(nearestStop(height, drag.frame));
+        onStop(nearestStop(height, drag.frame, mobile));
     };
 
     // Нажатие на ручку — с клавиатуры в том числе, поэтому click, а не pointerup.
@@ -104,17 +108,19 @@ export default function Shade({ stop, onStop, label, children }: ShadeProps) {
             draggedRef.current = false;
             return;
         }
-        onStop(nextStop(stop));
+        onStop(nextStop(stop, mobile));
     };
 
     const drag = dragRef.current;
-    // Затемнение набирается на последней ступени: от половины к верху. Пока тянут, считаем его
-    // по высоте, чтобы фон темнел вместе с движением, а не вспыхивал в конце.
+    // Затемнение набирается на последней ступени: от предпоследней к верху. Пока тянут, считаем
+    // его по высоте, чтобы фон темнел вместе с движением, а не вспыхивал в конце.
+    const stops = shadeStops(mobile);
+    const below = stops[stops.length - 2];
     const dim =
         drag && dragHeight !== null
             ? clamp(
-                  (dragHeight - stopHeight('half', drag.frame)) /
-                      Math.max(stopHeight('full', drag.frame) - stopHeight('half', drag.frame), 1),
+                  (dragHeight - stopHeight(below, drag.frame, mobile)) /
+                      Math.max(stopHeight('full', drag.frame, mobile) - stopHeight(below, drag.frame, mobile), 1),
                   0,
                   1
               )
