@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test';
 
+import { MOBILE_MAX_WIDTH } from '@/config/layout';
+
 import {
     ALBATROS,
     DEMO,
@@ -8,6 +10,7 @@ import {
     join,
     openChannel,
     openNewChannel,
+    openSheet,
     readState,
     send,
     ships,
@@ -133,6 +136,9 @@ test('набранный номер стоит на выбранном кора�
     await expect(kinds.nth(3).locator('[class*="hullNumber"]'), 'борт не пошёл за набором').toHaveText('42');
 });
 
+/** Звание старшего одной строкой: им подписан и бэдж, и снекбар под вымпелом. */
+const SENIOR = 'Старший на рейде';
+
 /**
  * Старший на рейде. Правило простое: старший в канале один, это тот, кто встал первым,
  * и только он может высадить чужой корабль. Проверяем обе стороны — что старшему это можно
@@ -143,7 +149,7 @@ test('старший на рейде отмечен бэджем и высажи
     await expect(ships(page)).toHaveCount(3);
 
     await page.getByLabel('Корабли на связи').click();
-    await expect(page.getByText('Старший на рейде')).toHaveCount(1);
+    await expect(page.getByText(SENIOR)).toHaveCount(1);
 
     // Высадка — из строчки того, кого высаживают: свою кнопку старший в списке не находит.
     await expect(page.getByLabel(/^Высадить/)).toHaveCount(2);
@@ -154,6 +160,35 @@ test('старший на рейде отмечен бэджем и высажи
     await expect(systemLines(page).last()).toHaveText('Малый ракетный корабль «Вымпел» 561 выдворен с рейда');
     const crew = await readState(page);
     expect(crew.channels['ch-demo'].members.map((member) => member.memberId)).not.toContain(VYMPEL);
+});
+
+/**
+ * Вымпел у позывного старшего. Он стоит на любом экране, а вот подпись словами — только там,
+ * где на неё есть ширина, и от этого зависит, кнопка вымпел или картинка. Проверяем оба
+ * состояния подряд на одной странице: важно, что переход между ними работает на живом списке,
+ * а не только на свежеоткрытом.
+ */
+test('вымпел старшего: с подписью — просто отметка, без подписи — кнопка со снекбаром', async ({ page }) => {
+    await openChannel(page, DEMO, ALBATROS);
+    await openSheet(page);
+
+    // Широкий экран: вымпел один (старший в канале один), рядом бэдж, и нажимать не на что —
+    // звание уже написано словами.
+    const pennants = page.locator('svg[class*="pennant"]');
+    await expect(pennants, 'вымпел стоит не у одного корабля').toHaveCount(1);
+    await expect(page.getByText(SENIOR), 'бэджа старшего нет на широком экране').toHaveCount(1);
+    await expect(page.getByRole('button', { name: SENIOR }), 'вымпел с подписью зачем-то нажимается').toHaveCount(0);
+
+    // Телефон: подписи нет — строка занята позывным, типом и кнопкой, — и вымпел остаётся
+    // единственным ответом на вопрос «что это за флажок». Значит, он кнопка.
+    await page.setViewportSize({ width: MOBILE_MAX_WIDTH - 90, height: 844 });
+    await expect(page.getByText(SENIOR), 'бэдж остался на телефоне').toHaveCount(0);
+    await expect(pennants, 'вымпел пропал вместе с бэджем').toHaveCount(1);
+
+    const flag = page.getByRole('button', { name: SENIOR });
+    await expect(flag, 'на телефоне вымпел не стал кнопкой').toHaveCount(1);
+    await flag.click();
+    await expect(page.locator('[class*="snackbar"]'), 'вымпел не ответил званием').toHaveText(SENIOR);
 });
 
 test('не старшему высаживать нечем, а после его ухода старшинство переходит дальше', async ({ page }) => {
