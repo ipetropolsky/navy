@@ -4,7 +4,8 @@
 Кроме уменьшения:
 - небо разворачивается по кругу и подгоняется под прежнюю рамку (см. prepare_sky);
 - месяц вырезается из старой картинки неба отдельным слоем (в новом небе месяца нет);
-- остров вырезается из своей картинки (силуэт по контуру, серый фон уходит в прозрачность).
+- остров вырезается из своей картинки (силуэт по контуру, серый фон уходит в прозрачность);
+- вымпел старшего на рейде обрезается по своим полям.
 
 Запуск: python3 tools/scene-assets/prepare-backgrounds.py
 Зависимости: Pillow, numpy, scipy (ставятся ad hoc, в проект не входят).
@@ -62,6 +63,12 @@ SEA_SOURCE = 'sea_fixed.png'
 
 ISLAND_SOURCE = 'island.png'
 ISLAND_WIDTH = 1400
+
+# Вымпел старшего на рейде: снимок настоящего вымпела, уже с прозрачным фоном. Стоит он
+# в строчке списка ростом с букву, поэтому и уменьшается сильно — но не до строчки, а вдвое
+# с запасом: экраны бывают плотные, и на них картинка берётся из тех же пикселей.
+PENNANT_SOURCE = 'senior.png'
+PENNANT_WIDTH = 320
 
 # В новом небе месяца нет, берём его из первой присланной картинки неба.
 MOON_SOURCE = 'sky_clean_3296x1028.png'
@@ -134,6 +141,18 @@ def prepare_island() -> None:
     print('island', (ISLAND_WIDTH, height))
 
 
+def prepare_pennant() -> None:
+    """Вымпел прислан с прозрачным фоном: срезаем пустые поля и уменьшаем."""
+    pennant = Image.open(SOURCES / PENNANT_SOURCE).convert('RGBA')
+    alpha = np.asarray(pennant)[..., 3] > 8
+    rows, cols = np.where(alpha.any(axis=1))[0], np.where(alpha.any(axis=0))[0]
+    pennant = pennant.crop((int(cols[0]), int(rows[0]), int(cols[-1]) + 1, int(rows[-1]) + 1))
+
+    height = round(pennant.height * PENNANT_WIDTH / pennant.width)
+    pennant.resize((PENNANT_WIDTH, height), Image.LANCZOS).save(OUT / 'pennant.png', optimize=True)
+    print('pennant', (PENNANT_WIDTH, height))
+
+
 def prepare_moon() -> None:
     img = Image.open(SOURCES / MOON_SOURCE).convert('RGB')
     arr = np.asarray(img).astype(np.float32)
@@ -195,6 +214,7 @@ def main() -> None:
     prepare_sea()
     prepare_island()
     prepare_moon()
+    prepare_pennant()
 
 
 if __name__ == '__main__':

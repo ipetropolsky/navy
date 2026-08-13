@@ -174,7 +174,7 @@ test('вымпел старшего: с подписью — просто отм
 
     // Широкий экран: вымпел один (старший в канале один), рядом бэдж, и нажимать не на что —
     // звание уже написано словами.
-    const pennants = page.locator('svg[class*="pennant"]');
+    const pennants = page.locator('img[class*="pennant"]');
     await expect(pennants, 'вымпел стоит не у одного корабля').toHaveCount(1);
     await expect(page.getByText(SENIOR), 'бэджа старшего нет на широком экране').toHaveCount(1);
     await expect(page.getByRole('button', { name: SENIOR }), 'вымпел с подписью зачем-то нажимается').toHaveCount(0);
