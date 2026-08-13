@@ -15,6 +15,7 @@ import islandUrl from '@/assets/scene/island.png';
 import moonUrl from '@/assets/scene/moon.png';
 import seaUrl from '@/assets/scene/sea.png';
 import skyUrl from '@/assets/scene/sky.png';
+import { spreadAside } from '@/backend';
 import MemberName from '@/components/ships/MemberName';
 import Ship from '@/components/ships/Ship';
 import { SHIP_SPRITES } from '@/components/ships/shipSprites';
@@ -359,6 +360,14 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
         ...leavingById.current.values(),
     ].sort((a, b) => a.place.slot - b.place.slot);
 
+    // На сколько корабли расходятся, уступая друг другу воду на тесной линии. Считается
+    // по каналу, а не по кадру: уходящий корабль в кадре ещё виден, но давить на соседа уже
+    // перестал — тот отпускает резинку и идёт обратно на своё место, не дожидаясь, пока
+    // ушедший скроется за кромкой. Уходящему расхождения не достаётся по той же причине:
+    // в списке канала его уже нет, и он снимается со своей точки, а не с отжатой.
+    const aside = spreadAside(members, zoom);
+    const asideOf = (member: Member): number => aside[member.memberId] ?? 0;
+
     // Пока вкладка в фоне, браузер не рисует кадров, и анимации в ней стоят. Само событие
     // доходит вовремя — useChannel применяет его сразу, — и разметка обновляется, а движение
     // ждёт возвращения на вкладку и начинается с нуля. Поэтому каждому начатому ходу
@@ -519,7 +528,7 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
      * и для корабля, и для овала свободного места — оттого место и оказывается ровно там,
      * где потом встанет корабль, включая отступ от края кадра.
      */
-    const laneStyle = (place: Berth, width: number): CSSProperties => {
+    const laneStyle = (place: Berth, width: number, aside = 0): CSSProperties => {
         // Доля пути от дальней линии к ближней. Считается от концов рейда, а не от глубины:
         // сами концы приколочены к горизонту и к нижней кромке кадра, а перспектива
         // распределяет линии между ними.
@@ -537,6 +546,10 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
             '--slot-scale': slotScale(place.slot).toFixed(4),
             // В какую сторону от своего коридора отходит отметка места, см. --berth-shift.
             '--corridor-side': CORRIDOR_SIDE[place.corridor],
+            // На сколько корабль отошёл от своей точки, уступая тесному соседу. Ни у отметки
+            // места, ни у подписи этого слагаемого нет: они остаются там, где место, — отходит
+            // корабль, а не стоянка.
+            '--slot-aside': `${aside.toFixed(2)}%`,
             // Чем дальше корабль, тем выше он стоит в кадре — это и есть перспектива. Рейд
             // натянут между двумя отметками: дальняя линия стоит на --berth-far ниже горизонта,
             // ближняя — на --berth-near выше нижней кромки кадра, а между ними линии расходятся
@@ -760,7 +773,7 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
                         data-motion={motionKind || undefined}
                         style={
                             {
-                                ...laneStyle(member.place, width),
+                                ...laneStyle(member.place, width, asideOf(member)),
                                 // Ближний перекрывает дальнего: порядок наложения идёт от слота.
                                 zIndex: member.place.slot + 1,
                                 // Ход в процентах ширины кадра: столько корабль смещён от своего
@@ -857,12 +870,22 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
                         не пропадает за ближним корпусом. Стоит она там же, где у свободного
                         места горит точка, — на самой отметке стоянки, — и качается той же
                         волной и в той же фазе, что и корабль над ней: имя написано на воде,
-                        а вода одна на всех. */}
+                        а вода одна на всех.
+                        Мерки дорожке достаются те же, что и точке (berthWidthPercent), и без
+                        расхождения: подпись стоит на самой стоянке, которую собой закрывает,
+                        а корабль над ней может быть отведён в сторону — отступом от края кадра
+                        или уступая тесному соседу. Займи подпись ширину корпуса, у края кадра
+                        она отъехала бы вместе с ним и повисла между двумя точками. */}
                     {placed.map((member) => (
                         <div
                             key={member.memberId}
                             className={styles.shipNameLane}
-                            style={laneStyle(member.place, shipWidthPercent(member.place.slot, member.shipKind))}
+                            // Чьё это место — нужно проверке: подпись обязана встать на ту же
+                            // ось, что и точка свободного места, и сверять их иначе не с чем.
+                            // Метка своя, не data-berth: тем помечены сами точки, и общая
+                            // сбивала бы счёт разметки под кораблём.
+                            data-berth-name={berthKey(member.place)}
+                            style={laneStyle(member.place, berthWidthPercent(member.place.slot))}
                         >
                             <span
                                 className={styles.shipName}

@@ -157,6 +157,59 @@ test('на одной линии помещаются двое, и борта н
     }
 });
 
+test('тесному соседу корабль уступает воду и возвращается, когда тот ушёл', async ({ page }) => {
+    // Рейд предлагает и такие линии, где двоим на серединах коридоров не разойтись: место
+    // там есть, просто вставать придётся теснее. Кто уже стоял, тот и подвинется — а когда
+    // сосед уйдёт, вернётся на свою точку. Сохранённое место при этом не меняется: расхождение
+    // живёт только в кадре.
+    await openNewChannel(page, 'rezinka');
+    await page.getByText('Малый ракетный корабль', { exact: true }).click();
+    await page.locator('[data-berth="5-center"]').click();
+    await join(page, 'Гром', '404');
+
+    // Меряем самый широкий корпус в кадре: на линию встанет катер, и спутать их не с чем.
+    const bigShip = (): Promise<{ middle: number; width: number }> =>
+        page.evaluate(() => {
+            const boxes = [...document.querySelectorAll('[class*="shipSlot"]')].map((slot) =>
+                slot.getBoundingClientRect()
+            );
+            const widest = boxes.sort((one, other) => other.width - one.width)[0];
+            return { middle: widest.left + widest.width / 2, width: widest.width };
+        });
+
+    await openChannel(page, 'rezinka', 'gost');
+    await page.getByText('Сторожевой катер', { exact: true }).click();
+    const alone = await bigShip();
+
+    // Встаём слева от него — на линию, где вдвоём тесно.
+    const spot = await page.locator('[data-berth="5-left"]').boundingBox();
+    expect(spot, 'слева от соседа не нашлось места').toBeTruthy();
+    await page.mouse.click(spot!.x + spot!.width / 2, spot!.y + spot!.height / 2);
+    await join(page, 'Малыш', '111');
+    await page.waitForTimeout(4000);
+
+    // Отошёл, и отошёл вправо — от соседа, а не куда попало. Мерка в долях собственной ширины:
+    // на другом экране и корпус, и расхождение считаются в процентах кадра.
+    const pressed = await bigShip();
+    expect((pressed.middle - alone.middle) / pressed.width, 'корабль не уступил воду тесному соседу').toBeGreaterThan(
+        0.08
+    );
+
+    // А место осталось прежним: в канале корабль по-прежнему стоит на середине своего коридора.
+    const fleet = await readState(page).then(
+        (state) => Object.values(state.channels).find((item) => item.channel.slug === 'rezinka')!.members
+    );
+    const resident = fleet.find((member) => member.name === 'Гром')!;
+    expect(`${resident.place.slot}-${resident.place.corridor}`, 'расхождение переписало место').toBe('5-center');
+
+    // Сосед ушёл — резинка тянет корабль обратно на свою точку.
+    await page.getByLabel('Корабли на связи').click();
+    await page.getByRole('button', { name: 'Уйти с рейда' }).click();
+    await page.waitForTimeout(4000);
+    const back = await bigShip();
+    expect(Math.abs(back.middle - alone.middle) / back.width, 'корабль не вернулся на своё место').toBeLessThan(0.05);
+});
+
 test('свободные места на рейде зависят от выбранного корабля', async ({ page }) => {
     // Вместимость линии считается размером кораблей, а значит, свободные места у катера
     // и у корабля в полсотни метров разные. Знать об этом должна не форма, а сцена: силуэт
@@ -406,6 +459,44 @@ test('под своим кораблём разметки нет, а отошё�
             return box.width / box.height;
         });
     await expect.poll(flatness, { message: 'покинутое место осталось подсвеченным' }).toBeCloseTo(1, 1);
+});
+
+test('подпись стоит на точке своего места, даже когда корабль отведён от края кадра', async ({ page }) => {
+    // Подпись подписывает место, а не корпус. Корабль над ней может стоять чуть в стороне:
+    // у края кадра его отодвигает внутрь собственная ширина (shownLeft), а на тесной линии
+    // он уступает воду соседу. Возьми подпись мерки корпуса — у ближних боковых мест имя
+    // уехало бы вместе с ним и повисло между двумя стоянками.
+    //
+    // Берём для этого самый крупный корабль на ближней боковой линии: там отступ от края
+    // кадра больше всего, и разойтись корпусу с точкой есть куда.
+    await openNewChannel(page, 'podpis');
+    await page.getByText('Малый ракетный корабль', { exact: true }).click();
+    const mine = '9-left';
+    await page.locator(`[data-berth="${mine}"]`).click();
+    await join(page, 'Гром', '404');
+
+    // Открываем форму заново и переносим выбор на другое место: своё становится обычным
+    // свободным, и точка на нём загорается — с ней и сверяем подпись. Сам корабль никуда
+    // не идёт, место меняется только отправкой.
+    await page.locator('[class*="shipMine"]').click();
+    await expect(berths(page).first()).toBeVisible();
+    await page.locator('[data-berth][aria-pressed="false"]').last().click();
+
+    const axes = await page.evaluate((key) => {
+        // Ось — середина самой отметки: и точка, и надпись, и корпус стоят серединой
+        // на своём месте, а дорожки под ними — полосы во весь кадр.
+        const middle = (node: Element): number => {
+            const box = node.getBoundingClientRect();
+            return box.left + box.width / 2;
+        };
+        return {
+            dot: middle(document.querySelector(`[data-berth="${key}"]`)!),
+            name: middle(document.querySelector(`[data-berth-name="${key}"] [class*="shipName_"]`)!),
+            hull: middle(document.querySelector('[class*="shipSlot"]')!),
+        };
+    }, mine);
+    expect(Math.abs(axes.name - axes.dot), 'подпись сошла с точки своего места').toBeLessThan(1);
+    expect(Math.abs(axes.hull - axes.dot), 'корабль не отошёл от края кадра, и проверять нечего').toBeGreaterThan(20);
 });
 
 test('ход корабля идёт с правдоподобной скоростью и зависит от корабля', async ({ browser }) => {

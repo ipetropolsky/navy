@@ -344,10 +344,12 @@ const expectBerthLightGrows = async (page: Page): Promise<void> => {
  *
  * Качается подпись той же волной, что и корабль над ней, — потому и допуск ниже не нулевой.
  *
- * По ширине подпись стоит под своим кораблём: и корпус, и имя, и точка места сдвинуты
- * разбегом коридоров одинаково (см. --berth-shift). Однажды разбег достался только отметке
- * с подписью, а корабль остался на оси коридора — и на ближних линиях имя уехало от корпуса
- * на полтора десятка пикселей.
+ * По ширине подпись стоит на своей стоянке, а не под серединой корпуса: корабль над ней может
+ * быть отведён в сторону — у края кадра его отодвигает внутрь собственная ширина, на тесной
+ * линии он уступает воду соседу, — а имя остаётся на точке, которую собой закрывает. Поэтому
+ * здесь сверяется не совпадение осей, а то, что имя осталось при своём корабле: разъехаться
+ * дальше, чем на треть коридора, они не могут ни от клампа, ни от расхождения. Точное же
+ * совпадение подписи с точкой стоянки проверяется в scene.spec, где эту точку видно.
  *
  * Написаны они позывным: цветом участника и той же меркой, что подпись под репликой в ленте.
  * Цвет проверяем не по значению — какой кому достался, решает бэкенд, — а по тому, что он
@@ -355,6 +357,14 @@ const expectBerthLightGrows = async (page: Page): Promise<void> => {
  */
 /** Насколько подпись может уехать от своей отметки, качаясь на волне, px: см. WAVE_NEAR. */
 const NAME_SWING = 2.5;
+
+/**
+ * Насколько подпись может разойтись со своим корпусом по ширине, доля кадра. Расходятся они
+ * на отступ корабля от края кадра и на расхождение с тесным соседом — и то и другое меньше
+ * трети шага между коридорами (30% кадра), то есть имя заведомо остаётся при своём корабле,
+ * а не перебирается к соседнему месту.
+ */
+const NAME_DRIFT_SHARE = 0.1;
 
 const expectNamesStandOnBerths = async (page: Page): Promise<void> => {
     // Подчёркивание в конце обязательно: подпись ездит по своей дорожке (shipNameLane),
@@ -366,19 +376,26 @@ const expectNamesStandOnBerths = async (page: Page): Promise<void> => {
             return {
                 middle: box.top + box.height / 2,
                 berth: mark.closest('[class*="shipNameLane"]')!.getBoundingClientRect().bottom,
-                axis: mark.closest('[class*="shipNameLane"]')!.getBoundingClientRect().left,
+                // Ось имени — его собственная середина: сама надпись отходит от коридора
+                // разбегом перспективы, ровно как точка внутри своей дорожки.
+                axis: box.left + box.width / 2,
                 size: paint.fontSize,
                 color: paint.color,
             };
         })
     );
-    // Оси корпусов: дорожка корабля и дорожка его подписи — полосы во весь кадр, сдвинутые
-    // одним и тем же смещением, поэтому сверять их можно прямо по левой кромке.
-    const hulls = await page.evaluate(() =>
-        [...document.querySelectorAll('[class*="shipLane"]')].map((lane) => lane.getBoundingClientRect().left)
-    );
-    const round = (values: number[]): number[] => [...values].map(Math.round).sort((one, other) => one - other);
-    expect(round(marks.map((mark) => mark.axis)), 'подпись стоит не под своим кораблём').toEqual(round(hulls));
+    // Оси корпусов — середины самих корпусов. Порядок в кадре у имён и кораблей один и тот же,
+    // так что сортировки хватает, чтобы составить пары.
+    const { hulls, frame } = await page.evaluate(() => ({
+        hulls: [...document.querySelectorAll('[class*="shipSlot"]')].map((hull) => {
+            const box = hull.getBoundingClientRect();
+            return box.left + box.width / 2;
+        }),
+        frame: document.querySelector('[class*="scene_"]')!.getBoundingClientRect().width,
+    }));
+    const sorted = (values: number[]): number[] => [...values].sort((one, other) => one - other);
+    const drift = sorted(marks.map((mark) => mark.axis)).map((axis, index) => Math.abs(axis - sorted(hulls)[index]));
+    expect(Math.max(...drift), 'подпись уехала от своего корабля').toBeLessThan(frame * NAME_DRIFT_SHARE);
     expect(marks.length, 'занятые места не подписаны вовсе').toBeGreaterThan(0);
     for (const mark of marks) {
         // Не «ровно на отметке», а «в пределах хода волны»: подпись качается вместе с кораблём,

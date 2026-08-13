@@ -42,8 +42,14 @@ test('реплика уходит и привязывается ответом',
     await send(page, 'Курс норд');
     await expect(bubbles(page)).toHaveCount(before + 1);
 
-    // Тап по чужому сообщению — ответ на него.
+    // Тап по чужому сообщению — ответ на него. Отвечаем на самое верхнее, и щёлкнуть по нему
+    // мало: лента сама прыгает к последнему сообщению (см. MessageList), а щелчок по верхнему
+    // пузырю приходится как раз на этот прыжок — на медленной машине он успевал промахнуться,
+    // и реплика уходила без привязки. Поэтому дожидаемся цитаты над строкой ввода: пока её нет,
+    // вкладка ещё не знает, на что отвечает, и отправлять рано.
+    const target = (await readState(page)).channels['ch-demo'].messages[0];
     await bubbles(page).first().click();
+    await expect(page.locator('[class*="replyBar"]')).toContainText(target.text);
     await send(page, 'Идём следом');
 
     const state = await readState(page);
