@@ -147,19 +147,27 @@ export const berthWidthPercent = (slot: number): number => slotWidthPercent(slot
 const metresPerPercent = (slot: number): number => SCENE_SCALE_LENGTH / slotWidthPercent(slot);
 
 /**
- * Сколько кораблю идти от стоянки за край кадра, % ширины сцены. Путь до кромки — это про
+ * Сколько кораблю идти от стоянки за край кадра, % ширины рейда. Путь до кромки — это про
  * кадр, и меряется он кадром; а вот запас за кромкой — про сам корабль, и меряется корпусами:
  * спрятаться должен каждый одинаково, и катеру для этого нужно куда меньше моря, чем кораблю.
+ *
+ * Кромок при этом две. Рейд бывает уже сцены — в развёрнутом кадре по бокам от него остаётся
+ * просто море (см. .raid в стилях), — и уйти корабль должен за кромку сцены, а не за край
+ * рейда, где его прекрасно видно. Лишнее море приходит отдельным слагаемым и в тех же долях
+ * рейда: одно и то же расстояние по обе стороны, поэтому на выбор стороны ухода оно не влияет
+ * и по умолчанию его нет.
  */
 export const pathToEdge = (
     leftPercent: number,
     widthPercent: number,
     side: 'left' | 'right',
     /** Запас за кромкой, длин корпуса: ENTER_GUARD или LEAVE_GUARD. */
-    guard: number
+    guard: number,
+    /** Насколько сцена шире рейда с этой стороны, % ширины рейда. */
+    overhang = 0
 ): number => {
     const span = side === 'left' ? leftPercent : 100 - leftPercent;
-    return span + widthPercent * (0.5 + guard);
+    return span + overhang + widthPercent * (0.5 + guard);
 };
 
 /**

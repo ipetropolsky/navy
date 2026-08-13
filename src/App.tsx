@@ -374,7 +374,15 @@ export default function App() {
 
     return (
         <div
-            className={[styles.app, fullscreen ? styles.appFull : ''].filter(Boolean).join(' ')}
+            className={[
+                styles.app,
+                fullscreen ? styles.appFull : '',
+                // Открытая шторка поджимает кадр, а не накрывает его, — но только на широком
+                // окне; отсечку по ширине держат стили.
+                fullscreen && shadeStop !== 'peek' ? styles.appShadeOpen : '',
+            ]
+                .filter(Boolean)
+                .join(' ')}
             onFocus={handleFocusIn}
             onBlur={handleFocusOut}
         >
