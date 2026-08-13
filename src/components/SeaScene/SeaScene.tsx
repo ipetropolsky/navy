@@ -750,11 +750,12 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
             ref={sceneRef}
         >
             <div className={styles.sky}>
-                {/* Небо-текстура: соседние плитки зеркальны друг другу, поэтому стыки незаметны. */}
+                {/* Небо-текстура: картинка стыкуется сама с собой, поэтому плитки одинаковы
+                    и просто лежат в ряд. Орион — в средней: см. .skyStrip в стилях. */}
                 <div className={styles.skyStrip}>
-                    <img className={styles.skyTileMirrored} src={skyUrl} alt="" />
                     <img className={styles.skyTile} src={skyUrl} alt="" />
-                    <img className={styles.skyTileMirrored} src={skyUrl} alt="" />
+                    <img className={styles.skyTile} src={skyUrl} alt="" />
+                    <img className={styles.skyTile} src={skyUrl} alt="" />
                 </div>
             </div>
             {/* Месяц лежит на кружке неба: у картинки тёмная половина прозрачна, и сквозь неё

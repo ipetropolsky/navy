@@ -1124,7 +1124,81 @@ test('фокус в поле поднимает шторку до верха, а
 });
 
 /**
- * Небо и вода собраны одинаково: полоса из трёх плиток шириной с кадр, соседние зеркальны.
+ * Орион — единственный узнаваемый узор на небе, и стоит он в кадре на своём месте: правее
+ * середины, выше половины неба, подальше от месяца. Место это держится двумя числами разом —
+ * долей, на которой созвездие стоит в самой картинке (её задаёт подготовка ассета), и сдвигом
+ * полосы в стилях, — поэтому проверяется оно на экране, а не в любом из двух по отдельности.
+ *
+ * Второе условие важнее первого: Орион обязан быть в кадре ровно один. Плитки неба одинаковы
+ * и лежат в ряд, и стоит плитке стать уже кадра — созвездие задвоится, а задвоенный узор
+ * читается сразу, в отличие от любого другого куска звёздного неба.
+ */
+// Где Орион стоит в картинке — доли её ширины и высоты. Числа держит подготовка ассета,
+// см. SKY_ORION_PLACE в tools/scene-assets/prepare-backgrounds.py.
+const ORION_IN_TILE = { x: 0.4333, y: 0.3966 };
+
+test('Орион стоит в кадре на своём месте и ровно один', async ({ page }) => {
+    await openChannel(page, DEMO, ALBATROS);
+
+    const orions = () =>
+        page.evaluate((orion: { x: number; y: number }) => {
+            const sky = document.querySelector('[class*="sky_"]')!.getBoundingClientRect();
+            return (
+                [...document.querySelectorAll('[class*="skyTile"]')]
+                    .map((tile) => tile.getBoundingClientRect())
+                    .map((tile) => ({
+                        x: ((tile.left + orion.x * tile.width - sky.left) / sky.width) * 100,
+                        y: ((tile.top + orion.y * tile.height - sky.top) / sky.height) * 100,
+                    }))
+                    // Только те, что попали в кадр: остальные плитки закрывают его по краям.
+                    .filter((spot) => spot.x > 0 && spot.x < 100)
+            );
+        }, ORION_IN_TILE);
+
+    // Кадры разной пропорции: широкий и низкий (там плитка меряется по ширине кадра) и узкий
+    // и высокий (там — по высоте неба, иначе картинка не накрыла бы небо сверху).
+    const measure = async (frame: { width: number; height: number }, full: boolean) => {
+        const size = `${frame.width}×${frame.height}${full ? ', во весь экран' : ''}`;
+        await page.setViewportSize(frame);
+        await page.getByRole('button', { name: full ? 'Развернуть сцену' : 'Свернуть сцену' }).click();
+        await expect(page.getByRole('button', { name: full ? 'Свернуть сцену' : 'Развернуть сцену' })).toBeVisible();
+        // Ждём весь ответ целиком, а не одно число из него: высота сцены едет полсекунды,
+        // и замер посреди перехода поймал бы небо не той высоты.
+        await expect
+            .poll(
+                async () => {
+                    const spots = await orions();
+                    if (spots.length !== 1) {
+                        return `Орионов в кадре ${spots.length}`;
+                    }
+                    const x = Math.round(spots[0].x);
+                    const y = Math.round(spots[0].y);
+                    if (x < 70 || x > 83) {
+                        return `уехал по горизонтали: ${x}%`;
+                    }
+                    if (y < 15 || y > 50) {
+                        return `уехал по вертикали: ${y}%`;
+                    }
+                    return 'на месте';
+                },
+                { message: `${size}: Орион` }
+            )
+            .toBe('на месте');
+    };
+
+    await [
+        { frame: { width: 1200, height: 900 }, full: true },
+        { frame: { width: 1200, height: 900 }, full: false },
+        { frame: { width: 390, height: 844 }, full: true },
+        { frame: { width: 390, height: 844 }, full: false },
+    ].reduce(async (before, step) => {
+        await before;
+        return measure(step.frame, step.full);
+    }, Promise.resolve());
+});
+
+/**
+ * Небо и вода собраны одинаково: полоса из трёх плиток, у воды соседние ещё и зеркальны.
  * И беда у них одна. Край плитки почти никогда не ложится ровно на пиксель, браузер смешивает
  * крайний столбец с тем, что под ним, — и по кадру от неба до нижней кромки идёт тонкая тёмная
  * черта. Лечится тем, что плитки заходят друг на друга на пиксель: рисунок у них по стыку общий,
