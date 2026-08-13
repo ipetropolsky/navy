@@ -979,3 +979,61 @@ test('плитки неба и воды заходят друг на друга,
         'плитки сомкнулись встык — по кадру пойдёт тёмная черта'
     ).toHaveLength(0);
 });
+
+/**
+ * Снимок неба вытянут вширь почти 1:3.2, и, отмеренный по ширине кадра, на телефоне он выходит
+ * ниже самого неба: 121 px картинки против 135 px неба. Верх неба оставался ровной заливкой
+ * без единой звезды, а по верхней кромке снимка шёл стык — не по цвету (верхняя строка снимка
+ * и есть цвет подложки), а по рисунку: выше границы звёзд нет вовсе, ниже они начинаются разом.
+ * Месяц на телефоне стоит в 31 px от верха сцены, то есть ровно на этой границе, — оттого стык
+ * и бросался в глаза прежде всего рядом с ним.
+ *
+ * Проверяем то же условие, что и починили: снимок обязан накрывать небо сверху. Ширины ему
+ * для этого не жалко — обрезается он с боков, где запаса втрое.
+ */
+test('снимок неба накрывает небо целиком, а не кончается на полпути', async ({ page }) => {
+    await openChannel(page, DEMO, ALBATROS);
+
+    // Плюс — над снимком осталась полоса голой подложки, ноль и минус — накрыл.
+    const gapAbovePhoto = () =>
+        page.evaluate(() => {
+            const sky = document.querySelector('[class*="sky_"]')!.getBoundingClientRect();
+            const tile = document.querySelector('[class*="skyTile"]')!.getBoundingClientRect();
+            return Math.round((tile.top - sky.top) * 100) / 100;
+        });
+
+    // Ожидающим expect, а не разовым замером: смена размера окна доходит до вёрстки не мгновенно
+    // — высота сцены считается через dvh, — и первый же замер после resize застаёт прежний кадр.
+    const expectCovered = (label: string) =>
+        expect
+            .poll(gapAbovePhoto, { message: `${label}: над снимком неба голая подложка, по его кромке пойдёт стык` })
+            .toBeLessThanOrEqual(0);
+
+    // Мерка одного кадра: сперва обычная сцена, потом развёрнутая, и обратно — следующему
+    // кадру достаётся то же состояние, с которого начали.
+    const measure = async (frame: { width: number; height: number }) => {
+        const size = `${frame.width}×${frame.height}`;
+        await page.setViewportSize(frame);
+        await expectCovered(`${size}, обычная сцена`);
+        await page.getByRole('button', { name: 'Развернуть сцену' }).click();
+        await expect(page.getByRole('button', { name: 'Свернуть сцену' })).toBeVisible();
+        await expectCovered(`${size}, во весь экран`);
+        await page.getByRole('button', { name: 'Свернуть сцену' }).click();
+        await expect(page.getByRole('button', { name: 'Развернуть сцену' })).toBeVisible();
+    };
+
+    // Кадры разной высоты: у сцены свой предел (300px), а небо в ней продолжает расти, и стык
+    // с высотой окна уезжает вниз — на 390×844 он был на 13-й строке, на 390×1000 на 26-й.
+    const frames = [
+        { width: 390, height: 700 },
+        { width: 390, height: 844 },
+        { width: 390, height: 1000 },
+        { width: 1200, height: 900 },
+    ];
+    // Цепочкой, а не циклом: кадры меряются строго по очереди, но await внутри цикла тут
+    // не наш приём — см. правила линтера.
+    await frames.reduce(async (before, frame) => {
+        await before;
+        return measure(frame);
+    }, Promise.resolve());
+});
