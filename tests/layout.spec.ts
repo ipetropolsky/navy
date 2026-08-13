@@ -1,9 +1,20 @@
 import { Page, expect, test } from '@playwright/test';
 
+import { EDGE_MARGIN } from '@/backend/placement';
 import { MOBILE_MAX_WIDTH, PINNED_ACTIONS_MIN_HEIGHT } from '@/config/layout';
 import { SLOT_COUNT, slotDepth, slotShare } from '@/types/channel';
 
-import { ALBATROS, DEMO, openChannel, openSheet, readState, shipNames, ships } from '@tests/helpers';
+import {
+    ALBATROS,
+    DEMO,
+    join,
+    openChannel,
+    openNewChannel,
+    openSheet,
+    readState,
+    shipNames,
+    ships,
+} from '@tests/helpers';
 
 /**
  * Раскладка на телефоне и на десктопе. Здесь тоже только то, на чём наступали: вода однажды
@@ -772,4 +783,54 @@ test('берег острова стоит на горизонте, а не от
 
     await page.setViewportSize({ width: 330, height: 700 });
     expect(await islandBelowHorizon(page), 'в узком кадре берег отошёл от горизонта').toBeCloseTo(wide, 0);
+});
+
+/**
+ * Поля по краям кадра. Рейд занимает не весь кадр, а воду между полями: и коридоры, и разброс
+ * внутри полосы, и расхождение тесной пары, и отметки мест считаются внутри них. Раньше поля
+ * не было вовсе — крайний корабль вставал бортом ровно на обрез, — а отметки держались от края
+ * тридцатью пикселями, то есть на телефоне втрое большей долей кадра, чем на десктопе.
+ *
+ * Меряется поле у самого крупного корабля на ближней линии бокового коридора: там корпус шире
+ * своей полосы, вода вся под ним, и в кромку он упирается наверняка. На мелком или дальнем
+ * корабле поле не проверить — он до кромки попросту не достаёт.
+ *
+ * На широком экране корпус до своего поля не достаёт и такой: ширину силуэта держит ещё
+ * и потолок в пикселях (`maxShipWidth`), чтобы на большом мониторе корабли не разрастались, —
+ * и на десктопе крупный корабль рисуется уже, чем ему отведено. Поэтому там проверяется
+ * неравенство: в поле корпус не заходит. Ровно на кромке поля он встаёт там, где потолок
+ * не жмёт, — на телефоне и в узком кадре, и вот там уже сверяется само число.
+ */
+const edgeGap = (page: Page): Promise<number> =>
+    page.evaluate(() => {
+        const scene = document.querySelector('[class*="scene"]')!.getBoundingClientRect();
+        const hull = document.querySelector('[class*="shipBody"] img')!.getBoundingClientRect();
+        return (Math.min(hull.left - scene.left, scene.right - hull.right) / scene.width) * 100;
+    });
+
+test('корабль не встаёт бортом на обрез кадра, и поле у него одно на всех экранах', async ({ page }) => {
+    await openNewChannel(page, 'polya');
+    // Самый крупный корабль справочника стоит в списке первым: проекты идут по убыванию длины.
+    await page.locator('button:has([class*="kindShip"])').first().click();
+    await page.locator('[data-berth="9-left"]').click();
+    await join(page, 'Гроза', '404');
+    // Ход у самого крупного корабля на ближней линии долгий, и меряться он мешает: по дороге
+    // корабль к кромке ближе, чем когда встанет. Ждём не срок, а конца хода — сцена сама
+    // снимает пометку движения, когда корабль пришёл.
+    await ships(page).first().waitFor();
+    await expect(page.locator('[data-motion]'), 'корабль так и не дошёл до места').toHaveCount(0, { timeout: 40000 });
+
+    // Допуск здесь и ниже — на качку: корпус на волне ещё и кренится, а прямоугольник вокруг
+    // повёрнутой картинки шире самого корпуса. Замер даёт до трёх десятых процента кадра.
+    expect(await edgeGap(page), 'корабль зашёл в поле по краю кадра').toBeGreaterThan(EDGE_MARGIN - 0.35);
+
+    // Телефон и узкий кадр: потолок ширины силуэта тут не жмёт, и корабль встаёт ровно
+    // на кромку поля — одинаково на обоих, потому что поле отмерено кадром, а не пикселями.
+    await page.setViewportSize({ width: MOBILE_MAX_WIDTH - 90, height: 844 });
+    const phone = await edgeGap(page);
+    expect(phone, 'на телефоне корабль встал не на кромку поля').toBeGreaterThan(EDGE_MARGIN - 0.35);
+    expect(phone, 'на телефоне корабль не дошёл до кромки поля').toBeLessThan(EDGE_MARGIN + 0.35);
+
+    await page.setViewportSize({ width: 330, height: 700 });
+    expect(await edgeGap(page), 'в узком кадре поле вышло другой доли кадра').toBeCloseTo(phone, 0);
 });
