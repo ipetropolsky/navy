@@ -654,10 +654,10 @@ declare global {
     }
 }
 
-const watchLamps = (page: Page): Promise<void> =>
-    page.evaluate(() => {
+const watchLamps = (page: Page, within = '[class*="shipLane"]'): Promise<void> =>
+    page.evaluate((selector) => {
         window.__flashes = {};
-        for (const lane of document.querySelectorAll('[class*="shipLane"]')) {
+        for (const lane of document.querySelectorAll(selector)) {
             const lamp = lane.querySelector('[class*="lamp"]')!;
             // Корабли различаем по подписи спрайта: своего имени у дорожки нет.
             const name = lane.querySelector('img')?.alt ?? '?';
@@ -668,7 +668,7 @@ const watchLamps = (page: Page): Promise<void> =>
                 }
             }).observe(lamp, { attributes: true, attributeFilter: ['class'] });
         }
-    });
+    }, within);
 
 const flashes = (page: Page): Promise<Record<string, number>> => page.evaluate(() => window.__flashes);
 
@@ -711,4 +711,44 @@ test('лампа передаёт и то, что набрано поверх в
     // Ш — «−−−−», ровно четыре вспышки. Их и ждём: лишние две означали бы, что вместо буквы
     // передан знак стирания, а он тут ни при чём — человек не стёр, а переписал.
     await expect.poll(async () => (await flashes(page))[mine], 'набранное поверх выделения не ушло в лампу').toBe(10);
+});
+
+test('в списке кораблей выбранный стоит под парами и отзывается лампой', async ({ page }) => {
+    const KINDS = '[class*="kinds_"] > button';
+    // Канал открываем, но в строй не встаём: список кораблей — это и есть форма входа.
+    await openChannel(page, DEMO);
+    const buttons = page.locator(KINDS);
+    await expect(buttons.first()).toBeVisible();
+    await watchLamps(page, KINDS);
+
+    // Тычок в третий силуэт: не в первый, который выбран и так, — иначе выбор ничего не менял бы,
+    // и проверка прошла бы на неподвижной картинке.
+    const picked = 2;
+    const label = (await buttons.nth(picked).locator('img').getAttribute('alt'))!;
+    await buttons.nth(picked).click();
+
+    // Выбранный корабль стоит под парами: у него ходовые огни, у остальных якорные. Так видно,
+    // который из них твой, и сразу показана разница между двумя наборами огней.
+    const sets = await lights(page, KINDS);
+    expect(sets.length, 'список кораблей пуст').toBeGreaterThan(1);
+    const kinds = (index: number): string[] => sets[index].map((light) => light.kind);
+    expect(kinds(picked), 'у выбранного корабля не горит топовый').toContain('masthead');
+    expect(kinds(picked), 'у выбранного корабля не горит кормовой').toContain('stern');
+    expect(
+        kinds(picked).some((kind) => kind.startsWith('anchor')),
+        'выбранный корабль остался на якоре'
+    ).toBe(false);
+    const others = sets.filter((_, index) => index !== picked);
+    expect(
+        others.every((set) => set.length > 0 && set.every((light) => light.kind.startsWith('anchor'))),
+        'невыбранный корабль пошёл ходом'
+    ).toBe(true);
+
+    // И отзывается он тем же сигналом, что корабль в кадре на оклик: K — «−·−», три вспышки.
+    await expect.poll(async () => (await flashes(page))[label], 'выбранный корабль не мигнул лампой').toBe(3);
+    const all = await flashes(page);
+    expect(
+        Object.values(all).filter((count) => count > 0),
+        'на выбор мигнул не один корабль'
+    ).toHaveLength(1);
 });

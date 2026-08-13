@@ -9,10 +9,12 @@ import Field from '@/components/ui/Field';
 import Input from '@/components/ui/Input';
 import Panel from '@/components/ui/Panel';
 import { useSnackbar } from '@/components/ui/Snackbar';
+import { HAIL_SIGNAL } from '@/hooks/morse';
 import {
     HULL_NUMBER_LENGTH,
     MEMBER_COLORS,
     Member,
+    MorseFeed,
     SHIP_KINDS,
     SHIP_KIND_LABELS,
     SHIP_SPECS,
@@ -115,6 +117,12 @@ export default function MemberForm({
         initial?.color ?? MEMBER_COLORS.find((option) => !takenColors.includes(option)) ?? MEMBER_COLORS[0]
     );
     const [busy, setBusy] = useState(false);
+    // Отклик выбранного корабля: ткнули в кнопку — он мигнул лампой ровно так же, как чужой
+    // корабль в кадре на тычок в аватарку. Держится он в состоянии, а не собирается на каждый
+    // проход: лампа считает поводом новый объект, и собранный заново отклик передавал бы
+    // без конца. Счётчик в seq — чтобы можно было ткнуть в тот же силуэт второй раз: сигнал
+    // всегда один и тот же, и по нему двух нажатий не различить.
+    const [reply, setReply] = useState<MorseFeed | null>(null);
     const notify = useSnackbar();
 
     const hullNumberOk = isValidHullNumber(hullNumber);
@@ -212,17 +220,32 @@ export default function MemberForm({
                             key={kind}
                             type="button"
                             className={kind === shipKind ? styles.kindActive : styles.kind}
-                            onClick={() => onShipKind(kind)}
+                            onClick={() => {
+                                onShipKind(kind);
+                                setReply((prev) => ({ seq: (prev?.seq ?? 0) + 1, text: HAIL_SIGNAL }));
+                            }}
                         >
                             {/* Место под силуэт одно на всех, а сам силуэт в нём той ширины,
                                 какую даёт его длина. Корабль тут тот же, что в сцене, вместе
                                 с огнями и сигнальной лампой: стоянка на рейде — это то, ради
                                 чего его и выбирают, а огни у каждого силуэта свои и стоят
                                 по-разному. Бортового номера в списке нет: его набирают выше,
-                                и на двенадцати корпусах сразу он читался бы как часть рисунка. */}
+                                и на двенадцати корпусах сразу он читался бы как часть рисунка.
+
+                                Выбранный корабль стоит под парами: у него горят ходовые огни,
+                                у остальных — якорные. Так и видно, который из них сейчас твой,
+                                и разница между двумя наборами огней заодно показана вживую,
+                                а не описана словами. Отклик лампой достаётся тоже ему одному. */}
                             <span className={styles.kindImageBox} style={{ aspectRatio: IMAGE_BOX_ASPECT }}>
                                 <span className={styles.kindShip} style={{ width: percent(shipWidth(kind)) }}>
-                                    <Ship kind={kind} name={SHIP_KIND_LABELS[kind]} hullNumber="" facing="right" />
+                                    <Ship
+                                        kind={kind}
+                                        name={SHIP_KIND_LABELS[kind]}
+                                        hullNumber=""
+                                        facing="right"
+                                        mode={kind === shipKind ? 'underway' : 'anchored'}
+                                        morseFeed={kind === shipKind ? reply : null}
+                                    />
                                 </span>
                             </span>
                             <span className={styles.scaleRow}>
