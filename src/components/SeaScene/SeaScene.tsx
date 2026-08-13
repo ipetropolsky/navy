@@ -18,7 +18,6 @@ import skyUrl from '@/assets/scene/sky.png';
 import { fleetLefts, restingLeft } from '@/backend';
 import MemberName from '@/components/ships/MemberName';
 import Ship from '@/components/ships/Ship';
-import { SHIP_SPRITES } from '@/components/ships/shipSprites';
 import {
     Berth,
     CORRIDORS,
@@ -558,14 +557,6 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
         } as CSSProperties;
     };
 
-    /**
-     * Предел ширины корабля, px. Нужен на широком экране: доли кадра там оборачиваются
-     * такими пикселями, что ближний корабль занимает половину рейда. У дальнего предел ниже —
-     * перспектива, — и у мелкого корабля тоже: его доля от предела та же, что и в кадре.
-     */
-    const maxShipWidth = (member: Member): number =>
-        (60 + slotDepth(member.place.slot) * 290) * SHIP_SPRITES[member.shipKind].scale;
-
     // Выбор места на рейде. Целиться в саму разметку не нужно: указатель ловит вся вода,
     // а выбирается ближайшее место. Иначе на дальних слотах пришлось бы попадать
     // в трёхпиксельный кружок, а на телефоне — ещё и пальцем.
@@ -825,7 +816,6 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
                             // только собой.
                             onClick={canEdit ? onEditShip : undefined}
                             title={canEdit ? 'Изменить корабль и место на рейде' : undefined}
-                            style={{ maxWidth: maxShipWidth(member) }}
                         >
                             {/* Кивок живёт своим блоком: он тоже поворот, а поворот на слоте уже занят
                             дифферентом, и на качающемся блоке — тангажом. Свойство одно на элемент,
