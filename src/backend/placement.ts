@@ -12,8 +12,7 @@
  * стоят самое большее двое, считая остров (SLOT_CAPACITY), и помещаются они туда, только если
  * расходятся бортами в ширину кадра (fitsAlongside) — стоять при этом на своих коридорах
  * никто не обязан: тесной паре разрешено разойтись хоть в чужую полосу (fleetLefts), и в кадре
- * это и происходит. Само место от этого не меняется: расхождение считает сцена, каждая
- * вкладка по своему экрану.
+ * это и происходит. Само место от этого не меняется: расхождение считает сцена.
  * Кто места не выбирал, встаёт случайно: строй не должен выглядеть построенным. Свободная
  * случайность, впрочем, быстро собирает корабли в кучу, поэтому её ограничивают три правила:
  * коридоры разводят соседей по ширине кадра, размер корабля задаёт, в какой части рейда
@@ -33,7 +32,6 @@
  * их не задать.
  */
 
-import { MOBILE_SHIP_ZOOM } from '@/config/layout';
 import {
     Berth,
     CORRIDORS,
@@ -189,7 +187,7 @@ const shuffled = <T>(items: T[]): T[] => {
 const allSlots = (): number[] => [...new Array<number>(SLOT_COUNT)].map((_, index) => index);
 
 /** Полширины корпуса на этой дальности, % ширины сцены. */
-const hullHalf = (slot: number, kind: ShipKind, zoom: number): number => (shipWidthPercent(slot, kind) * zoom) / 2;
+const hullHalf = (slot: number, kind: ShipKind): number => shipWidthPercent(slot, kind) / 2;
 
 /**
  * Разброс: доля от 0 до 1 по участнику и его месту. Не случайность, а хеш, и это важно:
@@ -224,8 +222,8 @@ const inFrame = (at: number, half: number): number => Math.min(Math.max(at, half
  * своего коридора, ту самую, на которой горит отметка места. Разброса ему не достаётся вовсе,
  * и это честно: разбрасывать нечего, вода вся под ним.
  */
-const restingAt = (spot: Spot, zoom: number, seed: string): number => {
-    const half = hullHalf(spot.slot, spot.kind, zoom);
+const restingAt = (spot: Spot, seed: string): number => {
+    const half = hullHalf(spot.slot, spot.kind);
     const { from, to } = CORRIDOR_BOUNDS[spot.corridor];
     const [nearest, farthest] = [from + half, to - half];
     const at =
@@ -248,10 +246,11 @@ const needApart = (oneHalf: number, otherHalf: number): number => (oneHalf + oth
 const roomAside = (at: number, half: number, away: number): number => (away > 0 ? 100 - half - at : at - half);
 
 /**
- * Помещаются ли эти двое борт о борт. Считается по самому тесному раскладу — телефонному,
- * где корабли растянуты: пустив пару на линию, расстановка отвечает за неё на любом экране.
+ * Помещаются ли эти двое борт о борт.
  *
- * Мерка тут одна — кадр. Расходятся корабли не внутри своих полос: тесному соседу уступают
+ * Мерка тут одна — кадр, и она же одна на все экраны: вся геометрия рейда — проценты ширины
+ * сцены, ни одного пикселя. Сузился экран — корабль в треть кадра остался кораблём в треть
+ * кадра, и пара, которую пустили на линию на широком окне, разойдётся и на узком. Расходятся корабли не внутри своих полос: тесному соседу уступают
  * и в чужую полосу, лишь бы разойтись бортами, — а вот за кромку кадра не уступают, иначе
  * корабль наполовину оказался бы за обрезом. Значит, двое помещаются ровно тогда, когда
  * оба корпуса да вода между ними умещаются в ширину сцены.
@@ -272,8 +271,8 @@ const roomAside = (at: number, half: number, away: number): number => (away > 0 
  * между ними (замер: 3.7% расстановок по пять кораблей).
  */
 const fitsAlongside = (slot: number, kind: ShipKind, other: Standing): boolean => {
-    const half = hullHalf(slot, kind, MOBILE_SHIP_ZOOM);
-    const otherHalf = hullHalf(other.place.slot, other.shipKind, MOBILE_SHIP_ZOOM);
+    const half = hullHalf(slot, kind);
+    const otherHalf = hullHalf(other.place.slot, other.shipKind);
     return needApart(half, otherHalf) + half + otherHalf <= 100;
 };
 
@@ -398,7 +397,7 @@ export type Anchored = Standing & Pick<Member, 'memberId' | 'joinedAt'>;
  * Где корабль стоит сам по себе, % ширины сцены — серединой корпуса. Это его собственная точка
  * на рейде: разброс внутри полосы и ничего больше, соседи тут не в счёт.
  */
-export const restingLeft = (ship: Anchored, zoom: number): number => restingAt(spotOf(ship), zoom, scatterSeed(ship));
+export const restingLeft = (ship: Anchored): number => restingAt(spotOf(ship), scatterSeed(ship));
 
 /**
  * Где корабли стоят в кадре, % ширины сцены — серединой корпуса, по участникам. Разброс
@@ -406,10 +405,9 @@ export const restingLeft = (ship: Anchored, zoom: number): number => restingAt(s
  * туда, где ему тут насчитали.
  *
  * Это единственное, что рисуется не по сохранённому месту. Место остаётся тем, куда корабль
- * поставили, — во всех вкладках одно и то же, — а положение в кадре считает каждая вкладка
- * сама, по своему экрану: на телефоне корабли растянуты, и расходиться им приходится заметнее,
- * чем на широком. Хранить тут нечего: из одного и того же состава на одном и том же экране
- * всегда выходит одна и та же картинка — разброс идёт от хеша, а не от случая.
+ * поставили, — а положение в кадре считает сцена. Хранить тут нечего: из одного и того же
+ * состава всегда выходит одна и та же картинка, на любом экране и в любой вкладке, потому
+ * что разброс идёт от хеша, а не от случая, и всё до единого числа тут — проценты кадра.
  *
  * Расхождение — резинка поверх разброса. Считается по парам на линии: больше двоих на неё
  * не встают, так что пара — это всё, что бывает. Первым уступает тот, кто мельче: ему и ходу
@@ -422,10 +420,10 @@ export const restingLeft = (ship: Anchored, zoom: number): number => restingAt(s
  * Держится всё это, как на резинке: ушёл сосед — и корабль вернулся на свою точку, никуда
  * при этом не переезжая, потому что место у него всё это время было своё.
  */
-export const fleetLefts = (fleet: Anchored[], zoom: number): Record<string, number> => {
+export const fleetLefts = (fleet: Anchored[]): Record<string, number> => {
     const left: Record<string, number> = {};
     for (const ship of fleet) {
-        left[ship.memberId] = restingLeft(ship, zoom);
+        left[ship.memberId] = restingLeft(ship);
     }
     for (const slot of new Set(fleet.map((ship) => ship.place.slot))) {
         // Мельче — уступает первым; при равных силуэтах уступает тот, кто встал раньше:
@@ -439,8 +437,8 @@ export const fleetLefts = (fleet: Anchored[], zoom: number): Record<string, numb
             );
         if (here.length === 2) {
             const [small, big] = here;
-            const smallHalf = hullHalf(small.place.slot, small.shipKind, zoom);
-            const bigHalf = hullHalf(big.place.slot, big.shipKind, zoom);
+            const smallHalf = hullHalf(small.place.slot, small.shipKind);
+            const bigHalf = hullHalf(big.place.slot, big.shipKind);
             const short = needApart(smallHalf, bigHalf) - Math.abs(left[small.memberId] - left[big.memberId]);
             if (short > 0) {
                 // Отходит каждый от соседа: кто стоит правее, тот и вправо. Встали ровно друг

@@ -19,7 +19,6 @@ import { fleetLefts, restingLeft } from '@/backend';
 import MemberName from '@/components/ships/MemberName';
 import Ship from '@/components/ships/Ship';
 import { SHIP_SPRITES } from '@/components/ships/shipSprites';
-import { MOBILE_SHIP_ZOOM } from '@/config/layout';
 import {
     Berth,
     CORRIDORS,
@@ -36,7 +35,6 @@ import {
     slotScale,
     slotShare,
 } from '@/types/channel';
-import { useIsMobile } from '@/utils/viewport';
 
 import {
     ENTER_GUARD,
@@ -263,10 +261,6 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
         []
     );
 
-    // На телефоне корабли растянуты, и путь у них в метрах длиннее — длительность хода
-    // это учитывает, иначе на узком экране флот ходил бы быстрее, чем на широком.
-    const zoom = useIsMobile() ? MOBILE_SHIP_ZOOM : 1;
-
     // Высота воды в кадре, px. Сама по себе она никуда не идёт — по ней сцена узнаёт, что
     // море переменилось: кадр сжался под клавиатуру, повернулся телефон. Точки мест стоят
     // в долях кадра, а искать ближайшую к указателю приходится в пикселях, и после такой
@@ -369,8 +363,8 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
     // на соседа уже перестал — тот отпускает резинку и идёт обратно на свою точку, не дожидаясь,
     // пока ушедший скроется за кромкой. Уходящему расхождения не достаётся по той же причине:
     // в списке канала его уже нет, и он снимается со своей точки, а не с отжатой.
-    const lefts = fleetLefts(members, zoom);
-    const leftOf = (member: Member): number => lefts[member.memberId] ?? restingLeft(member, zoom);
+    const lefts = fleetLefts(members);
+    const leftOf = (member: Member): number => lefts[member.memberId] ?? restingLeft(member);
 
     // Пока вкладка в фоне, браузер не рисует кадров, и анимации в ней стоят. Само событие
     // доходит вовремя — useChannel применяет его сразу, — и разметка обновляется, а движение
@@ -653,7 +647,7 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
         // Выбор закрылся или рейд перебрали заново — подсветка предыдущего указателя
         // к новому набору мест отношения не имеет.
         setNearBerth(null);
-    }, [berthOptions, takenKeys, seaHeight, zoom]);
+    }, [berthOptions, takenKeys, seaHeight]);
 
     /**
      * Место, до чьей точки ближе всего от этого места в кадре. Считается только по воде:
@@ -735,7 +729,7 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
                 // он не стоит — там стоит отметка места, а корабль разбросан внутри полосы
                 // и мог ещё и отойти от тесного соседа.
                 const shown = leftOf(member);
-                const enterPath = pathToEdge(shown, width, zoom, member.place.enterFrom, ENTER_GUARD);
+                const enterPath = pathToEdge(shown, width, member.place.enterFrom, ENTER_GUARD);
                 // Уход: вперёд, а если нос смотрит в остров — задним ходом в другую сторону.
                 const leave = leaveCourse(
                     member.place,
@@ -747,10 +741,10 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
                         )
                         .map((other) => other.place)
                 );
-                const leavePath = pathToEdge(shown, width, zoom, leave.side, LEAVE_GUARD);
-                const enterSeconds = sailSeconds(enterPath, member.place.slot, member.shipKind, false, zoom);
+                const leavePath = pathToEdge(shown, width, leave.side, LEAVE_GUARD);
+                const enterSeconds = sailSeconds(enterPath, member.place.slot, member.shipKind, false);
                 // Задний ход отличается только длительностью: кривая та же, а скорость ниже.
-                const leaveSeconds = sailSeconds(leavePath, member.place.slot, member.shipKind, leave.astern, zoom);
+                const leaveSeconds = sailSeconds(leavePath, member.place.slot, member.shipKind, leave.astern);
                 // Куда корабль идёт: уходящий — в свою сторону, остальные — той же, которой
                 // заходили на рейд. Стоящему это не пустое значение, а память о последнем ходе:
                 // кивок на остановке отыгрывается уже без движения, а клюнуть носом корабль
@@ -769,8 +763,7 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
                           leaving ? leavePath : enterPath,
                           leaving ? leaveSeconds : enterSeconds,
                           member.place.slot,
-                          member.shipKind,
-                          zoom
+                          member.shipKind
                       ) * bowUp
                     : 0;
                 // Кивок — короткое движение по краям манёвра, поверх дифферента: трогаясь,

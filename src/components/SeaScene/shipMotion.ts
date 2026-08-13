@@ -152,13 +152,12 @@ const metresPerPercent = (slot: number): number => SCENE_SCALE_LENGTH / slotWidt
 export const pathToEdge = (
     leftPercent: number,
     widthPercent: number,
-    zoom: number,
     side: 'left' | 'right',
     /** Запас за кромкой, длин корпуса: ENTER_GUARD или LEAVE_GUARD. */
     guard: number
 ): number => {
     const span = side === 'left' ? leftPercent : 100 - leftPercent;
-    return span + widthPercent * zoom * (0.5 + guard);
+    return span + widthPercent * (0.5 + guard);
 };
 
 /**
@@ -169,19 +168,8 @@ export const pathToEdge = (
  * приходит, поэтому «столько-то метров за столько-то секунд» — честная мерка, а как скорость
  * распределится внутри прогона, решает кривая в стилях.
  */
-export const sailSeconds = (
-    pathPercent: number,
-    slot: number,
-    kind: ShipKind,
-    astern: boolean,
-    /**
-     * Во сколько раз корабли в кадре растянуты сверх расчётного размера — на телефоне это
-     * MOBILE_SHIP_ZOOM. Корабль стал крупнее, а кадр остался тем же, значит в кадре стало
-     * меньше метров: без поправки на узком экране флот ходил бы быстрее, чем на широком.
-     */
-    zoom = 1
-): number => {
-    const metres = (pathPercent * metresPerPercent(slot)) / zoom;
+export const sailSeconds = (pathPercent: number, slot: number, kind: ShipKind, astern: boolean): number => {
+    const metres = pathPercent * metresPerPercent(slot);
     return Math.min(metres / sailSpeed(metres, kind, astern), pathPercent / MIN_SAIL_PACE);
 };
 
@@ -214,11 +202,11 @@ const TRIM_FULL_MPS = ROADSTEAD_KNOTS_SHORTEST * KNOT_MPS;
  * Знак ставит компонент: угол зависит от того, какой стороной корабль идёт вперёд, а не от того,
  * куда смотрит нос.
  */
-export const sailTrim = (pathPercent: number, seconds: number, slot: number, kind: ShipKind, zoom = 1): number => {
+export const sailTrim = (pathPercent: number, seconds: number, slot: number, kind: ShipKind): number => {
     if (pathPercent <= 0 || seconds <= 0) {
         return 0;
     }
-    const speed = (pathPercent * metresPerPercent(slot)) / zoom / seconds;
+    const speed = (pathPercent * metresPerPercent(slot)) / seconds;
     const full = TRIM_SHORTEST_DEG + (TRIM_LONGEST_DEG - TRIM_SHORTEST_DEG) * sizeShare(kind);
     return Math.min(speed / TRIM_FULL_MPS, 1) * full;
 };

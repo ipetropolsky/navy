@@ -286,8 +286,6 @@
     --berth-far: calc(var(--sea-fit) * @berth-far-share);
     --berth-near: calc(var(--sea-fit) * @berth-near-share);
     --island-line: calc(var(--sea-fit) * @island-line-share);
-    // Корабли на телефоне крупнее, иначе совсем мелкие.
-    --ship-zoom: 1;
     // Концы разбега коридоров: см. @berth-spread-far и --berth-shift.
     --berth-spread-far: @berth-spread-far;
     --berth-spread-near: @berth-spread-near;
@@ -327,7 +325,6 @@
         // высота берётся с точностью до пикселя разметки, а --scene-height — до дробной части,
         // и расходятся они на доли пикселя. Месяцу этого не видно, шву воды и неба — видно.
         --sky-px: ~'max(var(--scene-height) - @{sea-height-mobile}, min(@{sky-min-mobile}, var(--scene-height) * 0.4))';
-        --ship-zoom: @ship-zoom-mobile;
         --berth-spread-far: @berth-spread-far-mobile;
         --berth-spread-near: @berth-spread-near-mobile;
     }
@@ -611,7 +608,7 @@
         (var(--berth-spread-far) + (var(--berth-spread-near) - var(--berth-spread-far)) * var(--slot-share, 1)) *
             var(--corridor-side, 0)
     );
-    --slot-safe: calc(var(--slot-half) * var(--ship-zoom) + @ship-edge-gap);
+    --slot-safe: calc(var(--slot-half) + @ship-edge-gap);
     --slot-x: clamp(var(--slot-safe), var(--slot-left), calc(100% - var(--slot-safe)));
 }
 
@@ -667,7 +664,7 @@
 // и только потом садился на воду, а тронувшись — приподнимался уже на ходу.
 .shipSlot {
     position: relative;
-    width: calc(var(--slot-width) * var(--ship-zoom));
+    width: var(--slot-width);
     translate: -50%;
     transform-origin: 50% 82%;
     pointer-events: none;
