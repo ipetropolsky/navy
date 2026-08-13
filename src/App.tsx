@@ -1,17 +1,20 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { ChannelDraft, ChannelError, MemberDraft, backend, freeBerths, suggestBerth } from '@/backend';
 import { DEMO_CHANNEL_SLUG } from '@/backend/seed';
 import SeaScene from '@/components/SeaScene/SeaScene';
 import CreateChannel from '@/components/channel/CreateChannel';
 import MemberForm from '@/components/channel/MemberForm';
+import MembersList from '@/components/channel/MembersList';
 import MembersSheet from '@/components/channel/MembersSheet';
 import Composer from '@/components/chat/Composer';
 import MessageList from '@/components/chat/MessageList';
 import Button from '@/components/ui/Button';
 import IconButton from '@/components/ui/IconButton';
 import Panel from '@/components/ui/Panel';
+import Shade from '@/components/ui/Shade';
 import { useSnackbar } from '@/components/ui/Snackbar';
+import { ShadeStop } from '@/components/ui/shadeStops';
 import { HAIL_SIGNAL, morseDuration } from '@/hooks/morse';
 import { useChannel } from '@/hooks/useChannel';
 import { channelLink, useRoute } from '@/routing';
@@ -55,15 +58,15 @@ export default function App() {
     // Развёрнутая сцена. Режим один на всё приложение, а не на экран: развернул в чате —
     // открыл форму корабля и выбираешь место на том же большом кадре. Ради этого он и заведён.
     const [fullscreen, setFullscreen] = useState(false);
-    const appRef = useRef<HTMLDivElement>(null);
+    // На какой ступени стоит шторка полноэкранного вида. Держим здесь, а не в самой шторке:
+    // её положение отнимает и возвращает клавиатура (см. ниже), а отнять можно только чужое.
+    const [shadeStop, setShadeStop] = useState<ShadeStop>('peek');
 
-    // На развороте и на сворачивании страница возвращается к началу. Промотанная вниз, она
-    // после сворачивания оставила бы человека где-то в середине ленты, а после разворота —
-    // ниже кадра, ради которого он кнопку и нажал. Рывком, а не плавно: разворот и так
-    // движение, и второе поверх него читалось бы дёрганьем.
+    // Разворачиваем — шторка опускается в щёлку: человек нажал кнопку ради кадра, и открывать
+    // ему поверх кадра ленту во весь экран значит не показать ничего.
     const toggleFullscreen = (): void => {
         setFullscreen((on) => !on);
-        appRef.current?.scrollTo({ top: 0 });
+        setShadeStop('peek');
     };
 
     // Пустой список — тоже список, но новый на каждой отрисовке: без useMemo он менял бы
@@ -232,8 +235,96 @@ export default function App() {
         return members.length ? `${members.length} на связи` : 'никого нет';
     };
 
+    // Список кораблей. В обычном виде он приезжает своей шторкой поверх всего, в полноэкранном
+    // — встаёт в большую шторку на место чата: две шторки одна поверх другой были бы уже
+    // не «показать список», а второй этаж.
+    const membersList = (
+        <MembersList
+            members={members}
+            myId={myId}
+            seniorId={channel?.channel.owner?.memberId ?? null}
+            onEditMe={() => {
+                setSheetOpen(false);
+                setEditing(true);
+            }}
+            onLeave={() => {
+                setSheetOpen(false);
+                void channelState.leave();
+            }}
+            // Список остаётся открытым: высадив один корабль, старший чаще всего смотрит
+            // на список дальше, а не уходит из него.
+            onKick={(memberId) => void channelState.kick(memberId)}
+            onHail={handleHail}
+        />
+    );
+
+    // Содержимое панели: что лежит под сценой в обычном виде и что переезжает в шторку
+    // в полноэкранном. Разметка одна на оба вида — меняется только то, во что она обёрнута.
+    const panelContent = (
+        <>
+            {loading && <div className={styles.waiting}>Выходим на связь…</div>}
+            {/* Адрес в ссылке есть, а канала по нему нет: ссылка устарела или в ней опечатка.
+                Показывать здесь форму создания нельзя — человек шёл не создавать, а войти. */}
+            {!loading && route.channel && !channel && (
+                <Panel
+                    title="Канала нет"
+                    hint={`Канала по адресу «${route.channel}» нет: ссылка устарела или в ней опечатка.`}
+                    actions={<Button onClick={route.openHome}>Создать свой канал</Button>}
+                />
+            )}
+            {!loading && !route.channel && (
+                <CreateChannel
+                    onCreate={handleCreate}
+                    demoHref={`?channel=${DEMO_CHANNEL_SLUG}`}
+                    onOpenDemo={() => route.openChannel(DEMO_CHANNEL_SLUG)}
+                />
+            )}
+            {!loading && channel && !inChat && (
+                <MemberForm
+                    mode={editing ? 'edit' : 'join'}
+                    crew={members}
+                    myId={myId}
+                    initial={myDraft}
+                    shipKind={shipKind}
+                    onShipKind={setPickedKind}
+                    onSubmit={handleMemberSubmit}
+                    onCancel={editing ? () => setEditing(false) : undefined}
+                />
+            )}
+            {inChat && channel && me && (
+                <>
+                    <MessageList
+                        messages={channel.messages}
+                        members={members}
+                        myId={me.memberId}
+                        onReply={setReplyTo}
+                        onHail={handleHail}
+                    />
+                    <Composer
+                        replyTo={replyTo}
+                        replyToAuthor={replyToAuthor}
+                        onCancelReply={() => setReplyTo(null)}
+                        onSend={handleSend}
+                        onTooLong={(length) => notify(`Максимум ${MAX_MESSAGE_LENGTH} символов, у вас ${length}`)}
+                        onTyped={channelState.reportTyping}
+                    />
+                </>
+            )}
+        </>
+    );
+
+    // Что показывает шторка и как она подписана для тех, кто её не видит. Заодно это ответ
+    // на вопрос, зачем шторке щёлка: из неё видно заголовок того, что там лежит.
+    const shadeIsMembers = sheetOpen && inChat;
+    const shadeLabel = (): string => {
+        if (shadeIsMembers) {
+            return 'Корабли на связи';
+        }
+        return inChat ? 'Разговор' : 'Форма';
+    };
+
     return (
-        <div className={[styles.app, fullscreen ? styles.appFull : ''].filter(Boolean).join(' ')} ref={appRef}>
+        <div className={[styles.app, fullscreen ? styles.appFull : ''].filter(Boolean).join(' ')}>
             <header className={styles.header}>
                 <div className={styles.scene}>
                     <SeaScene
@@ -271,9 +362,20 @@ export default function App() {
                     {/* Кнопки идут вплотную: это один блок действий, а не два разных. */}
                     <div className={styles.headerActions}>
                         {inChat && (
+                            // Кнопка переключает, а не только открывает: в полноэкранном виде
+                            // список приезжает в ту же шторку, что и чат, и закрыть его,
+                            // ткнув мимо, нельзя — мимо там сцена.
                             <IconButton
                                 large={fullscreen}
-                                onClick={() => setSheetOpen(true)}
+                                onClick={() => {
+                                    setSheetOpen((on) => !on);
+                                    // Открывать список в щёлке незачем: там видно один
+                                    // заголовок. Поднимаем до половины, а выше человек
+                                    // дотянет сам.
+                                    if (!sheetOpen && shadeStop === 'peek') {
+                                        setShadeStop('half');
+                                    }
+                                }}
                                 aria-label="Корабли на связи"
                             >
                                 <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
@@ -310,75 +412,20 @@ export default function App() {
                     </div>
                 </div>
             </header>
-            <main className={styles.panel}>
-                {loading && <div className={styles.waiting}>Выходим на связь…</div>}
-                {/* Адрес в ссылке есть, а канала по нему нет: ссылка устарела или в ней опечатка.
-                    Показывать здесь форму создания нельзя — человек шёл не создавать, а войти. */}
-                {!loading && route.channel && !channel && (
-                    <Panel
-                        title="Канала нет"
-                        hint={`Канала по адресу «${route.channel}» нет: ссылка устарела или в ней опечатка.`}
-                        actions={<Button onClick={route.openHome}>Создать свой канал</Button>}
-                    />
-                )}
-                {!loading && !route.channel && (
-                    <CreateChannel
-                        onCreate={handleCreate}
-                        demoHref={`?channel=${DEMO_CHANNEL_SLUG}`}
-                        onOpenDemo={() => route.openChannel(DEMO_CHANNEL_SLUG)}
-                    />
-                )}
-                {!loading && channel && !inChat && (
-                    <MemberForm
-                        mode={editing ? 'edit' : 'join'}
-                        crew={members}
-                        myId={myId}
-                        initial={myDraft}
-                        shipKind={shipKind}
-                        onShipKind={setPickedKind}
-                        onSubmit={handleMemberSubmit}
-                        onCancel={editing ? () => setEditing(false) : undefined}
-                    />
-                )}
-                {inChat && channel && me && (
-                    <>
-                        <MessageList
-                            messages={channel.messages}
-                            members={members}
-                            myId={me.memberId}
-                            onReply={setReplyTo}
-                            onHail={handleHail}
-                        />
-                        <Composer
-                            replyTo={replyTo}
-                            replyToAuthor={replyToAuthor}
-                            onCancelReply={() => setReplyTo(null)}
-                            onSend={handleSend}
-                            onTooLong={(length) => notify(`Максимум ${MAX_MESSAGE_LENGTH} символов, у вас ${length}`)}
-                            onTyped={channelState.reportTyping}
-                        />
-                    </>
-                )}
-            </main>
-            <MembersSheet
-                open={sheetOpen}
-                members={members}
-                myId={myId}
-                seniorId={channel?.channel.owner?.memberId ?? null}
-                onEditMe={() => {
-                    setSheetOpen(false);
-                    setEditing(true);
-                }}
-                onLeave={() => {
-                    setSheetOpen(false);
-                    void channelState.leave();
-                }}
-                // Шторка остаётся открытой: высадив один корабль, старший чаще всего смотрит
-                // на список дальше, а не уходит из него.
-                onKick={(memberId) => void channelState.kick(memberId)}
-                onClose={() => setSheetOpen(false)}
-                onHail={handleHail}
-            />
+            {fullscreen ? (
+                <Shade stop={shadeStop} onStop={setShadeStop} label={shadeLabel()}>
+                    <div className={styles.shadePanel}>{shadeIsMembers ? membersList : panelContent}</div>
+                </Shade>
+            ) : (
+                <main className={styles.panel}>{panelContent}</main>
+            )}
+            {/* Список кораблей поверх обычного вида. В полноэкранном его показывает шторка
+                выше, и вторая шторка тут была бы шторкой над шторкой. */}
+            {!fullscreen && (
+                <MembersSheet open={sheetOpen} onClose={() => setSheetOpen(false)}>
+                    {membersList}
+                </MembersSheet>
+            )}
         </div>
     );
 }

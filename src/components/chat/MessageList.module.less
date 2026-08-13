@@ -1,7 +1,9 @@
 .list {
     flex: 1 1 auto;
-    // Лента остаётся читаемой даже когда клавиатура поджала приложение.
-    min-height: 200px;
+    // Лента остаётся читаемой даже когда клавиатура поджала приложение. Переменной, а не
+    // числом: в щёлке шторки ленте отведено меньше, чем 200px, и предел там нужно снять
+    // целиком — см. --list-min-height в App.module.less.
+    min-height: var(--list-min-height, 200px);
     overflow-y: auto;
     display: flex;
     flex-direction: column;

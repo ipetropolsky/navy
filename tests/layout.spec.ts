@@ -1,7 +1,7 @@
 import { Page, expect, test } from '@playwright/test';
 
 import { EDGE_MARGIN } from '@/backend/placement';
-import { MOBILE_MAX_WIDTH, PINNED_ACTIONS_MIN_HEIGHT } from '@/config/layout';
+import { MOBILE_MAX_WIDTH, PINNED_ACTIONS_MIN_HEIGHT, SHADE_PEEK_HEIGHT } from '@/config/layout';
 import { SLOT_COUNT, slotDepth, slotShare } from '@/types/channel';
 
 import {
@@ -863,9 +863,9 @@ test('корабль не встаёт бортом на обрез кадра, 
  * попасть в нужную трудно. Разворот снимает ограничение колонки: кадр занимает окно целиком,
  * и та же геометрия рейда раскладывается на всю его ширину и высоту.
  *
- * Меряется здесь не картинка, а три обещания: кадр действительно вырос до окна и вернулся
- * обратно; шапка выросла вместе с ним; страница осталась страницей — под сценой всё так же
- * чат, до которого можно домотать.
+ * Меряется здесь не картинка, а три обещания: кадр действительно вырос до окна — до всего,
+ * кроме щёлки шторки внизу, — и вернулся обратно; шапка выросла вместе с ним; чат никуда
+ * не делся, он в шторке.
  */
 const sceneBox = async (page: Page): Promise<{ width: number; height: number }> => {
     const box = await page.locator('[class*="scene"]').first().boundingBox();
@@ -891,13 +891,13 @@ test('сцена разворачивается во весь экран и св
     await expect
         .poll(async () => (await sceneBox(page)).width, { message: 'сцена не разошлась на всю ширину окна' })
         .toBe(window.width);
-    expect((await sceneBox(page)).height, 'сцена не заняла окно по высоте').toBe(window.height);
+    // Не всё окно: снизу сцену поджимает щёлка шторки — из-под кадра всегда торчит её край.
+    expect((await sceneBox(page)).height, 'сцена не заняла окно по высоте').toBe(window.height - SHADE_PEEK_HEIGHT);
     expect(await buttonWidth(page), 'кнопки в шапке остались прежними').toBeGreaterThan(smallButton);
 
-    // Полноэкранная сцена не съедает остальное: чат никуда не делся, он под ней.
-    const composer = page.getByPlaceholder('Сообщение');
-    await composer.scrollIntoViewIfNeeded();
-    await expect(composer, 'под развёрнутой сценой не осталось чата').toBeVisible();
+    // Полноэкранная сцена не съедает остальное: чат никуда не делся, он в щёлке шторки,
+    // и поле ввода из неё видно сразу, без единого движения.
+    await expect(page.getByPlaceholder('Сообщение'), 'в щёлке шторки не осталось чата').toBeVisible();
 
     await page.getByRole('button', { name: 'Свернуть сцену' }).click();
     await expect
