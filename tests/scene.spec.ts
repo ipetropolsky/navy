@@ -670,22 +670,57 @@ test('разметка гаснет вместе с флотом, а не кад
     await openChannel(page, DEMO, ALBATROS);
     await page.locator('[class*="shipMine"]').click();
     await expect(berths(page).first()).toBeVisible();
+    // Ждём, пока флот договорит своё: замер идёт по долям пути, и начинать его посреди
+    // предыдущего движения нельзя — доли считались бы от полпути.
+    const hull = page.locator('[class*="shipBody"]').first();
+    await expect
+        .poll(() => hull.evaluate((one) => Number.parseFloat(getComputedStyle(one).opacity)), {
+            message: 'флот так и не ушёл в призрак',
+        })
+        .toBeLessThan(0.51);
 
     // Точки и подписи стоят у самых кораблей, и пропади они разом, пока корпуса возвращаются
     // из призрака, — на корабле это читалось бы вспышкой. Поэтому после закрытия формы слой
-    // ещё в кадре и догорает: он уходит тем же переходом и за то же время, что и высветление.
-    await page.getByText('Отмена', { exact: true }).click();
-    const layer = page.locator('[class*="berthField"]');
-    await expect(layer, 'разметка пропала кадром, не догорев').toHaveCount(1);
-    const fading = await layer.evaluate((field) => {
-        const style = getComputedStyle(field);
-        return { opacity: Number.parseFloat(style.opacity), duration: style.transitionDuration };
+    // ещё в кадре и догорает: он уходит тем же движением и за то же время, что и высветление.
+    //
+    // Смотрим на это покадрово, а не одним замером: слой однажды уже пропадал первым же кадром
+    // и потом свои двести миллисекунд висел в кадре невидимым. Замер «прозрачность меньше
+    // единицы» такое пропускал — ноль тоже меньше единицы, — и поймать это можно только тем,
+    // что слой проходит через середину, а не перескакивает её.
+    const frames = await page.evaluate(async () => {
+        const ship = document.querySelector('[class*="shipBody"]')!;
+        const out: { field: number; ship: number }[] = [];
+        const step = (): Promise<void> => new Promise((resolve) => requestAnimationFrame(() => resolve()));
+        const cancel = [...document.querySelectorAll('button')].find((one) => one.textContent === 'Отмена');
+        cancel!.click();
+        const sample = async (): Promise<void> => {
+            await step();
+            const field = document.querySelector('[class*="berthField"]');
+            out.push({
+                field: field ? Number.parseFloat(getComputedStyle(field).opacity) : 0,
+                ship: Number.parseFloat(getComputedStyle(ship).opacity),
+            });
+        };
+        for (let i = 0; i < 24; i += 1) {
+            // eslint-disable-next-line no-await-in-loop
+            await sample();
+        }
+        return out;
     });
-    expect(fading.opacity, 'разметка не начала гаснуть').toBeLessThan(1);
-    expect(fading.duration, 'разметка гаснет не в срок высветления').toBe('0.2s');
 
-    // И уходит из разметки совсем: иначе прозрачный слой навсегда остался бы поверх сцены.
-    await expect(layer, 'догоревшая разметка осталась в кадре').toHaveCount(0);
+    const midway = frames.filter((frame) => frame.field > 0.2 && frame.field < 0.8);
+    expect(midway.length, 'разметка не гасла, а пропала кадром').toBeGreaterThan(2);
+
+    // И гаснет она ровно тогда, когда светлеет флот. Считаем обоих в долях пройденного пути:
+    // разметка идёт от единицы к нулю, корабль — от призрака к себе, и на каждом кадре доли
+    // обязаны сойтись. Так проверяется не длительность в стилях, а то, что видно глазом.
+    const ghost = frames[0].ship;
+    const apart = midway.map((frame) => Math.abs(1 - frame.field - (frame.ship - ghost) / (1 - ghost)));
+    expect(Math.max(...apart), 'разметка и флот идут вразнобой').toBeLessThan(0.1);
+
+    // И уходит из кадра совсем: иначе прозрачный слой навсегда остался бы поверх сцены.
+    expect(frames.at(-1)!.field, 'догоревшая разметка осталась в кадре').toBe(0);
+    await expect(page.locator('[class*="berthField"]'), 'догоревшая разметка осталась в кадре').toHaveCount(0);
 });
 
 test('подпись стоит на точке своего места, даже когда корабль отведён от края кадра', async ({ page }) => {
