@@ -1,4 +1,4 @@
-import { ReactNode, useEffect, useRef } from 'react';
+import { ReactNode, UIEvent, useLayoutEffect, useRef } from 'react';
 
 import Avatar from '@/components/ships/Avatar';
 import MemberName from '@/components/ships/MemberName';
@@ -36,16 +36,85 @@ interface MessageListProps {
     onHail: (memberId: string) => void;
 }
 
+/**
+ * Насколько близко к нижней кромке лента считается прицепленной, px. Ноль сюда не годится:
+ * высоты в браузере дробные, и домотанная до упора лента то и дело оказывается в пикселе
+ * от конца. Полутора строчками при этом не отделаешься в другую сторону — отцеп должен
+ * случаться от настоящего движения вверх, а не от округления.
+ */
+const STICK_SLOP = 24;
+
 /** Лента сообщений в стиле Telegram: группировка по автору, ответы, тап по сообщению — ответить. */
 export default function MessageList({ messages, members, myId, onReply, onHail }: MessageListProps) {
     const listRef = useRef<HTMLDivElement>(null);
 
-    useEffect(() => {
+    /**
+     * Прицеплена ли лента к низу. Прицеплена — низ держится у панели ввода, и новые сообщения
+     * появляются на виду; отцеплена — на виду остаётся то место, куда человек отмотал, и ни
+     * новое сообщение, ни поехавшая шторка его не сдвигают.
+     *
+     * Отцепляет и прицепляет обратно только сама прокрутка: домотал до низа — прицепили,
+     * тронул вверх — отпустили. Никакой другой причины перемотать ленту вниз нет, и это
+     * ровно то, чего от чата ждут: читаешь старое — читай, пока не вернёшься сам.
+     *
+     * Ref, а не состояние: перерисовывать ленту от смены прицепа нечего — она от него
+     * не меняется ни на пиксель.
+     */
+    const stuckRef = useRef(true);
+
+    /** Последняя своя реплика: по ней видно, что человек сам дописал разговор до конца. */
+    const lastMessage = messages.at(-1);
+    const lastOwnId =
+        lastMessage && lastMessage.kind !== 'system' && lastMessage.author.memberId === myId
+            ? lastMessage.messageId
+            : null;
+    const lastOwnRef = useRef(lastOwnId);
+
+    const handleScroll = (event: UIEvent<HTMLDivElement>): void => {
+        const list = event.currentTarget;
+        stuckRef.current = list.scrollHeight - list.scrollTop - list.clientHeight <= STICK_SLOP;
+    };
+
+    /**
+     * Держим низ. Без зависимостей нарочно: прицепленную ленту надо доводить до конца после
+     * каждой перерисовки — пришло сообщение, выросло своё же, развернулась цитата.
+     *
+     * Layout, а не обычный эффект: прокрутка обязана встать до того, как кадр покажут, иначе
+     * новое сообщение успевает мелькнуть снизу и только потом лента к нему доезжает.
+     */
+    useLayoutEffect(() => {
         const list = listRef.current;
-        if (list) {
+        // Своя реплика прицепляет ленту обратно. Отправить сообщение и не увидеть его —
+        // единственный случай, когда «не мотать» читается поломкой: человек только что сам
+        // дописал разговор до конца, значит и смотреть хочет на конец.
+        if (lastOwnId && lastOwnId !== lastOwnRef.current) {
+            stuckRef.current = true;
+        }
+        lastOwnRef.current = lastOwnId;
+        if (list && stuckRef.current) {
             list.scrollTop = list.scrollHeight;
         }
-    }, [messages.length]);
+    });
+
+    /**
+     * То же самое, но когда меняется не лента, а её окошко: шторка ходит по ступеням, и высота
+     * ленты едет вместе с ней все свои 280 мс. Перерисовки на это нет — высоту меняет переход
+     * в стилях, — а низ уезжал бы из виду ровно на разницу высот. Поэтому смотрим за самим
+     * блоком: пока лента прицеплена, каждый её новый размер снова доводится до конца.
+     */
+    useLayoutEffect(() => {
+        const list = listRef.current;
+        if (!list) {
+            return undefined;
+        }
+        const observer = new ResizeObserver(() => {
+            if (stuckRef.current) {
+                list.scrollTop = list.scrollHeight;
+            }
+        });
+        observer.observe(list);
+        return () => observer.disconnect();
+    }, []);
 
     const byId = new Map(members.map((member) => [member.memberId, member]));
     // По кому группировать подряд идущие сообщения. Системная запись не группируется ни с чем:
@@ -54,7 +123,7 @@ export default function MessageList({ messages, members, myId, onReply, onHail }
         message.kind === 'system' ? message.messageId : message.author.memberId;
 
     return (
-        <div ref={listRef} className={styles.list}>
+        <div ref={listRef} className={styles.list} onScroll={handleScroll}>
             {messages.length > 0 && <div className={styles.dateChip}>{formatDate(messages[0].sentAt)}</div>}
             {messages.map((message, index) => {
                 if (message.kind === 'system') {

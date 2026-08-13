@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { Page, expect, test } from '@playwright/test';
 
 import { MOBILE_MAX_WIDTH } from '@/config/layout';
 
@@ -210,4 +210,58 @@ test('не старшему высаживать нечем, а после ег�
     await openChannel(page, DEMO, VYMPEL);
     await page.getByLabel('Корабли на связи').click();
     await expect(page.getByLabel(/^Высадить/)).toHaveCount(1);
+});
+
+/**
+ * Прицеп ленты к низу. Пока лента внизу, она там и держится: новые реплики приходят на виду,
+ * и поле ввода отделяет их от последней строчки. Отмотал вверх — лента отцепляется, и место,
+ * на которое человек смотрит, больше не двигается ни от чужих сообщений, ни от того, что
+ * окошко ленты переменило рост (в полноэкранном виде им ходит шторка). Домотал обратно
+ * до низа — прицепилась снова.
+ *
+ * Свои реплики — исключение, и единственное: отправить сообщение и не увидеть его нельзя.
+ */
+// Сама лента, а не список кораблей: имя класса у обеих одно и то же (.list в своём модуле),
+// поэтому берём её через плашку с датой — та бывает только в ленте и лежит прямо в ней.
+const listBox = (page: Page) => page.locator('[class*="dateChip"]').locator('xpath=..');
+
+const scrollState = (page: Page): Promise<{ top: number; bottom: number }> =>
+    listBox(page).evaluate((node) => ({
+        top: Math.round(node.scrollTop),
+        bottom: Math.round(node.scrollHeight - node.scrollTop - node.clientHeight),
+    }));
+
+test('лента держится низа, пока её не отмотали, и не дёргается, пока не вернули', async ({ context }) => {
+    const mine = await context.newPage();
+    const theirs = await context.newPage();
+    await openChannel(mine, DEMO, ALBATROS);
+    await openChannel(theirs, DEMO, VYMPEL);
+
+    // Набиваем ленту так, чтобы её было что мотать.
+    for (let index = 0; index < 12; index += 1) {
+        // eslint-disable-next-line no-await-in-loop
+        await send(theirs, `Отметка ${index}`);
+    }
+    await expect
+        .poll(async () => (await scrollState(mine)).bottom, { message: 'лента не стоит внизу' })
+        .toBeLessThan(24);
+
+    // Отматываем вверх — и с этого мгновения место на виду не двигается.
+    await listBox(mine).evaluate((node) => {
+        node.scrollTop = 0;
+    });
+    const parked = await scrollState(mine);
+    expect(parked.top, 'лента не отмоталась').toBe(0);
+
+    await send(theirs, 'Пришло, пока читают старое');
+    await expect(bubbles(mine).last()).toContainText('Пришло, пока читают старое');
+    expect((await scrollState(mine)).top, 'чужая реплика утянула ленту с места').toBe(parked.top);
+
+    // Своя реплика — другое дело: её надо видеть, и лента прицепляется обратно.
+    await send(mine, 'Принято');
+    await expect
+        .poll(async () => (await scrollState(mine)).bottom, {
+            message: 'после своей реплики лента не вернулась к низу',
+        })
+        .toBeLessThan(24);
 });
