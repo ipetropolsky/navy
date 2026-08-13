@@ -1,0 +1,94 @@
+// Ход шторки. Та же кривая, что у разворота сцены: стремительное начало и долгое
+// успокоение к концу — движение читается как «выехала и встала».
+@shade-seconds: 0.28s;
+@shade-easing: cubic-bezier(0.22, 1, 0.36, 1);
+
+// @shade-peek и @shade-top-gap подставляются в каждый .less из src/config/layout.ts —
+// см. vite.config.ts.
+
+// Шторка прижата к нижней кромке своего кадра и растёт вверх. Кадр — это .app: он
+// position: relative и height: 100dvh, поэтому ступени считаются от высоты окна,
+// а не от длины содержимого.
+.shade {
+    position: absolute;
+    inset: auto 0 0;
+    z-index: 30;
+    display: flex;
+    flex-direction: column;
+    // Содержимое перекладывается под новую высоту, и на полпути ему бывает тесно:
+    // прилипшая полоса кнопок и поле ввода не должны вылезать за скруглённый край.
+    overflow: hidden;
+    border-radius: 16px 16px 0 0;
+    background: var(--color-bg-raised);
+    box-shadow: 0 -8px 40px rgba(0, 0, 0, 0.5);
+    transition: height @shade-seconds @shade-easing;
+}
+
+.shadePeek {
+    height: @shade-peek;
+}
+
+.shadeHalf {
+    height: 50%;
+}
+
+// До верха, но не вплотную: под открытой полоской остаётся шапка канала с кнопками —
+// см. SHADE_TOP_GAP.
+.shadeFull {
+    height: calc(100% - @shade-top-gap);
+}
+
+// Пока тянут, высота идёт за пальцем: любой переход тут превратился бы в отставание.
+.shadeDragging {
+    transition: none;
+}
+
+// Затемнение под шторкой. Прозрачность ставится из кода — она набирается по ходу движения,
+// а не переключается на ступени, — поэтому своего перехода у неё нет: пока шторку тянут,
+// он опаздывал бы, а на ступенях её меняют вместе с высотой, и та уже анимируется.
+.backdrop {
+    position: absolute;
+    inset: 0;
+    z-index: 10;
+    background: var(--color-bg-overlay);
+    pointer-events: none;
+    transition: opacity @shade-seconds @shade-easing;
+}
+
+// Ручка занимает всю ширину шторки, а не только полоску посередине: тянут её пальцем,
+// и промахнуться мимо 36 px на телефоне проще, чем попасть.
+//
+// touch-action: none — чтобы браузер не забрал вертикальное движение себе под прокрутку:
+// он это делает молча и с задержкой, и шторка начинала бы ехать не сразу.
+.handle {
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    padding: 10px 0 8px;
+    border: 0;
+    background: none;
+    cursor: grab;
+    touch-action: none;
+
+    &:active {
+        cursor: grabbing;
+    }
+}
+
+.grip {
+    width: 36px;
+    height: 4px;
+    border-radius: 2px;
+    background: rgba(127, 157, 189, 0.4);
+}
+
+// Содержимое: всё, что осталось от шторки под ручкой. min-height: 0 — чтобы лента и форма
+// внутри скроллились сами, а не распирали шторку изнутри.
+.body {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+}
