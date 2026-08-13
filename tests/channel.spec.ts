@@ -88,7 +88,9 @@ test('уход с рейда отмечается в ленте и возвра�
     await expect(page.getByPlaceholder('Гром')).toBeVisible();
     const state = await readState(page);
     expect(state.channels['ch-demo'].members.map((member) => member.memberId)).not.toContain(ALBATROS);
-    expect(state.channels['ch-demo'].messages.at(-1)!.text).toBe('Сторожевой катер «Альбатрос» 317 снялся с рейда');
+    expect(state.channels['ch-demo'].messages.at(-1)!.text).toBe(
+        'Пограничный сторожевой катер «Альбатрос» 317 снялся с рейда'
+    );
 });
 
 test('переоснащение пишет в ленту, что было и что стало', async ({ page }) => {
@@ -96,9 +98,11 @@ test('переоснащение пишет в ленту, что было и ч
 
     await page.getByLabel('Корабли на связи').click();
     await page.getByRole('button', { name: 'Настроить корабль' }).click();
-    await join(page, 'Буран', '512', 'Тральщик');
+    await join(page, 'Буран', '512', 'Рейдовый тральщик');
 
-    await expect(systemLines(page).last()).toHaveText('Сторожевой катер «Альбатрос» 317 теперь тральщик «Буран» 512');
+    await expect(systemLines(page).last()).toHaveText(
+        'Пограничный сторожевой катер «Альбатрос» 317 теперь рейдовый тральщик «Буран» 512'
+    );
 });
 
 test('набранный номер стоит на выбранном корабле, и только на нём', async ({ page }) => {

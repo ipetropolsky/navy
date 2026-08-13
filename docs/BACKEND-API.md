@@ -89,7 +89,7 @@ interface Member {
     memberId: string;
     name: string; // позывной, он же название корабля
     hullNumber: string; // ровно три цифры
-    shipKind: ShipKind; // 'patrol' | 'missile' | 'minesweeper' | 'corvette' | 'torpedo'
+    shipKind: ShipKind; // 'pr1234' | 'pr12412' | 'pr1141' | 'pr201' | 'pr205' | 'pr1258' | 'pr1400'
     color: string; // цвет позывного в ленте
     place: ShipPlacement; // место на рейде, назначает бэкенд
     joinedAt: number;
@@ -222,7 +222,7 @@ import { ChannelError } from '@/backend';
 try {
     const { member } = await backend.join({
         channelId,
-        member: { name: 'Гроза', hullNumber: '042', shipKind: 'corvette', color: '#8ecae6' },
+        member: { name: 'Гроза', hullNumber: '042', shipKind: 'pr12412', color: '#8ecae6' },
     });
     rememberMemberId(channelId, member.memberId);
 } catch (error) {
@@ -241,8 +241,8 @@ try {
 ```
 Малый противолодочный корабль «Гроза» 042 встал на рейд
 Малый противолодочный корабль «Гроза» 042 теперь **«Буран»**
-Торпедный катер «Буран» 517 теперь **тральщик «Сирена» 900**
-Тральщик «Сирена» 900 снялся с рейда
+Ракетный катер «Буран» 517 теперь **рейдовый тральщик «Сирена» 900**
+Рейдовый тральщик «Сирена» 900 снялся с рейда
 ```
 
 Старший на рейде — `channel.owner`. Им становится тот, кто встал в канал первым, и остаётся,
@@ -254,7 +254,7 @@ try {
 `member-left`, а в ленте отличается строчкой:
 
 ```
-Сторожевой катер «Вымпел» 561 выдворен с рейда
+Пограничный сторожевой катер «Вымпел» 561 выдворен с рейда
 ```
 
 Складывать такой текст может только бэкенд: он один знает, каким корабль был до правки, —

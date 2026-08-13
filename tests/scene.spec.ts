@@ -159,13 +159,13 @@ test('на одной линии помещаются двое, и борта н
 
     // Силуэт выбираем до того, как смотреть на воду: от размера зависит, куда этот корабль
     // влезет, и точки свободных мест пересчитываются под него.
-    await page.getByText('Сторожевой катер', { exact: true }).click();
+    await page.getByText('Пограничный сторожевой катер', { exact: true }).click();
     await page.locator('[data-berth="5-center"]').click();
     await join(page, 'Малыш', '111');
 
     // Возвращаемся тем, кого в канале нет: форма открывается заново, а сосед остаётся стоять.
     await openChannel(page, 'para', 'gost');
-    await page.getByText('Сторожевой катер', { exact: true }).click();
+    await page.getByText('Пограничный сторожевой катер', { exact: true }).click();
 
     // Щёлкаем по воде, а не по самому огоньку: круг света у выбранного места широкий и вполне
     // может лечь поверх соседнего огонька. Место всё равно достанется тому, чья точка ближе.
@@ -282,7 +282,7 @@ test('на тесной линии первым уступает тот, кто 
     // Проверять поэтому будем не расстояния в пикселях, а то, что от разброса не зависит:
     // тесная линия у этой пары такая, что воды катеру не хватает при любом разбросе.
     await openChannel(page, 'rezinka', 'gost');
-    await page.getByText('Сторожевой катер', { exact: true }).click();
+    await page.getByText('Пограничный сторожевой катер', { exact: true }).click();
     const spot = await page.locator('[data-berth="8-left"]').boundingBox();
     expect(spot, 'слева от соседа не нашлось места').toBeTruthy();
     await page.mouse.click(spot!.x + spot!.width / 2, spot!.y + spot!.height / 2);
@@ -331,9 +331,9 @@ test('разброс по коридору у всех вкладок одина
     await openNewChannel(page, 'razbros');
     await join(page, 'Гром', '404');
     await openChannel(page, 'razbros', 'vtoroy');
-    await join(page, 'Вымпел', '303', 'Сторожевой катер');
+    await join(page, 'Вымпел', '303', 'Пограничный сторожевой катер');
     await openChannel(page, 'razbros', 'tretiy');
-    await join(page, 'Резвый', '202', 'Торпедный катер');
+    await join(page, 'Резвый', '202', 'Ракетный катер');
 
     // Смотрим глазами двух участников: у каждого свой корабль и своя вкладка. Соседняя
     // вкладка того же контекста делит с этой хранилище, то есть видит тот же рейд.
@@ -398,7 +398,7 @@ test('свободные места на рейде зависят от выбр
         return berths(page).evaluateAll((dots) => dots.map((dot) => (dot as HTMLElement).dataset.berth ?? '').sort());
     };
 
-    const forCutter = await offered('Сторожевой катер');
+    const forCutter = await offered('Пограничный сторожевой катер');
     const forShip = await offered('Малый ракетный корабль');
 
     // Рядом с кораблём на восьмой линии катеру место есть — в обоих соседних коридорах:
@@ -427,14 +427,14 @@ test('соседняя линия занятого коридора остаёт
     // и у неё две стороны, которые надо проверять порознь: человеку соседняя линия видна
     // и доступна, а расстановка берёт её последней.
     await openNewChannel(page, 'sosedi');
-    await page.getByText('Сторожевой катер', { exact: true }).click();
+    await page.getByText('Пограничный сторожевой катер', { exact: true }).click();
     await page.locator('[data-berth="4-center"]').click();
     await join(page, 'Малыш', '111');
 
     // Сторона первая: гость видит на воде обе соседние линии центрального коридора. А вот
     // сама четвёртая пропала — там место занято, и точка на воде у них была бы одна на двоих.
     await openChannel(page, 'sosedi', 'gost');
-    await page.getByText('Сторожевой катер', { exact: true }).click();
+    await page.getByText('Пограничный сторожевой катер', { exact: true }).click();
     const offered = await berths(page).evaluateAll((dots) =>
         dots.map((dot) => (dot as HTMLElement).dataset.berth ?? '')
     );
@@ -826,8 +826,8 @@ test('ход корабля идёт с правдоподобной скоро�
         return Number.parseFloat(value);
     };
 
-    const patrol = await seconds('Сторожевой катер');
-    const minesweeper = await seconds('Тральщик');
+    const cutter = await seconds('Пограничный сторожевой катер');
+    const sweeper = await seconds('Рейдовый тральщик');
 
     // Скорость манёвра теперь одна на всех — на рейде маневрируют самым малым независимо
     // от паспорта, — поэтому корабли между собой уже не сравниваем. Проверяем другое:
@@ -836,7 +836,7 @@ test('ход корабля идёт с правдоподобной скоро�
     //
     // Верхняя мерка — это ход через весь кадр на самом малом: она идёт за MIN_SAIL_PACE
     // и меняется вместе с ним, поэтому и стоит с запасом, а не впритык к замеру.
-    for (const value of [patrol, minesweeper]) {
+    for (const value of [cutter, sweeper]) {
         expect(value).toBeGreaterThan(2);
         expect(value).toBeLessThanOrEqual(45);
     }

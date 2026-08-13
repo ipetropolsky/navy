@@ -39,7 +39,7 @@ const DEMO_CREW: (Omit<Member, 'place'> & { shipKind: ShipKind })[] = [
         memberId: 'm-albatros',
         name: 'Альбатрос',
         hullNumber: '317',
-        shipKind: 'patrol',
+        shipKind: 'pr1400',
         color: '#8ecae6',
         joinedAt: minutesAfterMidnight(21, 30),
     },

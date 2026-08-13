@@ -29,7 +29,7 @@ import styles from './App.module.less';
 const HAIL_HOLD_MS = morseDuration(HAIL_SIGNAL) + 1200;
 
 /** С каким кораблём открывается форма у того, кто ещё не в строю. */
-const DEFAULT_SHIP_KIND: ShipKind = 'corvette';
+const DEFAULT_SHIP_KIND: ShipKind = 'pr12412';
 
 /**
  * Три состояния сервиса, и выбираются они по адресу и по тому, кто эта вкладка:

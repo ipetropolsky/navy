@@ -1,6 +1,3 @@
-import corvetteUrl from '@/assets/scene/ship-corvette.png';
-import frigateUrl from '@/assets/scene/ship-frigate.png';
-import patrolUrl from '@/assets/scene/ship-patrol.png';
 import pr1141Url from '@/assets/scene/ship-pr1141.png';
 import pr1234Url from '@/assets/scene/ship-pr1234.png';
 import pr12412Url from '@/assets/scene/ship-pr12412.png';
@@ -65,9 +62,7 @@ export interface ShipSprite {
  * с корпус, передняя стенка надстройки — первый сплошной участок выше палубы, мачта — самая
  * высокая точка. Дальше их можно двигать руками: это просто числа.
  *
- * Размер в сцене у всех считается одинаково — по длине из справочника. Раньше пяти
- * безномерным силуэтам он подбирался на глаз, и рядом с проектами это стало видно:
- * девятнадцатиметровый катер выходил в кадре крупнее сорокаметрового.
+ * Размер в сцене у всех считается одинаково — по длине из справочника.
  */
 export const SHIP_SPRITES: Record<ShipKind, ShipSprite> = {
     pr1234: {
@@ -173,81 +168,6 @@ export const SHIP_SPRITES: Record<ShipKind, ShipSprite> = {
             stern: { x: 1055, y: 354 },
             anchorFore: { x: 686, y: 121 },
             anchorAft: { x: 1022, y: 336 },
-        },
-    },
-    corvette: {
-        url: corvetteUrl,
-        size: { width: 1100, height: 366 },
-        scale: shipSizeShare('corvette'),
-        hullNumber: { x: 242, y: 318 },
-        lights: {
-            signal: { x: 614, y: 5 },
-            masthead: { x: 409, y: 216 },
-            mastheadAft: { x: 614, y: 42 },
-            side: { x: 442, y: 246 },
-            stern: { x: 1054, y: 289 },
-            anchorFore: { x: 614, y: 64 },
-            anchorAft: { x: 1021, y: 293 },
-        },
-    },
-    missile: {
-        url: frigateUrl,
-        size: { width: 1100, height: 337 },
-        scale: shipSizeShare('missile'),
-        hullNumber: { x: 253, y: 293 },
-        lights: {
-            signal: { x: 595, y: 30 },
-            masthead: { x: 410, y: 192 },
-            mastheadAft: { x: 595, y: 64 },
-            side: { x: 443, y: 222 },
-            stern: { x: 1054, y: 263 },
-            anchorFore: { x: 594, y: 84 },
-            anchorAft: { x: 1021, y: 268 },
-        },
-    },
-    patrol: {
-        url: patrolUrl,
-        size: { width: 1100, height: 355 },
-        scale: shipSizeShare('patrol'),
-        hullNumber: { x: 242, y: 305 },
-        lights: {
-            signal: { x: 610, y: 6 },
-            masthead: { x: 424, y: 198 },
-            mastheadAft: { x: 610, y: 42 },
-            side: { x: 457, y: 229 },
-            stern: { x: 1054, y: 272 },
-            anchorFore: { x: 610, y: 63 },
-            anchorAft: { x: 1021, y: 280 },
-        },
-    },
-    minesweeper: {
-        url: patrolUrl,
-        size: { width: 1100, height: 355 },
-        scale: shipSizeShare('minesweeper'),
-        hullNumber: { x: 242, y: 305 },
-        lights: {
-            signal: { x: 610, y: 6 },
-            masthead: { x: 424, y: 198 },
-            mastheadAft: { x: 610, y: 42 },
-            side: { x: 457, y: 229 },
-            stern: { x: 1054, y: 272 },
-            anchorFore: { x: 610, y: 63 },
-            anchorAft: { x: 1021, y: 280 },
-        },
-    },
-    torpedo: {
-        url: frigateUrl,
-        size: { width: 1100, height: 337 },
-        scale: shipSizeShare('torpedo'),
-        hullNumber: { x: 253, y: 293 },
-        lights: {
-            signal: { x: 595, y: 30 },
-            masthead: { x: 410, y: 192 },
-            mastheadAft: { x: 595, y: 64 },
-            side: { x: 443, y: 222 },
-            stern: { x: 1054, y: 263 },
-            anchorFore: { x: 594, y: 84 },
-            anchorAft: { x: 1021, y: 268 },
         },
     },
 };
