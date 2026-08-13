@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { ChannelDraft, ChannelError, MemberDraft, backend, freeBerths } from '@/backend';
+import { ChannelDraft, ChannelError, MemberDraft, backend, freeBerths, suggestBerth } from '@/backend';
 import { DEMO_CHANNEL_SLUG } from '@/backend/seed';
 import SeaScene from '@/components/SeaScene/SeaScene';
 import CreateChannel from '@/components/channel/CreateChannel';
@@ -82,12 +82,17 @@ export default function App() {
     );
     const [pickedBerth, setPickedBerth] = useState<Berth | null>(null);
     // Своё место выбрано заранее: у стоящего в строю — то, на котором он стоит, у входящего —
-    // случайное свободное. Пустым оно не остаётся никогда: человек, ничего не трогавший
-    // в форме, всё равно должен понимать, куда встанет его корабль.
+    // то, куда его поставила бы расстановка. Пустым оно не остаётся никогда: человек, ничего
+    // не трогавший в форме, всё равно должен понимать, куда встанет его корабль.
     //
-    // Пока он думает, на выбранное место мог встать кто-то другой. Тогда молча берём другое
-    // случайное: заставлять человека выбирать заново из-за чужого хода незачем, а бэкенд
-    // при отправке проверит это ещё раз.
+    // Спрашиваем именно расстановку (suggestBerth), а не берём случайное из списка: тот, кто
+    // в форме ничего не выбирал, встаёт «сам», и правила у этого «сам» одни — простор, размер
+    // корабля, теснота по дальности. Своё, отдельное случайное здесь означало бы, что правила
+    // не работают ни для кого: через форму проходят все, кроме демо-канала.
+    //
+    // Пока он думает, на выбранное место мог встать кто-то другой. Тогда молча берём другое:
+    // заставлять человека выбирать заново из-за чужого хода незачем, а бэкенд при отправке
+    // проверит это ещё раз.
     const berthIsFree = pickedBerth && berthOptions.some((berth) => isSameBerth(berth, pickedBerth));
     if (!picking) {
         // Форма закрыта: выбор больше ничей. Оставить его — значит однажды переставить
@@ -101,7 +106,10 @@ export default function App() {
     } else if (berthOptions.length > 0 && !berthIsFree) {
         setPickedBerth(
             (me && berthOptions.find((berth) => isSameBerth(berth, me.place))) ??
-                berthOptions[Math.floor(Math.random() * berthOptions.length)]
+                suggestBerth(
+                    shipKind,
+                    members.filter((member) => member.memberId !== myId)
+                )
         );
     }
 

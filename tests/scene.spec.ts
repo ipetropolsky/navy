@@ -364,6 +364,52 @@ test('свободные места на рейде зависят от выбр
     ).toHaveLength(0);
 });
 
+test('соседняя линия занятого коридора остаётся на воде, а расстановка её обходит', async ({ page }) => {
+    // Теснота по дальности (MIN_SLOT_GAP) была запретом, и один корабль выключал из рейда
+    // пять дальностей своего коридора — свою и по две в каждую сторону. Теперь это склонность,
+    // и у неё две стороны, которые надо проверять порознь: человеку соседняя линия видна
+    // и доступна, а расстановка берёт её последней.
+    await openNewChannel(page, 'sosedi');
+    await page.getByText('Сторожевой катер', { exact: true }).click();
+    await page.locator('[data-berth="4-center"]').click();
+    await join(page, 'Малыш', '111');
+
+    // Сторона первая: гость видит на воде обе соседние линии центрального коридора. А вот
+    // сама четвёртая пропала — там место занято, и точка на воде у них была бы одна на двоих.
+    await openChannel(page, 'sosedi', 'gost');
+    await page.getByText('Сторожевой катер', { exact: true }).click();
+    const offered = await berths(page).evaluateAll((dots) =>
+        dots.map((dot) => (dot as HTMLElement).dataset.berth ?? '')
+    );
+    expect(offered, 'соседняя линия занятого коридора пропала с воды').toContain('3-center');
+    expect(offered, 'соседняя линия занятого коридора пропала с воды').toContain('5-center');
+    expect(offered, 'занятое место осталось на воде').not.toContain('4-center');
+
+    // Сторона вторая: те, кто места не выбирал, встали сами — и ни один не оказался в чужом
+    // коридоре ближе трёх линий. Свободных мест на рейде из четверых хватает с избытком,
+    // так что тесное место — последнее, что берётся, и до него дело не доходит.
+    const arrive = async (name: string, hullNumber: string, expected: number): Promise<void> => {
+        await openChannel(page, 'sosedi', `gost-${hullNumber}`);
+        await join(page, name, hullNumber);
+        await expect(ships(page)).toHaveCount(expected);
+    };
+    await arrive('Ветер', '201', 2);
+    await arrive('Гроза', '202', 3);
+    await arrive('Заря', '203', 4);
+
+    // Свой канал заводится со случайным id, поэтому ищем его по адресу, а не по ключу.
+    const state = await readState(page);
+    const raid = Object.values(state.channels).find((one) => one.channel.slug === 'sosedi')!;
+    const fleet = raid.members.map((member) => member.place);
+    expect(fleet, 'на рейде оказались не все').toHaveLength(4);
+    for (const one of fleet) {
+        const tight = fleet.filter(
+            (other) => other !== one && other.corridor === one.corridor && Math.abs(other.slot - one.slot) < 3
+        );
+        expect(tight, `расстановка поставила корабль вплотную к соседу по коридору ${one.corridor}`).toHaveLength(0);
+    }
+});
+
 test('рейд подсвечивает одно место и только под указателем на воде', async ({ page }) => {
     await openNewChannel(page, 'podskazka');
     const scene = page.locator('[class*="scene_"]').first();

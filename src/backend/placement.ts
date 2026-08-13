@@ -92,7 +92,21 @@ const CORRIDOR_BOUNDS: Record<Corridor, { from: number; to: number }> = Object.f
     ])
 ) as Record<Corridor, { from: number; to: number }>;
 
-/** Ближе этого числа слотов друг к другу два корабля в одном коридоре не встают. */
+/**
+ * Ближе скольких слотов друг к другу два корабля в одном коридоре стоять не любят. Не запрет,
+ * а склонность, и разница тут существенная. Запретом это было раньше — и один крупный корабль
+ * выключал из рейда пять дальностей разом: свою и по две в каждую сторону. На десяти линиях
+ * это половина рейда, отданная одному силуэту, а человеку, выбиравшему место сам, соседняя
+ * линия просто не предлагалась, хотя ничего невозможного в ней нет.
+ *
+ * Теперь такое место — просто худшее из годных: расстановка берёт его последним, когда
+ * свободных нигде не осталось (см. preferredBerths), а человеку оно предлагается наравне
+ * с прочими — он видит кадр целиком и решает сам.
+ *
+ * Само число прежнее и означает прежнее: сосед по своей или соседней линии того же коридора
+ * отличается по дальности на девятую часть перспективы, силуэты там почти одного размера
+ * и почти на одном месте, и в кадре это читается наложением. Через три линии разница видна.
+ */
 const MIN_SLOT_GAP = 3;
 
 /**
@@ -264,17 +278,17 @@ const fitsAlongside = (slot: number, kind: ShipKind, other: Standing): boolean =
 };
 
 /**
- * Коридоры, свободные для этого слота, в случайном порядке. Сначала линия целиком: если на ней
- * уже стоят двое (или один да остров), она занята — сколько бы воды между ними ни оставалось;
- * если стоящему на ней не разойтись с новичком бортами, занята тем более, и коридор тут ни
- * при чём — расходятся они по всему кадру. Дальше по коридорам: мимо идут занятые соседом
- * по дальности в том же коридоре и остров.
+ * Коридоры, свободные для этого слота, в случайном порядке. Здесь только запреты — то, куда
+ * встать нельзя вовсе, а не то, куда не хочется.
  *
- * Дальность и ширина проверяются порознь, потому что мешают по-разному. Сосед на соседней
- * линии того же коридора закрывает её собой: разница в дальности там на девятую часть
- * перспективы, силуэты почти одного размера и почти на одном месте — это читается наложением,
- * сколько бы воды между ними ни было. А вот на одной дальности всё решают борта, и решают
- * честным счётом.
+ * Сначала линия целиком: если на ней уже стоят двое (или один да остров), она занята — сколько
+ * бы воды между ними ни оставалось; если стоящему на ней не разойтись с новичком бортами, занята
+ * тем более, и коридор тут ни при чём — расходятся они по всему кадру. Дальше по коридорам:
+ * мимо идёт коридор соседа по этой же линии — там место попросту занято, точка на воде у них
+ * была бы одна на двоих, — и остров, который держит свой коридор на дальних слотах: там суша.
+ *
+ * А вот теснота по дальности (MIN_SLOT_GAP) сюда не входит: соседняя линия того же коридора
+ * не запрещена, она просто хуже прочих, и разбирается это при выборе (preferredBerths).
  */
 const freeCorridors = (slot: number, kind: ShipKind, taken: Standing[]): Corridor[] => {
     const island = slot < ISLAND_FREE_SLOT;
@@ -285,17 +299,19 @@ const freeCorridors = (slot: number, kind: ShipKind, taken: Standing[]): Corrido
     if (here.some((other) => !fitsAlongside(slot, kind, other))) {
         return [];
     }
-    const blocked = new Set<Corridor>();
-    for (const other of taken) {
-        if (Math.abs(other.place.slot - slot) < MIN_SLOT_GAP) {
-            blocked.add(other.place.corridor);
-        }
-    }
+    const blocked = new Set(here.map((other) => other.place.corridor));
     if (island) {
         blocked.add(ISLAND_CORRIDOR);
     }
     return shuffled(CORRIDORS).filter((corridor) => !blocked.has(corridor));
 };
+
+/**
+ * Тесно ли тут по дальности: стоит ли в этом же коридоре сосед ближе MIN_SLOT_GAP. Место
+ * от этого не перестаёт быть годным — оно становится худшим из годных.
+ */
+const crowded = (slot: number, corridor: Corridor, taken: Standing[]): boolean =>
+    taken.some((other) => other.place.corridor === corridor && Math.abs(other.place.slot - slot) < MIN_SLOT_GAP);
 
 /**
  * Насколько место далеко от чужого корабля. Обе разницы приведены к долям своего размаха
@@ -362,6 +378,11 @@ const placeAt = (berth: Berth, taken: Standing[]): ShipPlacement => {
  * что у него крупный корабль, незачем. А вот сам размер важен — от него зависит, куда этот
  * корабль вообще влезет, и, выбрав в форме другой силуэт, человек видит, как часть точек
  * на воде пропадает или появляется.
+ *
+ * Тесноты по дальности тут тоже нет: соседняя линия занятого коридора предлагается наравне
+ * с прочими. Человек смотрит на весь кадр разом и видит, к кому встаёт, — решать за него,
+ * что рядом с соседом ему не нравится, не нужно. Это разница между «нельзя» и «не хочется»:
+ * первое обязано быть видно на воде, второе — забота расстановки, а не выбирающего.
  */
 export const freeBerths = (kind: ShipKind, taken: Standing[]): Berth[] =>
     allSlots().flatMap((slot) => freeCorridors(slot, kind, taken).map((corridor) => berthAt(slot, corridor)));
@@ -439,14 +460,27 @@ export const fleetLefts = (fleet: Anchored[], zoom: number): Record<string, numb
  * Куда этот корабль может встать сам. В отличие от freeBerths — с оглядкой на дальность:
  * сначала отбираются слоты, ближайшие к «своей» части рейда, а потом раскладываются
  * по свободным коридорам.
+ *
+ * Теснота отсекается до всего остального, и отсекается начисто: пока на рейде есть хоть одно
+ * место без близкого соседа по коридору, тесные не рассматриваются вовсе. Ступенькой, а не
+ * прибавкой к счёту, — иначе крупный корабль, которого тянет к дальнему краю, выбирал бы
+ * тесноту в «своей» части рейда вместо простора в чужой, и получалась бы та же стопка силуэтов
+ * на соседних линиях, от которой всё и затевалось. Не осталось свободных — тесные снова в деле:
+ * встать рядом можно, просто это последнее, что берётся.
  */
 const preferredBerths = (kind: ShipKind, taken: Standing[]): Berth[] => {
     const wanted = preferredSlot(kind);
-    return allSlots()
-        .filter((slot) => freeCorridors(slot, kind, taken).length > 0)
-        .sort((a, b) => Math.abs(a - wanted) - Math.abs(b - wanted))
-        .slice(0, SLOT_CHOICE)
-        .flatMap((slot) => freeCorridors(slot, kind, taken).map((corridor) => berthAt(slot, corridor)));
+    const free = allSlots().flatMap((slot) =>
+        freeCorridors(slot, kind, taken).map((corridor) => berthAt(slot, corridor))
+    );
+    const roomy = free.filter((berth) => !crowded(berth.slot, berth.corridor, taken));
+    const choice = roomy.length > 0 ? roomy : free;
+    const slots = new Set(
+        [...new Set(choice.map((berth) => berth.slot))]
+            .sort((a, b) => Math.abs(a - wanted) - Math.abs(b - wanted))
+            .slice(0, SLOT_CHOICE)
+    );
+    return choice.filter((berth) => slots.has(berth.slot));
 };
 
 /**
@@ -456,8 +490,14 @@ const preferredBerths = (kind: ShipKind, taken: Standing[]): Berth[] => {
  *
  * Случайность нужна: без неё расстановка превратилась бы в алгоритм, который на одном
  * и том же составе каждый раз рисует одну и ту же картинку.
+ *
+ * Наружу это нужно потому, что человек, ничего не трогавший в форме, тоже встаёт «сам»:
+ * форма показывает ему выбранное место заранее, и брать его она обязана здесь. Иначе выходит
+ * два разных случая на один вопрос — форма ставит равновероятно из всех свободных, а правила
+ * (простор, размер, теснота) остаются лежать в расстановке и не работают ни для кого, кроме
+ * демо-канала.
  */
-const pickBerth = (kind: ShipKind, taken: Standing[]): Berth | null => {
+export const suggestBerth = (kind: ShipKind, taken: Standing[]): Berth | null => {
     const berths = preferredBerths(kind, taken);
     if (berths.length === 0) {
         return null;
@@ -481,6 +521,6 @@ const pickBerth = (kind: ShipKind, taken: Standing[]): Berth | null => {
  * невозможно, но проверка дешевле, чем разбирательство, если однажды станет возможно.
  */
 export const placeShip = (kind: ShipKind, taken: Standing[], wanted?: Berth): ShipPlacement | null => {
-    const berth = wanted && isBerthFree(wanted, kind, taken) ? wanted : pickBerth(kind, taken);
+    const berth = wanted && isBerthFree(wanted, kind, taken) ? wanted : suggestBerth(kind, taken);
     return berth && placeAt(berth, taken);
 };
