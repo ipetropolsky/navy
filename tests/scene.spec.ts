@@ -499,6 +499,35 @@ test('подпись стоит на точке своего места, даж�
     expect(Math.abs(axes.hull - axes.dot), 'корабль не отошёл от края кадра, и проверять нечего').toBeGreaterThan(20);
 });
 
+test('пока выбирают место, призраками становятся все корабли, а подписи не кренятся', async ({ page }) => {
+    await openChannel(page, DEMO, ALBATROS);
+    await expect(ships(page)).toHaveCount(3);
+    await page.locator('[class*="shipMine"]').click();
+    await expect(berths(page).first()).toBeVisible();
+
+    // Свой корабль высветляется наравне с чужими: место под ним закрыто им же, и, останься
+    // он плотным, единственной невидимой стоянкой на рейде была бы как раз его собственная.
+    const solid = await page
+        .locator('[class*="shipSlot"]')
+        .evaluateAll((slots) => slots.filter((slot) => getComputedStyle(slot).filter === 'none').length);
+    expect(solid, 'кто-то из кораблей остался плотным').toBe(0);
+
+    // Имя написано на воде: волна поднимает и опускает его вместе с корпусом, но крена ему
+    // не передаёт — тангаж качает корабль, а не надпись под ним.
+    const motion = await page.evaluate(() => {
+        const styles = (selector: string): CSSStyleDeclaration => getComputedStyle(document.querySelector(selector)!);
+        return {
+            hull: styles('[class*="shipRock"]').animationName,
+            name: styles('[class*="shipName_"]').animationName,
+            tilt: styles('[class*="shipName_"]').rotate,
+        };
+    });
+    expect(motion.hull, 'корабль перестал качаться').toContain('pitch');
+    expect(motion.name, 'подпись перестала ходить с волной').toContain('heave');
+    expect(motion.name, 'подпись кренится вместе с кораблём').not.toContain('pitch');
+    expect(motion.tilt, 'подпись наклонена').toBe('none');
+});
+
 test('ход корабля идёт с правдоподобной скоростью и зависит от корабля', async ({ browser }) => {
     // Каждый замер — своя вкладка со своим хранилищем: во второй раз форма постановки
     // в строй в той же вкладке уже не покажется, вкладка помнит, что корабль у неё есть.

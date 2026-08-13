@@ -792,9 +792,11 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
                             className={[
                                 styles.shipSlot,
                                 canEdit ? styles.shipMine : '',
-                                // Пока выбирают место, чужие корабли отходят на второй план:
-                                // разбирают в этот момент свой, и рейд под ним должно быть видно.
-                                berths && member.memberId !== myId ? styles.shipAside : '',
+                                // Пока выбирают место, весь флот отходит на второй план: речь
+                                // сейчас про рейд, и вода должна читаться сквозь любой корпус.
+                                // Свой корабль тут не исключение — его как раз и разбирают,
+                                // и место под ним закрыто им же.
+                                berths ? styles.shipAside : '',
                             ]
                                 .filter(Boolean)
                                 .join(' ')}

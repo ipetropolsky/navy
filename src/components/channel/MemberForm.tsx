@@ -2,6 +2,7 @@ import { useState } from 'react';
 
 import { ChannelError, MemberDraft } from '@/backend';
 import MemberName from '@/components/ships/MemberName';
+import Ship from '@/components/ships/Ship';
 import { SHIP_SPRITES } from '@/components/ships/shipSprites';
 import Button from '@/components/ui/Button';
 import Field from '@/components/ui/Field';
@@ -214,14 +215,15 @@ export default function MemberForm({
                             onClick={() => onShipKind(kind)}
                         >
                             {/* Место под силуэт одно на всех, а сам силуэт в нём той ширины,
-                                какую даёт его длина. */}
+                                какую даёт его длина. Корабль тут тот же, что в сцене, вместе
+                                с огнями и сигнальной лампой: стоянка на рейде — это то, ради
+                                чего его и выбирают, а огни у каждого силуэта свои и стоят
+                                по-разному. Бортового номера в списке нет: его набирают выше,
+                                и на двенадцати корпусах сразу он читался бы как часть рисунка. */}
                             <span className={styles.kindImageBox} style={{ aspectRatio: IMAGE_BOX_ASPECT }}>
-                                <img
-                                    className={styles.kindImage}
-                                    style={{ width: percent(shipWidth(kind)) }}
-                                    src={SHIP_SPRITES[kind].url}
-                                    alt=""
-                                />
+                                <span className={styles.kindShip} style={{ width: percent(shipWidth(kind)) }}>
+                                    <Ship kind={kind} name={SHIP_KIND_LABELS[kind]} hullNumber="" facing="right" />
+                                </span>
                             </span>
                             <span className={styles.scaleRow}>
                                 <span className={styles.scaleBar} style={{ width: percent(scaleWidth(kind)) }}>
