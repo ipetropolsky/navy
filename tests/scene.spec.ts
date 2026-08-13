@@ -1023,3 +1023,74 @@ test('в списке кораблей выбранный стоит под па
         'на выбор мигнул не один корабль'
     ).toHaveLength(1);
 });
+
+/**
+ * Перемена коридора на своей же дальности — переход по воде, а не перезаход. Раньше всякая
+ * перемена места отыгрывалась одинаково: корабль уходил за кромку кадра, пропадал на паузу
+ * и заплывал заново. На соседнюю точку той же линии это и неправда, и долго — полкадра туда,
+ * полкадра сюда да три секунды пустого рейда между ними, — а идти там меньше трети кадра.
+ *
+ * Правило самого манёвра проверяется юнитами (shipMotion.test.ts): куда идти, задним ли ходом
+ * и сколько это секунд — счёт чистый. Браузеру достаётся то, чего в счёте нет: что корабль
+ * и правда никуда не пропадал.
+ */
+test('на соседний коридор своей линии корабль переходит по воде, не уходя из кадра', async ({ page }) => {
+    // Рейд свой и корабль на нём один: в демо-канале расстановка каждый раз новая, и попадётся
+    // ли свободный коридор рядом со своим кораблём — как повезёт.
+    await openNewChannel(page, 'perehod');
+    await page.getByText('Пограничный сторожевой катер', { exact: true }).click();
+    // Курс вправо, а переходить будем влево: задний ход тут в порядке вещей, и проверить надо
+    // именно его — разворачиваться ради трети кадра корабль не должен.
+    await page.getByLabel('Курс вправо').click();
+    await page.locator('[data-berth="8-center"]').click();
+    await join(page, 'Стриж', '111');
+
+    // Заход должен отыграться до конца: пока он идёт, у корабля свой вид движения, и новый
+    // на него не наложить.
+    await expect(page.locator('[data-motion]'), 'корабль так и не встал на рейде').toHaveCount(0, { timeout: 30000 });
+    const scene = (await page.locator('[class*="scene"]').first().boundingBox())!;
+    const before = (await ships(page).first().boundingBox())!;
+
+    await page.getByLabel('Корабли на связи').click();
+    await page.getByRole('button', { name: 'Настроить корабль' }).click();
+    await page.locator('[data-berth="8-left"]').click();
+    await page.getByRole('button', { name: 'Готово' }).click();
+
+    // Ход именно переходный: уходящий отсюда пометился бы leaving и через паузу зашёл заново.
+    const lane = page.locator('[data-motion]');
+    await expect(lane, 'корабль не тронулся с места').toHaveCount(1);
+    await expect(lane, 'корабль пошёл на новое место перезаходом').toHaveAttribute('data-motion', 'shifting');
+
+    // И весь он на глазах: корабль не касается кромок кадра ни в одно из мгновений хода.
+    // Заодно это и проверка на пропажу — за кромкой его не было бы в разметке вовсе.
+    // Замер идёт в самой вкладке: со стороны Playwright каждый снимок — свой круг обмена,
+    // и на быстром ходу между ними успевает пройти полкадра.
+    const track = await page.evaluate(
+        () =>
+            new Promise<{ from: number; to: number }[]>((resolve) => {
+                const seen: { from: number; to: number }[] = [];
+                const tick = window.setInterval(() => {
+                    const box = document.querySelector('[class*="shipSlot"]')?.getBoundingClientRect();
+                    seen.push(box ? { from: box.left, to: box.right } : { from: NaN, to: NaN });
+                    if (seen.length >= 24) {
+                        window.clearInterval(tick);
+                        resolve(seen);
+                    }
+                }, 300);
+            })
+    );
+    const overboard = track.filter((box) => !(box.from > scene.x && box.to < scene.x + scene.width));
+    expect(overboard, 'посреди перехода корабль пропал из кадра или вышел за кромку').toHaveLength(0);
+
+    // Пришёл он туда, куда шёл: место переменилось, курс — нет.
+    await expect(page.locator('[data-motion]'), 'переход не кончился').toHaveCount(0, { timeout: 30000 });
+    const after = (await ships(page).first().boundingBox())!;
+    expect(after.x, 'корабль не сдвинулся влево').toBeLessThan(before.x);
+    await expect(ships(page).locator('[data-facing]'), 'корабль развернулся вместо заднего хода').toHaveAttribute(
+        'data-facing',
+        'right'
+    );
+    const state = await readState(page);
+    const [moved] = Object.values(state.channels).find((one) => one.channel.slug === 'perehod')!.members;
+    expect(`${moved.place.slot}-${moved.place.corridor}`, 'корабль встал не на выбранное место').toBe('8-left');
+});

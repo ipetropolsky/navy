@@ -16,8 +16,9 @@
     "format-check": "prettier --check --ignore-unknown .",
     "format-files": "prettier --write --ignore-unknown",
     "format-files-check": "prettier --check --ignore-unknown",
+    "test": "vitest run",
     "test:e2e": "playwright test",
-    "check": "npm run ts-check && npm run lint-check && npm run format-check",
+    "check": "npm run ts-check && npm run lint-check && npm run format-check && npm run test",
     "check-and-fix": "npm run lint && npm run format",
     "deploy": "npm run build && gh-pages -d build",
     "deps-latest": "node tools/get-latest-deps.cjs",
@@ -49,6 +50,7 @@
     "postcss": "8.5.8",
     "prettier": "3.8.1",
     "typescript": "6.0.2",
-    "vite": "8.0.3"
+    "vite": "8.0.3",
+    "vitest": "4.1.10"
   }
 }

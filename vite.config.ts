@@ -33,6 +33,12 @@ export default defineConfig({
         target: 'esnext',
         outDir: 'build',
     },
+    // Юниты лежат рядом с тем, что проверяют, — в src. Набор для браузера живёт отдельно,
+    // в tests/, и берёт его Playwright; сюда он попадать не должен, иначе vitest подхватит
+    // его по общему шаблону *.spec.ts и свалится на первом же `page`.
+    test: {
+        include: ['src/**/*.test.ts'],
+    },
     server: {
         port: 3000,
         open: true,
