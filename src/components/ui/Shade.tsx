@@ -1,6 +1,6 @@
 import { PointerEvent as ReactPointerEvent, ReactNode, useRef, useState } from 'react';
 
-import { useIsMobile } from '@/utils/viewport';
+import { useIsMobile, useIsShortWindow } from '@/utils/viewport';
 
 import { ShadeStop, nearestStop, nextStop, shadeStops, stopHeight } from '@/components/ui/shadeStops';
 
@@ -47,9 +47,15 @@ const clamp = (value: number, min: number, max: number): number => Math.min(Math
  *
  * Кто на какой ступени стоит, шторка не помнит: положение приходит снаружи. Иначе его не
  * отнять и не вернуть, а отнимать придётся — на время клавиатуры (см. App).
+ *
+ * В коротком окне шторки нет вовсе: ступени в нём не из чего сделать — сложенная шторка
+ * занимает больше, чем остаётся сцене (см. SHORT_WINDOW_MAX_HEIGHT). Там она ложится под
+ * кадром неподвижным блоком, и всё, что ниже, — ручка, затемнение, ступени — не рисуется
+ * и не считается.
  */
 export default function Shade({ stop, onStop, label, children }: ShadeProps) {
     const mobile = useIsMobile();
+    const still = useIsShortWindow();
     const shadeRef = useRef<HTMLElement>(null);
     // Высота, пока шторку тянут. Она стоит inline-стилем и идёт за пальцем без перехода;
     // отпустили — стиль убираем, и высоту снова задаёт класс ступени, уже с анимацией.
@@ -58,6 +64,16 @@ export default function Shade({ stop, onStop, label, children }: ShadeProps) {
     // Перетаскивание кончается тем же click, что и нажатие. Флаг отличает одно от другого:
     // без него бросок на ступень тут же догонялся бы шагом «нажали на ручку».
     const draggedRef = useRef(false);
+
+    // Неподвижная шторка: тот же блок с тем же содержимым, но без ручки и без затемнения.
+    // Уходит она отсюда сразу, до всего счёта ступеней, — считать в ней нечего.
+    if (still) {
+        return (
+            <section className={[styles.shade, styles.shadeStill].join(' ')} aria-label={label}>
+                <div className={styles.body}>{children}</div>
+            </section>
+        );
+    }
 
     const handlePointerDown = (event: ReactPointerEvent<HTMLButtonElement>) => {
         const shade = shadeRef.current;

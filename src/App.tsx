@@ -21,7 +21,7 @@ import { channelLink, useRoute } from '@/routing';
 import { Berth, MAX_MESSAGE_LENGTH, Message, MorseFeed, ShipKind, Side, isSameBerth, otherSide } from '@/types/channel';
 import { copyText } from '@/utils/clipboard';
 import { isTextField } from '@/utils/keyboard';
-import { useIsMobile } from '@/utils/viewport';
+import { useIsMobile, useIsShortWindow } from '@/utils/viewport';
 
 import styles from './App.module.less';
 
@@ -64,6 +64,10 @@ export default function App() {
     const [editing, setEditing] = useState(false);
     const notify = useSnackbar();
     const mobile = useIsMobile();
+    // Короткое окно: сцене и шторке в нём вдвоём не поместиться, и шторки в нём нет —
+    // содержимое лежит под кадром неподвижно, а страница прокручивается целиком.
+    // Ступени в таком окне не считаются вовсе, поэтому и всё, что ими правит, ниже отключено.
+    const shortWindow = useIsShortWindow();
 
     // Развёрнутая сцена. Режим один на всё приложение, а не на экран: развернул в чате —
     // открыл форму корабля и выбираешь место на том же большом кадре. Ради этого он и заведён.
@@ -104,7 +108,7 @@ export default function App() {
     // сообщения, — и вешать на каждое по паре обработчиков значит однажды завести одиннадцатое
     // и забыть. React отдаёт focusin/focusout всплывающими, так что хватает одной пары наверху.
     const handleFocusIn = (event: FocusEvent<HTMLDivElement>): void => {
-        if (!fullscreen || !mobile || !isTextField(event.target)) {
+        if (!fullscreen || !mobile || shortWindow || !isTextField(event.target)) {
             return;
         }
         // Прыжок из поля в поле — не новый заход клавиатуры: она и не убиралась. Прежнее
@@ -412,8 +416,11 @@ export default function App() {
                 styles.app,
                 fullscreen ? styles.appFull : '',
                 // Открытая шторка поджимает кадр, а не накрывает его, — но только на широком
-                // окне; отсечку по ширине держат стили.
-                fullscreen && shadeStop !== 'peek' ? styles.appShadeOpen : '',
+                // окне; отсечку по ширине держат стили. В коротком окне шторка не открывается
+                // и не закрывается вовсе, и поджимать кадр там нечему.
+                fullscreen && !shortWindow && shadeStop !== 'peek' ? styles.appShadeOpen : '',
+                // Короткое окно: приложение становится обычной прокручиваемой страницей.
+                fullscreen && shortWindow ? styles.appShort : '',
             ]
                 .filter(Boolean)
                 .join(' ')}
@@ -469,7 +476,9 @@ export default function App() {
                                     // Открывать список в щёлке незачем: там видно один
                                     // заголовок. Поднимаем на ступень выше, а дальше человек
                                     // дотянет сам; на десктопе ступень эта сразу верхняя.
-                                    if (!sheetOpen && shadeStop === 'peek') {
+                                    // В коротком окне ступеней нет — список просто занимает
+                                    // место разговора в неподвижной шторке.
+                                    if (!shortWindow && !sheetOpen && shadeStop === 'peek') {
                                         setShadeStop(nextStop('peek', mobile));
                                     }
                                 }}
