@@ -9,6 +9,7 @@ import {
     useState,
 } from 'react';
 
+import arrowUrl from '@/assets/scene/arrow.png';
 import cloudFarUrl from '@/assets/scene/cloud-1.png';
 import cloudNearUrl from '@/assets/scene/cloud-2.png';
 import islandUrl from '@/assets/scene/island.png';
@@ -197,9 +198,19 @@ const seaTiles = (
  * кто на связи.
  */
 export interface BerthChoice {
-    /** Свободные места: в каждом горит точка, а у выбранного она вырастает в круг света. */
+    /** Свободные места: в каждом горит точка, а на выбранном она разворачивается в стрелку курса. */
     options: Berth[];
     picked: Berth | null;
+    /**
+     * Курс, выбранный в форме. Стрелка на выбранном месте смотрит туда же, куда встанет
+     * корабль, — и она же этот курс переставляет: нажатие по уже выбранному месту разворачивает
+     * его на обратный (см. onPick).
+     */
+    facing: Side;
+    /**
+     * Нажатие по месту. Первое — выбор места, повторное по тому же — разворот курса:
+     * решает это не сцена, а тот, кто держит и место, и курс.
+     */
     onPick: (berth: Berth) => void;
 }
 
@@ -683,16 +694,14 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
     // виден, а место под ним уже свободно, — и точка загоралась бы у него под килем.
     //
     // Своё место — особый случай: рейд предлагает его всегда, иначе переехать и передумать
-    // было бы некуда. Пока выбрано оно же, оно и занято своим кораблём: разметка под килем
-    // ничего не сообщает — где корабль стоит, видно по нему самому. А переключились на другое
-    // место, и своё становится обычным свободным: точка на нём нужна, иначе некуда вернуться.
+    // было бы некуда, — и занятым оно не считается никогда. Прежде под своим килем разметку
+    // прятали: круг света сообщал только «сюда переедет корабль», а под кораблём, который
+    // и так тут стоит, сообщать было нечего. Теперь на выбранном месте лежит стрелка курса,
+    // и ей есть что сказать в любом случае: она показывает, куда корабль будет смотреть,
+    // и ею же курс разворачивают. Прятать её под своим кораблём — значит отобрать разворот
+    // ровно у того, кто ничего в форме не двигал.
     const berthTaken = new Set(
-        placed
-            .filter(
-                (member) =>
-                    member.memberId !== myId || !shownBerths?.picked || isSameBerth(member.place, shownBerths.picked)
-            )
-            .map((member) => berthKey(member.place))
+        placed.filter((member) => member.memberId !== myId).map((member) => berthKey(member.place))
     );
     const takenKeys = [...berthTaken].sort().join(' ');
     const berthLanes = useRef(new Map<string, HTMLElement>());
@@ -994,6 +1003,9 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
             {shownBerths && (
                 <div
                     className={[styles.berthField, berths ? '' : styles.berthFieldGone].filter(Boolean).join(' ')}
+                    // Картинка стрелки приходит из сборки, а не из стилей: пути к ней в .less
+                    // взяться неоткуда — все картинки сцены живут импортами, см. верх файла.
+                    style={{ '--berth-arrow': `url(${arrowUrl})` } as CSSProperties}
                     onPointerMove={trackBerth}
                     onPointerLeave={() => setNearBerth(null)}
                     onClick={pickNearestBerth}
@@ -1014,46 +1026,47 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
                         расхождения: подпись стоит на самой стоянке, которую собой закрывает,
                         а корабль над ней может быть отведён в сторону — отступом от края кадра
                         или уступая тесному соседу. Займи подпись ширину корпуса, у края кадра
-                        она отъехала бы вместе с ним и повисла между двумя точками. */}
-                        {placed.map((member) => (
-                            <div
-                                key={member.memberId}
-                                className={styles.shipNameLane}
-                                // Чьё это место — нужно проверке: подпись обязана встать на ту же
-                                // ось, что и точка свободного места, и сверять их иначе не с чем.
-                                // Метка своя, не data-berth: тем помечены сами точки, и общая
-                                // сбивала бы счёт разметки под кораблём.
-                                data-berth-name={berthKey(member.place)}
-                                style={laneStyle(member.place, berthWidthPercent(member.place.slot))}
-                            >
-                                <span
-                                    className={styles.shipName}
-                                    data-wave={wavePhase(member.place).toFixed(2)}
-                                    style={
-                                        {
-                                            '--heave': `${waveAmplitude(slotDepth(member.place.slot)).toFixed(2)}px`,
-                                            '--wave-start': `-${wavePhase(member.place).toFixed(2)}s`,
-                                        } as CSSProperties
-                                    }
+                        она отъехала бы вместе с ним и повисла между двумя точками.
+                        На выбранном месте подписи нет: там лежит стрелка курса, и имя прошло бы
+                        ровно через неё. Место это всегда своё — чужие рейд не предлагает, — а под
+                        своим кораблём подпись и не нужна: она отвечает на вопрос «кто здесь стоит»,
+                        и под собственным килем ответ известен. Отошли на другое место, и подпись
+                        на покинутом возвращается вместе с точкой. */}
+                        {placed
+                            .filter((member) => !shownBerths.picked || !isSameBerth(member.place, shownBerths.picked))
+                            .map((member) => (
+                                <div
+                                    key={member.memberId}
+                                    className={styles.shipNameLane}
+                                    // Чьё это место — нужно проверке: подпись обязана встать на ту же
+                                    // ось, что и точка свободного места, и сверять их иначе не с чем.
+                                    // Метка своя, не data-berth: тем помечены сами точки, и общая
+                                    // сбивала бы счёт разметки под кораблём.
+                                    data-berth-name={berthKey(member.place)}
+                                    style={laneStyle(member.place, berthWidthPercent(member.place.slot))}
                                 >
-                                    <MemberName name={member.name} color={member.color} />
-                                </span>
-                            </div>
-                        ))}
+                                    <span
+                                        className={styles.shipName}
+                                        data-wave={wavePhase(member.place).toFixed(2)}
+                                        style={
+                                            {
+                                                '--heave': `${waveAmplitude(slotDepth(member.place.slot)).toFixed(2)}px`,
+                                                '--wave-start': `-${wavePhase(member.place).toFixed(2)}s`,
+                                            } as CSSProperties
+                                        }
+                                    >
+                                        <MemberName name={member.name} color={member.color} />
+                                    </span>
+                                </div>
+                            ))}
                         {shownBerths.options.map((berth) => {
                             const picked = Boolean(shownBerths.picked && isSameBerth(berth, shownBerths.picked));
                             const near = Boolean(nearBerth && isSameBerth(berth, nearBerth));
                             const key = berthKey(berth);
-                            // Под кораблём разметки не рисуем — см. berthTaken. Заодно место
+                            // Под чужим кораблём разметки не рисуем — см. berthTaken. Заодно место
                             // пропадает и из замера: ближайшим к указателю оно уже не считается,
                             // иначе щелчок по воде доставался бы месту, которого в кадре не видно.
-                            //
-                            // Своё место это касается наравне с чужими: пока выбрано оно, под своим
-                            // же кораблём горел бы круг света — а показывать он должен, куда корабль
-                            // переедет, и под килем ему делать нечего. Где корабль стоит сейчас,
-                            // видно по самому кораблю. Отошли на другое место — своё становится
-                            // обычным свободным (см. berthTaken), и точка на нём загорается снова:
-                            // иначе некуда возвращаться.
+                            // Своего корабля это не касается: под ним лежит стрелка курса.
                             if (berthTaken.has(key)) {
                                 return null;
                             }
@@ -1077,7 +1090,13 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
                                         className={styles.berthDot}
                                         data-berth={key}
                                         aria-pressed={picked}
-                                        aria-label={`Место на рейде: ${BERTH_LABELS[berth.corridor]}, ${berth.slot + 1}-я линия`}
+                                        // У выбранного места нажатие означает уже не выбор,
+                                        // а разворот — подпись обязана говорить то же самое.
+                                        aria-label={
+                                            picked
+                                                ? `Выбрано место: ${BERTH_LABELS[berth.corridor]}, ${berth.slot + 1}-я линия. Развернуть корабль`
+                                                : `Место на рейде: ${BERTH_LABELS[berth.corridor]}, ${berth.slot + 1}-я линия`
+                                        }
                                         // Своя обработка нужна ради клавиатуры: у нажатия с неё нет
                                         // координат, а без них ближайшее место не найти.
                                         onClick={(event) => {
@@ -1104,6 +1123,11 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
                                                 styles.berthDotLight,
                                                 near ? styles.berthDotNear : '',
                                                 picked ? styles.berthDotPicked : '',
+                                                // Стрелка нарисована вправо, влево смотрит
+                                                // отражением — рисовать вторую незачем.
+                                                picked && shownBerths.facing === 'left'
+                                                    ? styles.berthDotPickedLeft
+                                                    : '',
                                             ]
                                                 .filter(Boolean)
                                                 .join(' ')}

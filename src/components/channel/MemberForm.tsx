@@ -37,22 +37,23 @@ interface MemberFormProps {
     myId: string | null;
     initial?: MemberDraft;
     /**
-     * Выбранный силуэт. Единственное поле формы, которое живёт снаружи: от размера корабля
-     * зависит, куда он влезет на рейде, а свободные места показывает не форма, а сцена.
+     * Выбранный силуэт. Живёт снаружи: от размера корабля зависит, куда он влезет на рейде,
+     * а свободные места показывает не форма, а сцена.
      */
     shipKind: ShipKind;
     onShipKind: (kind: ShipKind) => void;
+    /**
+     * Выбранный курс. Тоже снаружи и по той же причине: его показывает стрелка на воде,
+     * и переставляют её оттуда же — нажатием на выбранное место. Держи форма курс у себя,
+     * кнопки в ней и стрелка в кадре разошлись бы, показывая каждая своё.
+     */
+    facing: Side;
+    onFacing: (side: Side) => void;
     onSubmit: (draft: MemberDraft) => Promise<void>;
     onCancel?: () => void;
 }
 
 const randomHullNumber = (): string => String(Math.floor(Math.random() * 900) + 100);
-
-/**
- * Курс, с которым открывается форма: монетка. Осмысленного умолчания тут нет — куда смотреть
- * носом, дело вкуса, — а один и тот же курс у всех выстроил бы рейд в кильватерную колонну.
- */
-const randomCourse = (): Side => (Math.random() < 0.5 ? 'left' : 'right');
 
 /** Порядок кнопок курса — как на компасе, каким его видит глаз: влево слева, вправо справа. */
 const COURSES: Side[] = ['left', 'right'];
@@ -136,6 +137,8 @@ export default function MemberForm({
     initial,
     shipKind,
     onShipKind,
+    facing,
+    onFacing,
     onSubmit,
     onCancel,
 }: MemberFormProps) {
@@ -146,9 +149,6 @@ export default function MemberForm({
     const [color, setColor] = useState(
         initial?.color ?? MEMBER_COLORS.find((option) => !takenColors.includes(option)) ?? MEMBER_COLORS[0]
     );
-    // Курс живёт в форме, а не снаружи: от него, в отличие от силуэта, не зависит ничего,
-    // кроме самого корабля, — свободных мест на рейде он не меняет.
-    const [facing, setFacing] = useState<Side>(initial?.facing ?? randomCourse);
     const [busy, setBusy] = useState(false);
     // Отклик выбранного корабля: ткнули в кнопку — он мигнул лампой ровно так же, как чужой
     // корабль в кадре на тычок в аватарку. Держится он в состоянии, а не собирается на каждый
@@ -258,7 +258,7 @@ export default function MemberForm({
                             className={side === facing ? styles.courseActive : styles.course}
                             aria-label={side === 'left' ? 'Курс влево' : 'Курс вправо'}
                             aria-pressed={side === facing}
-                            onClick={() => setFacing(side)}
+                            onClick={() => onFacing(side)}
                         >
                             <CourseArrow side={side} />
                         </button>

@@ -5,7 +5,7 @@
 - небо разворачивается по кругу и подгоняется под прежнюю рамку (см. prepare_sky);
 - месяц вырезается из старой картинки неба отдельным слоем (в новом небе месяца нет);
 - остров вырезается из своей картинки (силуэт по контуру, серый фон уходит в прозрачность);
-- вымпел старшего на рейде обрезается по своим полям.
+- вымпел старшего на рейде и стрелка курса обрезаются по своим полям.
 
 Запуск: python3 tools/scene-assets/prepare-backgrounds.py
 Зависимости: Pillow, numpy, scipy (ставятся ad hoc, в проект не входят).
@@ -67,8 +67,18 @@ ISLAND_WIDTH = 1400
 # Вымпел старшего на рейде: снимок настоящего вымпела, уже с прозрачным фоном. Стоит он
 # в строчке списка ростом с букву, поэтому и уменьшается сильно — но не до строчки, а вдвое
 # с запасом: экраны бывают плотные, и на них картинка берётся из тех же пикселей.
-PENNANT_SOURCE = 'senior.png'
+#
+# Исходник взят выбеленный: прежний отдавал в жёлто-коричневое (средний цвет непрозрачных
+# пикселей 214/189/159), и в строчке рядом с белым текстом вымпел читался выцветшим. У этого
+# перекос вчетверо меньше (224/216/205), и в списке он остаётся белым флагом, а не бежевым.
+PENNANT_SOURCE = 'senior_white.png'
 PENNANT_WIDTH = 320
+
+# Стрелка выбранного курса: лежит на воде под выбранным местом и под своим кораблём.
+# Нарисована вправо, влево разворачивается отражением. Исходник — белый силуэт с большими
+# полями; в кадре стрелка мелкая, но светится, и запас по плотности ей нужен как и вымпелу.
+ARROW_SOURCE = 'arrow.png'
+ARROW_WIDTH = 320
 
 # В новом небе месяца нет, берём его из первой присланной картинки неба.
 MOON_SOURCE = 'sky_clean_3296x1028.png'
@@ -158,6 +168,18 @@ def prepare_pennant() -> None:
     print('pennant', (PENNANT_WIDTH, height))
 
 
+def prepare_arrow() -> None:
+    """Стрелка курса: тот же обрез по полям и уменьшение, что и у вымпела."""
+    arrow = Image.open(SOURCES / ARROW_SOURCE).convert('RGBA')
+    alpha = np.asarray(arrow)[..., 3] > 8
+    rows, cols = np.where(alpha.any(axis=1))[0], np.where(alpha.any(axis=0))[0]
+    arrow = arrow.crop((int(cols[0]), int(rows[0]), int(cols[-1]) + 1, int(rows[-1]) + 1))
+
+    height = round(arrow.height * ARROW_WIDTH / arrow.width)
+    arrow.resize((ARROW_WIDTH, height), Image.LANCZOS).save(OUT / 'arrow.png', optimize=True)
+    print('arrow', (ARROW_WIDTH, height))
+
+
 def prepare_moon() -> None:
     img = Image.open(SOURCES / MOON_SOURCE).convert('RGB')
     arr = np.asarray(img).astype(np.float32)
@@ -222,6 +244,7 @@ def main() -> None:
     prepare_island()
     prepare_moon()
     prepare_pennant()
+    prepare_arrow()
 
 
 if __name__ == '__main__':

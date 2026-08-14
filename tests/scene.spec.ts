@@ -649,7 +649,7 @@ test('качка идёт по одним часам, и пришедший по
     }
 });
 
-test('под своим кораблём разметки нет, а отошёл — место снова помечено точкой', async ({ page }) => {
+test('под своим кораблём лежит стрелка курса, а отошёл — место помечено точкой', async ({ page }) => {
     await openChannel(page, DEMO, ALBATROS);
     const fleet = Object.values((await readState(page)).channels)[0].members;
     const mine = fleet.find((member) => member.memberId === ALBATROS)!;
@@ -658,21 +658,60 @@ test('под своим кораблём разметки нет, а отошё�
     await page.locator('[class*="shipMine"]').click();
     await expect(berths(page).first()).toBeVisible();
 
-    // Пока выбрано своё же место, под килем не горит ничего: круг света показывает, куда
-    // корабль переедет, а где он стоит сейчас — видно по самому кораблю.
-    await expect(page.locator(`[data-berth="${key}"]`), 'под своим кораблём горит разметка').toHaveCount(0);
-
-    // Переключились на другое — своё стало обычным свободным местом, и точка на нём
-    // загорелась: иначе некуда возвращаться. Точка, а не круг: выбрано теперь не оно.
-    // Круг лежит на воде и потому сплющен — по этому его от точки и отличаем.
-    await page.locator('[data-berth][aria-pressed="false"]').last().click();
-    await expect(page.locator(`[data-berth="${key}"]`), 'на покинутое место некуда вернуться').toHaveCount(1);
-    const flatness = (): Promise<number> =>
-        page.locator(`[data-lit="${key}"]`).evaluate((light) => {
-            const box = light.getBoundingClientRect();
+    // Своё место разметка не прячет: на нём лежит стрелка курса, и под своим кораблём она
+    // такая же нужная, как под любым другим местом, — курсом корабль встанет в обе стороны.
+    // Отличаем её от точки по вытянутости: стрелка лежит на воде и вчетверо шире себя.
+    const stretch = (): Promise<number> =>
+        page.locator(`[data-lit="${key}"]`).evaluate((mark) => {
+            const box = mark.getBoundingClientRect();
             return box.width / box.height;
         });
-    await expect.poll(flatness, { message: 'покинутое место осталось подсвеченным' }).toBeCloseTo(1, 1);
+    await expect(page.locator(`[data-berth="${key}"]`), 'под своим кораблём нет разметки').toHaveCount(1);
+    await expect.poll(stretch, { message: 'на своём месте лежит не стрелка' }).toBeGreaterThan(3);
+
+    // Подписи своего корабля рядом нет: имя прошло бы ровно через стрелку, а под своим
+    // кораблём и без подписи понятно, кто здесь стоит.
+    await expect(page.locator(`[data-berth-name="${key}"]`), 'своё имя написано поверх стрелки').toHaveCount(0);
+
+    // Переключились на другое — своё стало обычным свободным местом, и точка на нём
+    // загорелась: иначе некуда возвращаться. Точка круглая, стрелка — нет.
+    await page.locator('[data-berth][aria-pressed="false"]').last().click();
+    await expect(page.locator(`[data-berth="${key}"]`), 'на покинутое место некуда вернуться').toHaveCount(1);
+    await expect.poll(stretch, { message: 'покинутое место осталось выбранным' }).toBeCloseTo(1, 1);
+});
+
+/**
+ * Курс переставляют не только кнопками в форме, но и на самом рейде: на выбранном месте лежит
+ * стрелка, и повторное нажатие по этому месту её разворачивает. Место при этом остаётся
+ * выбранным — уйти с него можно, ткнув в другое.
+ */
+test('повторное нажатие по выбранному месту разворачивает курс', async ({ page }) => {
+    await openNewChannel(page, 'razvorot');
+
+    await page.getByLabel('Курс вправо').click();
+    const picked = page.locator('[data-berth][aria-pressed="true"]');
+    const key = await picked.getAttribute('data-berth');
+
+    // Стрелка смотрит туда же, куда кнопка курса: отражением, а не второй картинкой.
+    const mirrored = (): Promise<boolean> =>
+        page
+            .locator(`[data-lit="${key}"]`)
+            .evaluate((mark) => getComputedStyle(mark).transform.startsWith('matrix(-1'));
+    await expect.poll(mirrored, { message: 'стрелка смотрит не туда, куда курс' }).toBe(false);
+
+    // Нажали по тому же месту — курс развернулся, и форма показывает то же самое: и стрелка,
+    // и кнопки берут его из одних рук.
+    await picked.click();
+    await expect(page.getByLabel('Курс влево')).toHaveAttribute('aria-pressed', 'true');
+    await expect.poll(mirrored, { message: 'стрелка не развернулась вслед за курсом' }).toBe(true);
+    await expect(page.locator(`[data-berth="${key}"]`), 'разворот увёл корабль с места').toHaveAttribute(
+        'aria-pressed',
+        'true'
+    );
+
+    // И обратно: разворот — это переключатель, а не одноразовый ход.
+    await picked.click();
+    await expect(page.getByLabel('Курс вправо')).toHaveAttribute('aria-pressed', 'true');
 });
 
 test('разметка гаснет вместе с флотом, а не кадром', async ({ page }) => {

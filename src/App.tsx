@@ -18,7 +18,7 @@ import { ShadeStop, nextStop } from '@/components/ui/shadeStops';
 import { HAIL_SIGNAL, morseDuration } from '@/hooks/morse';
 import { useChannel } from '@/hooks/useChannel';
 import { channelLink, useRoute } from '@/routing';
-import { Berth, MAX_MESSAGE_LENGTH, Message, MorseFeed, ShipKind, isSameBerth } from '@/types/channel';
+import { Berth, MAX_MESSAGE_LENGTH, Message, MorseFeed, ShipKind, Side, isSameBerth, otherSide } from '@/types/channel';
 import { copyText } from '@/utils/clipboard';
 import { isTextField } from '@/utils/keyboard';
 import { useIsMobile } from '@/utils/viewport';
@@ -35,6 +35,13 @@ const HAIL_HOLD_MS = morseDuration(HAIL_SIGNAL) + 1200;
 
 /** С каким кораблём открывается форма у того, кто ещё не в строю. */
 const DEFAULT_SHIP_KIND: ShipKind = 'pr12412';
+
+/**
+ * Курс, с которым форма открывается у новичка: монетка. Осмысленного умолчания тут нет —
+ * куда смотреть носом, дело вкуса, — а один и тот же курс у всех выстроил бы рейд
+ * в кильватерную колонну.
+ */
+const randomCourse = (): Side => (Math.random() < 0.5 ? 'left' : 'right');
 
 /**
  * Три состояния сервиса, и выбираются они по адресу и по тому, кто эта вкладка:
@@ -146,6 +153,15 @@ export default function App() {
     const [pickedKind, setPickedKind] = useState<ShipKind | null>(null);
     const shipKind = pickedKind ?? me?.shipKind ?? DEFAULT_SHIP_KIND;
 
+    // Курс — здесь по той же причине: его показывает стрелка на выбранном месте, и оттуда же
+    // его меняют повторным нажатием. Начальный достаётся от своего корабля, а новичку — монеткой:
+    // осмысленного умолчания тут нет, а один и тот же курс у всех выстроил бы рейд в колонну.
+    // Монетка бросается один раз за вкладку, а не на каждый проход: пересчитываемая на месте,
+    // она переворачивала бы корабль в форме от любой перерисовки.
+    const initialCourse = useRef(randomCourse());
+    const [pickedFacing, setPickedFacing] = useState<Side | null>(null);
+    const facing = pickedFacing ?? me?.place.facing ?? initialCourse.current;
+
     // Свободные места на рейде: их показывает сцена, пока открыта форма корабля. Своё место
     // считается свободным — иначе, открыв форму, человек не видел бы, где он стоит сейчас.
     const berthOptions = useMemo(
@@ -181,6 +197,9 @@ export default function App() {
         if (pickedKind) {
             setPickedKind(null);
         }
+        if (pickedFacing) {
+            setPickedFacing(null);
+        }
     } else if (berthOptions.length > 0 && !berthIsFree) {
         setPickedBerth(
             (me && berthOptions.find((berth) => isSameBerth(berth, me.place))) ??
@@ -190,6 +209,19 @@ export default function App() {
                 )
         );
     }
+
+    /**
+     * Нажатие по месту на рейде. Второй раз по тому же месту — это не выбор заново, а разворот:
+     * на выбранном месте нарисована стрелка курса, и менять курс естественнее там же, где он
+     * и показан. Место при этом остаётся выбранным — уйти с него можно, ткнув в другое.
+     */
+    const handlePickBerth = (berth: Berth) => {
+        if (pickedBerth && isSameBerth(berth, pickedBerth)) {
+            setPickedFacing(otherSide(facing));
+            return;
+        }
+        setPickedBerth(berth);
+    };
 
     const handleCreate = async (draft: ChannelDraft) => {
         const { channel: created } = await backend.createChannel({ channel: draft });
@@ -336,6 +368,8 @@ export default function App() {
                     initial={myDraft}
                     shipKind={shipKind}
                     onShipKind={setPickedKind}
+                    facing={facing}
+                    onFacing={setPickedFacing}
                     onSubmit={handleMemberSubmit}
                     onCancel={editing ? () => setEditing(false) : undefined}
                 />
@@ -398,7 +432,9 @@ export default function App() {
                         // и корабль, и место на рейде меняются в одном месте.
                         onEditShip={() => setEditing(true)}
                         berths={
-                            picking ? { options: berthOptions, picked: pickedBerth, onPick: setPickedBerth } : undefined
+                            picking
+                                ? { options: berthOptions, picked: pickedBerth, facing, onPick: handlePickBerth }
+                                : undefined
                         }
                     />
                 </div>
