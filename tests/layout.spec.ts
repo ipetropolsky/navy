@@ -1126,6 +1126,30 @@ test('шторка ходит по ступеням от нажатия на р�
     await expectShade(page, stops.peek, 'с верхней ступени шторка не вернулась в щёлку');
 });
 
+/**
+ * Область нажатия у ручки больше, чем нарисовано: рисочка с полями занимает 22px, а палец
+ * просит вдвое — обычные для телефона 44. Прибавка уходит вниз и заезжает на верхнюю кромку
+ * содержимого, а отрицательным margin возвращается потоку, так что видно всё ровно как было.
+ */
+test('в ручку шторки попадают и ниже рисочки, а сама рисочка не съезжает', async ({ page }) => {
+    await openChannel(page, DEMO, ALBATROS);
+    await page.getByRole('button', { name: 'Развернуть сцену' }).click();
+    const desk = shadeStops(page.viewportSize()!.height, false);
+    await expectShade(page, desk.peek, 'развёрнутая сцена открылась не сложенной шторкой');
+
+    const handle = (await page.getByRole('button', { name: SHADE_HANDLE }).boundingBox())!;
+    expect(Math.round(handle.height), 'в ручку по-прежнему трудно попасть').toBe(44);
+    const grip = (await page.locator('[class*="grip"]').first().boundingBox())!;
+    expect(Math.round(grip.y - handle.y), 'рисочка съехала с прежнего места').toBe(10);
+    // Содержимое начинается там же, где и начиналось: прибавка живёт только для указателя.
+    const body = (await page.locator('[class*="dateChip"]').first().boundingBox())!;
+    expect(Math.round(body.y - handle.y), 'содержимое уехало вслед за областью нажатия').toBeLessThan(44);
+
+    // Нажатие ниже рисочки — там, где под ручкой уже лежит лента.
+    await page.mouse.click(handle.x + handle.width / 2, handle.y + 34);
+    await expectShade(page, desk.full, 'нажатие ниже рисочки не подняло шторку');
+});
+
 test('шторку можно дотянуть до верха одним движением, а коротким рывком — не сдвинуть', async ({ page }) => {
     // Телефонное окно: ступеней там три, и на трёх видно и короткий рывок, и длинный бросок
     // через промежуточную.
@@ -1437,8 +1461,8 @@ test('снимок неба накрывает небо целиком, а не 
     }, Promise.resolve());
 });
 
-/** Риска над неподвижной шторкой короткого окна. */
-const gripBox = (page: Page) => page.locator('[class*="stillGrip"]').boundingBox();
+/** Риска неподвижной шторки короткого окна: та же полоска, что у ручки обычной. */
+const gripBox = (page: Page) => page.locator('[class*="stillHandle"]').boundingBox();
 
 /** Верхняя кромка шторки — та самая линия, на которой кончается развёрнутый кадр. */
 const shadeTop = async (page: Page): Promise<number> => {
@@ -1498,12 +1522,12 @@ test.describe('короткое окно', () => {
         ).toHaveCount(0);
 
         // Разговор лежит следом за кадром и ростом в тот же экран: страница выходит в два
-        // экрана. Экран разговора — это риска на воде и шторка сразу под ней.
-        const grip = (await gripBox(page))!;
+        // экрана. Риска у шторки на обычном своём месте — полоской по верхнему её краю.
         const shade = (await page.getByRole('region').first().boundingBox())!;
-        expect(Math.round(grip.y), 'риска встала не под кадром').toBe(screen);
-        expect(Math.round(shade.y), 'шторка легла не под риской').toBe(screen + Math.round(grip.height));
-        expect(Math.round(shade.y + shade.height), 'кадр с разговором вышли не в два экрана').toBe(2 * screen);
+        expect(Math.round(shade.y), 'шторка легла не под кадром').toBe(screen);
+        expect(Math.round(shade.height), 'шторка легла не в рост экрана').toBe(screen);
+        const grip = (await gripBox(page))!;
+        expect(Math.round(grip.y), 'риска стоит не по верхней кромке шторки').toBe(screen);
         // Колонку она держит ту же, что и в обычном виде: во весь экран просили сцену.
         expect(Math.round(shade.width), 'шторка растянулась вслед за кадром').toBe(COLUMN_WIDTH);
 
@@ -1514,11 +1538,10 @@ test.describe('короткое окно', () => {
         await expect(page.getByRole('button', { name: 'Свернуть сцену' }), 'кадр не уехал вверх').not.toBeInViewport();
 
         // В самом низу полосы шторка встаёт не под верхнюю кромку окна, а на полоску ниже:
-        // над ней остаётся видна вода с той же риской, за которую и тянут обратно к кадру.
+        // над ней остаётся видна вода, за которую и тянут обратно к кадру.
         await expect
             .poll(() => shadeTop(page), { message: 'шторка уехала верхом под кромку окна' })
-            .toBe(SHORT_WINDOW_PEEK + Math.round(grip.height));
-        expect(Math.round((await gripBox(page))!.y), 'риска уехала вместе со шторкой').toBe(SHORT_WINDOW_PEEK);
+            .toBe(SHORT_WINDOW_PEEK);
     });
 
     // Список кораблей в коротком окне занимает место разговора в той же неподвижной шторке:
@@ -1528,9 +1551,8 @@ test.describe('короткое окно', () => {
         await page.getByRole('button', { name: 'Развернуть сцену' }).click();
         await openSheet(page);
         await expect(page.getByRole('button', { name: 'Настроить корабль' }), 'список не открылся').toBeVisible();
-        const grip = (await gripBox(page))!;
         expect(await shadeTop(page), 'список сдвинул неподвижную шторку').toBe(
-            page.viewportSize()!.height - SHORT_WINDOW_PEEK + Math.round(grip.height)
+            page.viewportSize()!.height - SHORT_WINDOW_PEEK
         );
     });
 });

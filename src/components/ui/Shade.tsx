@@ -68,20 +68,18 @@ export default function Shade({ stop, onStop, label, children }: ShadeProps) {
     // Неподвижная шторка: тот же блок с тем же содержимым, но без ручки и без затемнения.
     // Уходит она отсюда сразу, до всего счёта ступеней, — считать в ней нечего.
     //
-    // Над ней риска: та же, что стоит на ручке, но вынесенная выше и на прозрачном фоне.
-    // Тянуть за неё нечего — страница прокручивается целиком, — она показывает, что низ
-    // страницы не обрезан, а продолжается разговором. Для тех, кто её не видит, ничего
-    // не значит и она: под шторкой всё та же подпись.
+    // Риска на ней остаётся, и на обычном своём месте — полоской по верхнему краю. Тянуть
+    // за неё нечего: страница прокручивается целиком, свайпом по чему угодно, включая саму
+    // сцену, и снап доводит её до ближайшего экрана. Риска показывает, что снизу не обрезанный
+    // край страницы, а её вторая половина.
     if (still) {
         return (
-            <>
-                <div className={styles.stillGrip} aria-hidden="true">
+            <section className={[styles.shade, styles.shadeStill].join(' ')} aria-label={label}>
+                <div className={styles.stillHandle} aria-hidden="true">
                     <span className={styles.grip} />
                 </div>
-                <section className={[styles.shade, styles.shadeStill].join(' ')} aria-label={label}>
-                    <div className={styles.body}>{children}</div>
-                </section>
-            </>
+                <div className={styles.body}>{children}</div>
+            </section>
         );
     }
 

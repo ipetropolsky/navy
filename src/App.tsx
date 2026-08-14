@@ -415,10 +415,6 @@ export default function App() {
             className={[
                 styles.app,
                 fullscreen ? styles.appFull : '',
-                // Открытая шторка поджимает кадр, а не накрывает его, — но только на широком
-                // окне; отсечку по ширине держат стили. В коротком окне шторка не открывается
-                // и не закрывается вовсе, и поджимать кадр там нечему.
-                fullscreen && !shortWindow && shadeStop !== 'peek' ? styles.appShadeOpen : '',
                 // Короткое окно: приложение становится обычной прокручиваемой страницей.
                 fullscreen && shortWindow ? styles.appShort : '',
             ]
