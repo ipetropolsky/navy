@@ -661,10 +661,14 @@ test('под своим кораблём лежит стрелка курса, �
     // Своё место разметка не прячет: на нём лежит стрелка курса, и под своим кораблём она
     // такая же нужная, как под любым другим местом, — курсом корабль встанет в обе стороны.
     // Отличаем её от точки по вытянутости: стрелка лежит на воде и вчетверо шире себя.
+    //
+    // Меряем собственный размер, а не рамку на экране: в боковых коридорах стрелка ещё и
+    // завалена по перспективе (см. --berth-arrow-turn), и габаритная рамка повёрнутой стрелки
+    // выше самой стрелки — вытянутость по ней выходит вдвое меньше настоящей.
     const stretch = (): Promise<number> =>
         page.locator(`[data-lit="${key}"]`).evaluate((mark) => {
-            const box = mark.getBoundingClientRect();
-            return box.width / box.height;
+            const box = getComputedStyle(mark);
+            return parseFloat(box.width) / parseFloat(box.height);
         });
     await expect(page.locator(`[data-berth="${key}"]`), 'под своим кораблём нет разметки').toHaveCount(1);
     await expect.poll(stretch, { message: 'на своём месте лежит не стрелка' }).toBeGreaterThan(3);
@@ -693,10 +697,15 @@ test('повторное нажатие по выбранному месту р�
     const key = await picked.getAttribute('data-berth');
 
     // Стрелка смотрит туда же, куда кнопка курса: отражением, а не второй картинкой.
+    //
+    // Зеркало ловим по знаку горизонтального множителя матрицы, а не по её началу: в боковых
+    // коридорах стрелка ещё и завалена по перспективе (см. --berth-arrow-turn), и множители
+    // там дробные. Знак от крена не зависит — на любом углу до прямого зеркало и только оно
+    // уводит первое число в минус.
     const mirrored = (): Promise<boolean> =>
         page
             .locator(`[data-lit="${key}"]`)
-            .evaluate((mark) => getComputedStyle(mark).transform.startsWith('matrix(-1'));
+            .evaluate((mark) => Number(/-?[\d.]+/.exec(getComputedStyle(mark).transform)?.[0]) < 0);
     await expect.poll(mirrored, { message: 'стрелка смотрит не туда, куда курс' }).toBe(false);
 
     // Нажали по тому же месту — курс развернулся, и форма показывает то же самое: и стрелка,
