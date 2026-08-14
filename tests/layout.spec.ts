@@ -6,7 +6,6 @@ import {
     COLUMN_WIDTH,
     MOBILE_MAX_WIDTH,
     PINNED_ACTIONS_MIN_HEIGHT,
-    SHADE_DESK_PEEK_HEIGHT,
     SHADE_PEEK_HEIGHT,
     SHADE_SEA_OVERLAP,
     SHADE_TOP_GAP,
@@ -18,6 +17,7 @@ import { SLOT_COUNT, slotDepth, slotShare } from '@/types/channel';
 import {
     ALBATROS,
     DEMO,
+    bubbles,
     join,
     openChannel,
     openNewChannel,
@@ -942,7 +942,7 @@ test('сцена разворачивается во весь экран и св
     // Заезжает она при этом на воду (SHADE_SEA_OVERLAP): нижняя полоска моря уходит под шторку,
     // и кадр ровно на столько же выше, чем если бы они встали встык.
     expect((await sceneBox(page)).height, 'сцена не заняла окно по высоте').toBe(
-        window.height - SHADE_DESK_PEEK_HEIGHT + SHADE_SEA_OVERLAP
+        window.height - SHADE_PEEK_HEIGHT + SHADE_SEA_OVERLAP
     );
     expect(await buttonWidth(page), 'кнопки в шапке остались прежними').toBeGreaterThan(smallButton);
 
@@ -1029,11 +1029,14 @@ test('разворот на весь экран растекается вниз,
     check(back, false);
 });
 
+/** То же число, что @haze-height в стилях сцены: рост полоски дымки над водой, px. */
+const HAZE_HEIGHT = 72;
+
 /**
- * Дымка над водой: полоска, засветляющая небо у горизонта. Проверяем не красоту, а два числа,
- * на которых она держится, — рост и место: пятьдесят пикселей ровно над линией воды.
+ * Дымка над водой: полоска, гасящая звёзды у горизонта. Проверяем не красоту, а два числа,
+ * на которых она держится, — рост и место: ровно над линией воды и одной высоты в любом кадре.
  */
-test('дымка стоит над водой полоской в пятьдесят пикселей', async ({ page }) => {
+test('дымка стоит над водой полоской в семьдесят два пикселя', async ({ page }) => {
     await openChannel(page, DEMO, ALBATROS);
 
     const measure = () =>
@@ -1044,13 +1047,15 @@ test('дымка стоит над водой полоской в пятьдес
         });
 
     const small = await measure();
-    expect(small.height, 'дымка не в пятьдесят пикселей').toBe(50);
+    expect(small.height, 'дымка не в семьдесят два пикселя').toBe(HAZE_HEIGHT);
     expect(Math.abs(small.gap), 'дымка не лежит на линии воды').toBeLessThan(1);
 
     // На весь экран рост тот же: это слой воздуха у воды, а не часть рисунка, которую
     // перспектива тянет вместе с кадром.
     await page.getByRole('button', { name: 'Развернуть сцену' }).click();
-    await expect.poll(async () => (await measure()).height, { message: 'дымка выросла вместе с кадром' }).toBe(50);
+    await expect
+        .poll(async () => (await measure()).height, { message: 'дымка выросла вместе с кадром' })
+        .toBe(HAZE_HEIGHT);
     expect(Math.abs((await measure()).gap), 'дымка сошла с линии воды').toBeLessThan(1);
 });
 
@@ -1125,8 +1130,8 @@ const shadeHeight = async (page: Page, name?: string): Promise<number> => {
  * Ступени в пикселях для окна такой высоты — те же числа, что считает `shadeStops`.
  * Промежуточная возвращается всегда, но ходит по ней шторка только на телефоне.
  */
-const shadeStops = (height: number, mobile: boolean) => ({
-    peek: mobile ? SHADE_PEEK_HEIGHT : SHADE_DESK_PEEK_HEIGHT,
+const shadeStops = (height: number) => ({
+    peek: SHADE_PEEK_HEIGHT,
     half: Math.round(height / 2),
     full: height - SHADE_TOP_GAP,
 });
@@ -1156,7 +1161,7 @@ const expectShade = (page: Page, height: number, message: string, name?: string)
 test('шторка ходит по ступеням от нажатия на ручку, и лестниц этих две', async ({ page }) => {
     await openChannel(page, DEMO, ALBATROS);
     await page.getByRole('button', { name: 'Развернуть сцену' }).click();
-    const desk = shadeStops(page.viewportSize()!.height, false);
+    const desk = shadeStops(page.viewportSize()!.height);
 
     // На широком окне ступени две: сложена или во весь кадр. Промежуточной там нет —
     // от сложенной шторки она отличается на полосу, ради которой не стоит лишнее движение.
@@ -1170,7 +1175,7 @@ test('шторка ходит по ступеням от нажатия на р�
     // сразу и кадр, и переписку.
     const phone = { width: MOBILE_MAX_WIDTH - 90, height: 844 };
     await page.setViewportSize(phone);
-    const stops = shadeStops(phone.height, true);
+    const stops = shadeStops(phone.height);
     await expectShade(page, stops.peek, 'на телефоне шторка не ужалась до щёлки');
     await page.getByRole('button', { name: SHADE_HANDLE }).click();
     await expectShade(page, stops.half, 'с первого нажатия шторка не дошла до половины');
@@ -1188,7 +1193,7 @@ test('шторка ходит по ступеням от нажатия на р�
 test('в ручку шторки попадают и ниже рисочки, а сама рисочка не съезжает', async ({ page }) => {
     await openChannel(page, DEMO, ALBATROS);
     await page.getByRole('button', { name: 'Развернуть сцену' }).click();
-    const desk = shadeStops(page.viewportSize()!.height, false);
+    const desk = shadeStops(page.viewportSize()!.height);
     await expectShade(page, desk.peek, 'развёрнутая сцена открылась не сложенной шторкой');
 
     const handle = (await page.getByRole('button', { name: SHADE_HANDLE }).boundingBox())!;
@@ -1210,7 +1215,7 @@ test('шторку можно дотянуть до верха одним дви
     await page.setViewportSize({ width: MOBILE_MAX_WIDTH - 90, height: 844 });
     await openChannel(page, DEMO, ALBATROS);
     await page.getByRole('button', { name: 'Развернуть сцену' }).click();
-    const stops = shadeStops(page.viewportSize()!.height, true);
+    const stops = shadeStops(page.viewportSize()!.height);
     await expectShade(page, stops.peek, 'развёрнутая сцена открылась не со щёлкой');
 
     // Четверть пути до половины: ближе к тому месту, откуда тянули.
@@ -1232,10 +1237,9 @@ test('шторку можно дотянуть до верха одним дви
  * во весь экран просили сцену, и лента сообщений на два монитора этого обещания не исполняет.
  * Ширину она держит ту же, что колонка в обычном виде, и стоит по центру кадра.
  *
- * Второе обещание — про кнопки внутри. На широком окне сложенная шторка рабочая, а не щёлка:
- * в ней помещаются последние реплики с полем ввода, и полоса кнопок липнет к нижней кромке
- * на любой ступени. Снято прилипание только в телефонной щёлке — там прилипшая полоса заняла
- * бы почти всю видимую часть (см. отдельную проверку ниже).
+ * Второе обещание — про кнопки внутри. Сложенная шторка рабочая: в ней помещаются три
+ * последние реплики с полем ввода, и полоса кнопок липнет к нижней кромке на любой ступени
+ * и на любой ширине (см. отдельную проверку про телефон ниже).
  */
 const actionsPosition = (page: Page): Promise<string> =>
     page
@@ -1250,7 +1254,7 @@ test('на широком окне шторка держит колонку, а 
     await openChannel(page, DEMO, ALBATROS);
     await page.getByRole('button', { name: 'Развернуть сцену' }).click();
     const window = page.viewportSize()!;
-    const stops = shadeStops(window.height, false);
+    const stops = shadeStops(window.height);
     await expectShade(page, stops.peek, 'развёрнутая сцена открылась не сложенной шторкой');
 
     const box = (await page.getByRole('region').first().boundingBox())!;
@@ -1273,22 +1277,23 @@ test('на широком окне шторка держит колонку, а 
 });
 
 /**
- * Телефонная щёлка — единственное место, где прилипание снято: прилипшая полоса кнопок
- * заняла бы почти всю видимую часть, и вместо обещанного «видно, что там лежит» из-под кадра
- * торчали бы одни кнопки. С половины и выше прилипание возвращается — там уже есть что листать.
+ * На телефоне кнопки липнут с той же нижней ступени, что и на широком окне. Раньше в щёлке
+ * прилипание снимали — она была вдвое ниже (132px), и прилипшая полоса заняла бы почти всю
+ * видимую часть. Теперь нижняя ступень одна на обе ширины и рассчитана на три реплики
+ * с полем ввода, то есть листать в ней уже есть что.
  */
-test('в телефонной щёлке кнопки не липнут, а с половины липнут', async ({ page }) => {
+test('на телефоне кнопки липнут и в сложенной шторке, и на половине', async ({ page }) => {
     // Высота выше отсечки прилипания, иначе кнопки не липли бы ни на одной ступени.
     await page.setViewportSize({ width: MOBILE_MAX_WIDTH - 90, height: PINNED_ACTIONS_MIN_HEIGHT + 100 });
     await openChannel(page, DEMO, ALBATROS);
     await page.getByRole('button', { name: 'Развернуть сцену' }).click();
-    const stops = shadeStops(page.viewportSize()!.height, true);
-    await expectShade(page, stops.peek, 'развёрнутая сцена открылась не со щёлкой');
+    const stops = shadeStops(page.viewportSize()!.height);
+    await expectShade(page, stops.peek, 'развёрнутая сцена открылась не сложенной шторкой');
 
-    // Список приезжает на ту же ступень, что и шторка под ним, — то есть в щёлку.
+    // Список приезжает на ту же ступень, что и шторка под ним, — то есть в сложенную.
     await openSheet(page);
-    await expectShade(page, stops.peek, 'список кораблей открылся не в щёлку', MEMBERS_SHADE);
-    expect(await actionsPosition(page), 'в щёлке кнопки всё равно прилипли').toBe('static');
+    await expectShade(page, stops.peek, 'список кораблей открылся не на нижней ступени', MEMBERS_SHADE);
+    expect(await actionsPosition(page), 'в сложенной шторке кнопки отлипли').toBe('sticky');
 
     await shadeHandle(page, MEMBERS_SHADE).click();
     await expectShade(page, stops.half, 'список кораблей не поднялся на половину', MEMBERS_SHADE);
@@ -1304,7 +1309,7 @@ test('в телефонной щёлке кнопки не липнут, а с �
 test('нажатие мимо шторки складывает её, а сложенную — не трогает', async ({ page }) => {
     await openChannel(page, DEMO, ALBATROS);
     await page.getByRole('button', { name: 'Развернуть сцену' }).click();
-    const stops = shadeStops(page.viewportSize()!.height, false);
+    const stops = shadeStops(page.viewportSize()!.height);
     await expectShade(page, stops.peek, 'развёрнутая сцена открылась не сложенной шторкой');
 
     // Точка у левого края: мимо шторки она на любой ступени — шторка держит колонку по центру.
@@ -1331,7 +1336,7 @@ test('нажатие мимо шторки складывает её, а сло�
 test('шторку тянут за любое место без своей прокрутки, а утянутый вниз список закрывается', async ({ page }) => {
     await openChannel(page, DEMO, ALBATROS);
     await page.getByRole('button', { name: 'Развернуть сцену' }).click();
-    const stops = shadeStops(page.viewportSize()!.height, false);
+    const stops = shadeStops(page.viewportSize()!.height);
     await openSheet(page);
     await shadeHandle(page, MEMBERS_SHADE).click();
     await expectShade(page, stops.full, 'список не поднялся до верха', MEMBERS_SHADE);
@@ -1353,7 +1358,7 @@ test('шторку тянут за любое место без своей пр�
 test('колесо над шторкой переставляет её по ступеням, а над лентой мотает ленту', async ({ page }) => {
     await openChannel(page, DEMO, ALBATROS);
     await page.getByRole('button', { name: 'Развернуть сцену' }).click();
-    const stops = shadeStops(page.viewportSize()!.height, false);
+    const stops = shadeStops(page.viewportSize()!.height);
     await expectShade(page, stops.peek, 'развёрнутая сцена открылась не сложенной шторкой');
 
     // Ручка — то самое «место без своей прокрутки», просто она всегда на виду.
@@ -1420,7 +1425,7 @@ test('открытый список кораблей не трогает раз�
 test('список кораблей закрывают крестиком и нажатием мимо, а шторка под ним стоит на месте', async ({ page }) => {
     await openChannel(page, DEMO, ALBATROS);
     await page.getByRole('button', { name: 'Развернуть сцену' }).click();
-    const stops = shadeStops(page.viewportSize()!.height, false);
+    const stops = shadeStops(page.viewportSize()!.height);
 
     await openSheet(page);
     await shadeRegion(page, MEMBERS_SHADE).getByRole('button', { name: 'Закрыть', exact: true }).click();
@@ -1448,7 +1453,7 @@ test('фокус в поле поднимает шторку до верха, а
     await page.setViewportSize({ width: MOBILE_MAX_WIDTH - 90, height: 844 });
     await openChannel(page, DEMO, ALBATROS);
     await page.getByRole('button', { name: 'Развернуть сцену' }).click();
-    const stops = shadeStops(page.viewportSize()!.height, true);
+    const stops = shadeStops(page.viewportSize()!.height);
 
     // Человек выставил половину — это и есть то, что придётся вернуть.
     await page.getByRole('button', { name: SHADE_HANDLE }).click();
@@ -1470,7 +1475,14 @@ test('фокус в поле поднимает шторку до верха, а
  *
  * Второе условие важнее первого: Орион обязан быть в кадре ровно один. Плитки неба одинаковы
  * и лежат в ряд, и стоит плитке стать уже кадра — созвездие задвоится, а задвоенный узор
- * читается сразу, в отличие от любого другого куска звёздного неба.
+ * читается сразу, в отличие от любого другого куска звёздного неба. Это проверяется во всех
+ * четырёх кадрах.
+ *
+ * А вот по вертикали — только в развёрнутых. Снимок неба стоит от горизонта одним масштабом
+ * на окно (см. --sky-reach), и свёрнутому кадру достаётся его нижняя полоса — засветка
+ * у воды, выше которой начинаются звёзды. Орион там оказывается над верхней кромкой кадра,
+ * и это не поломка, а та самая неподвижность неба: разворот не пересчитывает снимок,
+ * а открывает то, что было отмерено, — созвездие выходит из-за кромки на своё место.
  */
 // Где Орион стоит в картинке — доли её ширины и высоты. Числа держит подготовка ассета,
 // см. SKY_ORION_PLACE в tools/scene-assets/prepare-backgrounds.py.
@@ -1495,7 +1507,7 @@ test('Орион стоит в кадре на своём месте и ровн
         }, ORION_IN_TILE);
 
     // Кадры разной пропорции: широкий и низкий (там плитка меряется по ширине кадра) и узкий
-    // и высокий (там — по высоте неба, иначе картинка не накрыла бы небо сверху).
+    // и высокий (там — по пределу роста неба, иначе картинка не накрыла бы небо сверху).
     const measure = async (frame: { width: number; height: number }, full: boolean) => {
         const size = `${frame.width}×${frame.height}${full ? ', во весь экран' : ''}`;
         await page.setViewportSize(frame);
@@ -1515,8 +1527,12 @@ test('Орион стоит в кадре на своём месте и ровн
                     if (x < 70 || x > 83) {
                         return `уехал по горизонтали: ${x}%`;
                     }
-                    if (y < 15 || y > 50) {
+                    // В свёрнутом кадре созвездие стоит выше видимой полосы неба — там и должно.
+                    if (full && (y < 15 || y > 50)) {
                         return `уехал по вертикали: ${y}%`;
+                    }
+                    if (!full && y > 0) {
+                        return `в свёрнутом кадре опустился в кадр: ${y}%`;
                     }
                     return 'на месте';
                 },
@@ -1634,13 +1650,12 @@ test('снимок неба накрывает небо целиком, а не 
     }, Promise.resolve());
 });
 
-// Те же числа, что и в стилях сцены: @sky-drop, @sky-image-drop, @moon-above, @moon-top-mobile
-// и доля кадра, на которой месяц стоит в развёрнутой сцене (см. --moon-above в .sceneFull).
-// Достать их оттуда нечем — проверки стилей не собирают, — поэтому они здесь повторены.
+// Те же числа, что и в стилях сцены: @sky-drop, @sky-image-drop, @moon-above-share
+// и @moon-top-mobile. Достать их оттуда нечем — проверки стилей не собирают, — поэтому
+// они здесь повторены.
 const SKY_DROP = 30;
 const SKY_IMAGE_DROP = 0.1;
-const MOON_ABOVE = 70;
-const MOON_ABOVE_FULL_SHARE = 0.17;
+const MOON_ABOVE_SHARE = 0.42;
 const MOON_TOP_MOBILE = 31;
 
 /**
@@ -1657,6 +1672,8 @@ const skyFrame = (page: Page) =>
         const moon = box('[class*="moon_"]');
         return {
             sceneHeight: Math.round(scene.height),
+            /** Высота неба в кадре — от верхней кромки до линии воды. */
+            skyHeight: Math.round(horizon - scene.top),
             /** Насколько низ снимка неба ушёл ниже горизонта: снимок прижат к нему и опущен. */
             photoBelow: Math.round(tile.bottom - horizon),
             photoHeight: Math.round(tile.height),
@@ -1718,12 +1735,16 @@ test('небо и месяц опущены к воде, а на свёрнут�
     expectDropped(frames.phoneFull, SKY_DROP, 'телефон во весь экран');
     expectDropped(frames.phone, 0, 'телефон, свёрнутая сцена');
 
-    expect(frames.desk.moonAbove, 'месяц на десктопе стоит не на своей высоте').toBe(MOON_ABOVE);
-    // В развёрнутом кадре высота месяца — доля самого кадра: неба в нём вдоволь, и пиксельная
-    // мерка увела бы месяц к самой воде.
-    for (const frame of [frames.deskFull, frames.phoneFull]) {
-        const expected = frame.sceneHeight * MOON_ABOVE_FULL_SHARE;
-        expect(Math.abs(frame.moonAbove - expected), 'месяц в развёрнутом кадре не на своей доле').toBeLessThanOrEqual(
+    // Высота месяца над водой — доля неба, а не пиксели и не доля кадра: в каждом виде своя
+    // высота неба, и месяц стоит на той же её части. Мерка одна на все кадры, кроме свёрнутого
+    // телефонного, — там неба полоса, и месяц отмерен от строки состояния (см. ниже).
+    for (const [label, frame] of [
+        ['десктоп', frames.desk],
+        ['десктоп во весь экран', frames.deskFull],
+        ['телефон во весь экран', frames.phoneFull],
+    ] as const) {
+        const expected = frame.skyHeight * MOON_ABOVE_SHARE;
+        expect(Math.abs(frame.moonAbove - expected), `${label}: месяц стоит не на своей доле неба`).toBeLessThanOrEqual(
             1
         );
     }
@@ -1828,6 +1849,39 @@ test('на телефоне развёрнутый кадр кончается �
         .poll(async () => (await sceneBox(page)).height, { message: 'кадр занял не тот остаток окна' })
         .toBe(844 - SHADE_PEEK_HEIGHT);
     expect(await shadeTop(page), 'кадр и шторка разошлись по нижней кромке').toBe((await sceneBox(page)).height);
+});
+
+/**
+ * Обещание сложенной шторки: из неё читается разговор, а не то, что он где-то есть.
+ * Три последние реплики целиком и поле ввода под ними — на это и рассчитана высота щёлки
+ * (SHADE_PEEK_HEIGHT), и проверяется здесь ровно она: не «лента чему-то равна», а сколько
+ * пузырей влезло целиком между верхом шторки и полем ввода.
+ *
+ * Считаем на телефоне: колонка там уже, реплики переносятся чаще, и строки выходят выше,
+ * чем на широком окне, — то есть это худший из двух случаев.
+ */
+test('в сложенной шторке видно три последние реплики и поле ввода', async ({ page }) => {
+    await page.setViewportSize({ width: MOBILE_MAX_WIDTH - 90, height: 844 });
+    await openChannel(page, DEMO, ALBATROS);
+    await page.getByRole('button', { name: 'Развернуть сцену' }).click();
+    await expect
+        .poll(async () => (await page.getByRole('region').first().boundingBox())!.height, {
+            message: 'шторка встала не на нижнюю ступень',
+        })
+        .toBe(SHADE_PEEK_HEIGHT);
+
+    const composer = (await page.locator('[class*="composer"]').first().boundingBox())!;
+    const shade = (await page.getByRole('region').first().boundingBox())!;
+    const whole = await bubbles(page).evaluateAll(
+        (nodes, area) =>
+            nodes.filter((node) => {
+                const box = node.getBoundingClientRect();
+                return box.top >= area.top && box.bottom <= area.bottom;
+            }).length,
+        { top: shade.y, bottom: composer.y }
+    );
+    expect(whole, 'из сложенной шторки видно меньше трёх реплик целиком').toBeGreaterThanOrEqual(3);
+    await expect(page.getByPlaceholder('Сообщение'), 'поле ввода не влезло в щёлку').toBeInViewport();
 });
 
 /**

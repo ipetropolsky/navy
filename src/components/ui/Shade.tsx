@@ -109,8 +109,8 @@ const clamp = (value: number, min: number, max: number): number => Math.min(Math
  * теми же местами шагает по ступеням — мышью цеплять и волочить неудобно.
  *
  * Анимируется высота, а не сдвиг: содержимое внутри должно перекладываться под новый размер.
- * Сдвинутая шторка держала бы раскладку полной высоты, и в щёлке было бы видно её верхние
- * 132 px — то есть самые старые сообщения ленты — вместо последней строчки с полем ввода.
+ * Сдвинутая шторка держала бы раскладку полной высоты, и в щёлке был бы виден её верх —
+ * то есть самые старые сообщения ленты — вместо последних реплик с полем ввода.
  *
  * Кто на какой ступени стоит, шторка не помнит: положение приходит снаружи. Иначе его не
  * отнять и не вернуть, а отнимать придётся — на время клавиатуры (см. App).
@@ -181,7 +181,7 @@ export default function Shade({ stop, onStop, label, over = false, onClose, chil
      * Докуда шторка сжимается пальцем. Обычную ниже нижней ступени не пускаем — там ничего нет;
      * у закрываемой ниже щёлки лежит «убрать совсем», и дотянуть туда надо дать.
      */
-    const lowestHeight = (frame: number): number => (onClose ? 0 : stopHeight('peek', frame, mobile));
+    const lowestHeight = (frame: number): number => (onClose ? 0 : stopHeight('peek', frame));
 
     const handlePointerDown = (event: ReactPointerEvent<HTMLElement>) => {
         const shade = shadeRef.current;
@@ -216,7 +216,7 @@ export default function Shade({ stop, onStop, label, over = false, onClose, chil
             }
             // Вверх — растём: экранный y уменьшается, а высота прибавляется.
             const height = drag.startHeight + (drag.startY - moveEvent.clientY);
-            drag.height = clamp(height, lowestHeight(drag.frame), stopHeight('full', drag.frame, mobile));
+            drag.height = clamp(height, lowestHeight(drag.frame), stopHeight('full', drag.frame));
             setDragHeight(drag.height);
         };
 
@@ -241,7 +241,7 @@ export default function Shade({ stop, onStop, label, over = false, onClose, chil
             draggedRef.current = true;
             // Утянутая ниже половины щёлки закрываемая шторка закрывается: «ниже нижней ступени»
             // у неё означает не ступень, а то, что её убрали.
-            if (onClose && drag.height < stopHeight('peek', drag.frame, mobile) / 2) {
+            if (onClose && drag.height < stopHeight('peek', drag.frame) / 2) {
                 onClose();
                 return;
             }
@@ -312,8 +312,8 @@ export default function Shade({ stop, onStop, label, over = false, onClose, chil
     const dim =
         drag && dragHeight !== null
             ? clamp(
-                  (dragHeight - stopHeight(below, drag.frame, mobile)) /
-                      Math.max(stopHeight('full', drag.frame, mobile) - stopHeight(below, drag.frame, mobile), 1),
+                  (dragHeight - stopHeight(below, drag.frame)) /
+                      Math.max(stopHeight('full', drag.frame) - stopHeight(below, drag.frame), 1),
                   0,
                   1
               )
