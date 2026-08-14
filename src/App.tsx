@@ -17,6 +17,7 @@ import TopFade from '@/components/ui/TopFade';
 import { HAIL_SIGNAL, morseDuration } from '@/hooks/morse';
 import { useChannel } from '@/hooks/useChannel';
 import { useSlide } from '@/hooks/useSlide';
+import { useSwipe } from '@/hooks/useSwipe';
 import { channelLink, useRoute } from '@/routing';
 import { Berth, MAX_MESSAGE_LENGTH, Message, MorseFeed, ShipKind, Side, isSameBerth, otherSide } from '@/types/channel';
 import { copyText } from '@/utils/clipboard';
@@ -76,6 +77,13 @@ export default function App() {
     // Одно состояние на всё приложение, а не на экран: развернул в разговоре — открыл форму
     // корабля и выбираешь место на том же большом кадре.
     const [expanded, setExpanded] = useState(false);
+
+    // Раскладку переключает не только кнопка, но и свайп по кадру: сжатый раздаётся движением
+    // вниз, раздутый сжимается движением вверх — палец ведёт кромку кадра туда, куда она поедет.
+    // Обратные движения кадр не трогают, и потяг страницы к обновлению на них работает как был.
+    const sceneRef = useRef<HTMLDivElement>(null);
+    const switchLayout = useCallback(() => setExpanded((was) => !was), []);
+    useSwipe(sceneRef, expanded ? 'up' : 'down', switchLayout);
 
     // Пустой список — тоже список, но новый на каждой отрисовке: без useMemo он менял бы
     // ссылку каждый раз и заставлял пересчитывать всё, что от него зависит.
@@ -338,7 +346,7 @@ export default function App() {
     return (
         <div className={[styles.app, expanded ? styles.appExpanded : ''].filter(Boolean).join(' ')}>
             <header className={styles.header}>
-                <div className={styles.scene}>
+                <div className={styles.scene} ref={sceneRef}>
                     <SeaScene
                         members={members}
                         myId={myId ?? ''}

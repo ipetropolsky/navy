@@ -967,6 +967,77 @@ test('раскладка переключается: кадр раздаётся
 });
 
 /**
+ * Свайп по кадру: провести пальцем и получить ту же смену раскладки, что и кнопкой.
+ *
+ * Дальше по нему проверяется и обратное — что чужие движения кадр не забирает. Поэтому
+ * возвращается не «сработало ли», а отменено ли движение пальца: именно отмена запрещает
+ * браузеру тянуть страницу к обновлению, и на чужом жесте её быть не должно.
+ */
+const swipeScene = (page: Page, by: number): Promise<boolean> =>
+    page.evaluate((shift) => {
+        const node = document.querySelector('[class*="scene"]')!;
+        const box = node.getBoundingClientRect();
+        const x = Math.round(box.left + box.width / 2);
+        const y = Math.round(box.top + box.height / 2);
+        const at = (offset: number) => {
+            const touch = new Touch({ identifier: 1, target: node, clientX: x, clientY: y + offset });
+            return { touches: [touch], targetTouches: [touch], changedTouches: [touch] };
+        };
+        const options = { bubbles: true, cancelable: true };
+        node.dispatchEvent(new TouchEvent('touchstart', { ...options, ...at(0) }));
+        // Шагами, а не одним прыжком: жест опознаётся по первым миллиметрам, и одно движение
+        // сразу на всю длину прошло бы мимо этого разбора.
+        let prevented = false;
+        for (const share of [0.25, 0.5, 0.75, 1]) {
+            const step = new TouchEvent('touchmove', { ...options, ...at(Math.round(shift * share)) });
+            prevented = !node.dispatchEvent(step) || prevented;
+        }
+        node.dispatchEvent(new TouchEvent('touchend', { ...options, ...at(shift), touches: [] }));
+        return prevented;
+    }, by);
+
+/**
+ * Свайп по кадру меняет раскладку — и только в свою сторону. Сторона на каждую раскладку
+ * своя: сжатый кадр раздаётся движением вниз, раздутый сжимается движением вверх — палец
+ * ведёт нижнюю кромку кадра туда, куда она и поедет.
+ *
+ * Обратное движение кадр не забирает, и это здесь половина проверки: на нём браузер тянет
+ * страницу к обновлению, и перехваченным оказался бы заодно и этот жест.
+ */
+test('свайп по кадру меняет раскладку в свою сторону, а обратное движение отдаёт системе', async ({ page }) => {
+    const phone = { width: MOBILE_MAX_WIDTH - 90, height: 844 };
+    await page.setViewportSize(phone);
+    await openChannel(page, DEMO, ALBATROS);
+    const compact = Math.min(COMPACT_HEIGHT, Math.round(phone.height * 0.4));
+    await expect
+        .poll(async () => (await sceneBox(page)).height, { message: 'кадр встал не в свою сжатую мерку' })
+        .toBe(compact);
+
+    // Вверх по сжатому кадру — чужое движение: раскладка на месте, отмены нет.
+    expect(await swipeScene(page, -120), 'кадр отменил чужое движение пальца').toBe(false);
+    await page.waitForTimeout(400);
+    expect((await sceneBox(page)).height, 'кадр раздался от чужого движения').toBe(compact);
+
+    // Вниз — своё: кадр раздаётся, и потяг страницы к обновлению на нём запрещён.
+    expect(await swipeScene(page, 120), 'кадр не отменил своё движение пальца').toBe(true);
+    await expect
+        .poll(async () => (await sceneBox(page)).height, { message: 'кадр не раздался от свайпа вниз' })
+        .toBe(phone.height - Math.min(COMPACT_HEIGHT, Math.round(phone.height * 0.6)) - CONTENT_GAP + CONTENT_OVERLAP);
+
+    // И обратно: по раздутому кадру своё движение — вверх.
+    expect(await swipeScene(page, 120), 'раздутый кадр забрал движение вниз').toBe(false);
+    expect(await swipeScene(page, -120), 'кадр не отменил своё движение пальца').toBe(true);
+    await expect
+        .poll(async () => (await sceneBox(page)).height, { message: 'кадр не сжался от свайпа вверх' })
+        .toBe(compact);
+
+    // Короткое движение — не свайп: так кадр возит палец, который просто ткнули мимо корабля.
+    expect(await swipeScene(page, 24), 'короткий свайп сменил раскладку').toBe(true);
+    await page.waitForTimeout(400);
+    expect((await sceneBox(page)).height, 'кадр раздался от короткого движения').toBe(compact);
+});
+
+/**
  * Смена раскладки — движение вниз, а не прыжок вверх и обратно. Держится это на двух вещах.
  *
  * Первая: --scene-height объявлена длиной (@property в index.less) и потому переходит
