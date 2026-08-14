@@ -294,6 +294,23 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
         return () => observer.disconnect();
     }, []);
 
+    // Высота картинки неба в кадре, px. Нужна она кружку неба под месяцем: кружок рисует тот же
+    // градиент, что залит в саму картинку (см. @sky-gradient), и совпасть они обязаны точно —
+    // иначе вокруг месяца проступает круг посветлее или потемнее неба. Спрашиваем саму плитку,
+    // а не считаем: высота её берётся по двум разным правилам (см. --sky-tile), и какое из них
+    // сейчас в силе, зависит от того, что в кадре шире — окно или само небо.
+    const skyTileRef = useRef<HTMLImageElement>(null);
+    const [skyImageHeight, setSkyImageHeight] = useState(0);
+    useEffect(() => {
+        const tile = skyTileRef.current;
+        if (!tile) {
+            return undefined;
+        }
+        const observer = new ResizeObserver(([entry]) => setSkyImageHeight(entry.contentRect.height));
+        observer.observe(tile);
+        return () => observer.disconnect();
+    }, []);
+
     // Задники готовы — сцену можно показывать.
     const [painted, setPainted] = useState(false);
     useEffect(() => {
@@ -747,19 +764,20 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
             className={[styles.scene, painted ? styles.scenePainted : '', full ? styles.sceneFull : '']
                 .filter(Boolean)
                 .join(' ')}
+            style={{ '--sky-img-px': `${skyImageHeight}px` } as CSSProperties}
             ref={sceneRef}
         >
             <div className={styles.sky}>
                 {/* Небо-текстура: картинка стыкуется сама с собой, поэтому плитки одинаковы
                     и просто лежат в ряд. Орион — в средней: см. .skyStrip в стилях. */}
                 <div className={styles.skyStrip}>
-                    <img className={styles.skyTile} src={skyUrl} alt="" />
+                    <img className={styles.skyTile} src={skyUrl} alt="" ref={skyTileRef} />
                     <img className={styles.skyTile} src={skyUrl} alt="" />
                     <img className={styles.skyTile} src={skyUrl} alt="" />
                 </div>
             </div>
-            {/* Месяц лежит на кружке неба: у картинки тёмная половина прозрачна, и сквозь неё
-                просвечивали звёзды. Кружок этот — сам блок, а картинка внутри: диск месяца
+            {/* Месяц лежит на кружке неба: луна круглая, и сквозь её невидимую половину не должны
+                просвечивать звёзды. Кружок этот — сам блок, а картинка внутри: диск месяца
                 и картинка не одно и то же, у картинки вокруг диска пустые поля. */}
             <div className={styles.moon}>
                 <img className={styles.moonImage} src={moonUrl} alt="" />

@@ -75,6 +75,11 @@ MOON_SOURCE = 'sky_clean_3296x1028.png'
 MOON_REACH = 230
 MOON_WIDTH = 320
 MOON_CONTRAST = 55
+# Насколько пиксель должен быть ярче окрестного неба, чтобы попасть в слой вообще.
+# На исходнике у месяца, кроме серпа, слабо светится и вся остальная половина диска —
+# пепельный свет, превышение над фоном 10–30 против 95–190 у серпа. В кадре сцены он
+# читается не свечением, а большим мутным кругом вокруг месяца, и порог его срезает.
+MOON_FLOOR = 32
 
 
 def prepare_sky() -> None:
@@ -180,7 +185,9 @@ def prepare_moon() -> None:
         blurred = np.dstack([ndimage.gaussian_filter(background[..., c], 6) for c in range(3)])
         background[lit] = blurred[lit]
 
-    alpha = np.clip(np.abs(crop - background).max(axis=2) / MOON_CONTRAST, 0, 1)
+    # Берём только то, что ярче неба: тёмного здесь нет вовсе (замер по исходнику: минимум
+    # превышения −3), а модуль разницы тянул бы в слой шум размытого фона.
+    alpha = np.clip(((crop - background).max(axis=2) - MOON_FLOOR) / MOON_CONTRAST, 0, 1)
 
     # Гасим всё за пределами круга вокруг месяца, чтобы не тащить соседние звёзды и дымку.
     rows, cols = np.ogrid[: crop.shape[0], : crop.shape[1]]
