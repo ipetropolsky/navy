@@ -1756,6 +1756,54 @@ test('облака держатся горизонта: одна высота н
     );
 });
 
+/** Размеры шапки: буквы, поля полосы и круг кнопки — всё, что меняется на укрупнённом виде. */
+const headerSize = (page: Page) =>
+    page.evaluate(() => {
+        const letters = (selector: string) => parseFloat(getComputedStyle(document.querySelector(selector)!).fontSize);
+        return {
+            title: letters('[class*="chatTitle"]'),
+            status: letters('[class*="chatStatus"]'),
+            padding: getComputedStyle(document.querySelector('[class*="headerBar"]')!).padding,
+            button: Math.round(
+                document.querySelector('[class*="headerActions"] button')!.getBoundingClientRect().width
+            ),
+        };
+    });
+
+/**
+ * Шапка растёт вместе с кадром — но только там, где кадр и правда становится больше. На телефоне
+ * разворот отдаёт сцене тот же телефонный экран, укрупнять шапку не за чем, а название канала
+ * на этой ширине и без того обрезано многоточием: от прибавки букв и полей от него оставалось
+ * полслова. На десктопе кадр вырастает по-настоящему, и прежние размеры читались бы мелочью
+ * в углу, — там шапка укрупняется по-прежнему.
+ */
+test('шапка растёт с кадром только на десктопе, а на телефоне остаётся как в свёрнутом виде', async ({ page }) => {
+    await page.setViewportSize({ width: MOBILE_MAX_WIDTH - 90, height: 844 });
+    await openChannel(page, DEMO, ALBATROS);
+    const phone = await headerSize(page);
+
+    await page.getByRole('button', { name: 'Развернуть сцену' }).click();
+    await expect(page.getByRole('button', { name: 'Свернуть сцену' })).toBeVisible();
+    // Разворот едет @expand-seconds, и кнопки в шапке успевают сменить размер на ходу.
+    await page.waitForTimeout(700);
+    expect(await headerSize(page), 'на телефоне шапка поменялась от разворота').toEqual(phone);
+
+    // Окно расширяется, не выходя из полноэкранного режима: сцена остаётся развёрнутой.
+    await page.setViewportSize({ width: 1200, height: 900 });
+    await page.waitForTimeout(700);
+    const deskFull = await headerSize(page);
+    await page.getByRole('button', { name: 'Свернуть сцену' }).click();
+    await expect(page.getByRole('button', { name: 'Развернуть сцену' })).toBeVisible();
+    await page.waitForTimeout(700);
+    const desk = await headerSize(page);
+
+    expect(desk, 'на десктопе свёрнутая шапка не такая же, как на телефоне').toEqual(phone);
+    expect(deskFull.title, 'на десктопе название в полный экран не выросло').toBeGreaterThan(desk.title);
+    expect(deskFull.status, 'на десктопе подзаголовок в полный экран не вырос').toBeGreaterThan(desk.status);
+    expect(deskFull.button, 'на десктопе кнопка в полный экран не выросла').toBeGreaterThan(desk.button);
+    expect(deskFull.padding, 'на десктопе поля шапки в полный экран не выросли').not.toBe(desk.padding);
+});
+
 /** Риска неподвижной шторки короткого окна: та же полоска, что у ручки обычной. */
 const gripBox = (page: Page) => page.locator('[class*="stillHandle"]').boundingBox();
 
