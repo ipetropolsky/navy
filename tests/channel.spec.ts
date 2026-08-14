@@ -90,7 +90,10 @@ test('уход с рейда отмечается в ленте и возвра�
     await openChannel(page, DEMO, ALBATROS);
     await expect(ships(page)).toHaveCount(3);
 
-    await page.getByLabel('Корабли на связи').click();
+    // Уход — из формы своего корабля: пока она открыта, значок списка в шапке подменён
+    // выходом с рейда. Это второе, что делают с собственным кораблём, и место ему там же.
+    await openSheet(page);
+    await page.getByRole('button', { name: 'Настроить корабль' }).click();
     await page.getByRole('button', { name: 'Уйти с рейда' }).click();
 
     // Вкладка возвращается к форме — тупика нет, встать в строй можно снова.
@@ -205,7 +208,8 @@ test('не старшему высаживать нечем, а после ег�
     // Старший ушёл — канал не остаётся без него: старшинство берёт тот, кто дольше всех
     // из оставшихся. Иначе высаживать было бы уже некому.
     await openChannel(page, DEMO, ALBATROS);
-    await page.getByLabel('Корабли на связи').click();
+    await openSheet(page);
+    await page.getByRole('button', { name: 'Настроить корабль' }).click();
     await page.getByRole('button', { name: 'Уйти с рейда' }).click();
     await expect(page.getByPlaceholder('Гром')).toBeVisible();
 
@@ -222,7 +226,7 @@ test('не старшему высаживать нечем, а после ег�
  * Прицеп ленты к низу. Пока лента внизу, она там и держится: новые реплики приходят на виду,
  * и поле ввода отделяет их от последней строчки. Отмотал вверх — лента отцепляется, и место,
  * на которое человек смотрит, больше не двигается ни от чужих сообщений, ни от того, что
- * окошко ленты переменило рост (в полноэкранном виде им ходит шторка). Домотал обратно
+ * окошко ленты переменило рост (им ходит смена раскладки). Домотал обратно
  * до низа — прицепилась снова.
  *
  * Свои реплики — исключение, и единственное: отправить сообщение и не увидеть его нельзя.
@@ -293,6 +297,16 @@ const openShipForm = async (page: Page): Promise<void> => {
     await expect(page.locator('[data-berth]').first()).toBeVisible();
 };
 
+/**
+ * Кнопка «Готово» самой формы. Через страницу её не взять: форма выезжает поверх разговора,
+ * и у поля ввода под ней тоже кнопка-submit.
+ */
+const shipFormSubmit = (page: Page) =>
+    page
+        .locator('form')
+        .filter({ has: page.getByPlaceholder('Гром') })
+        .locator('button[type=submit]');
+
 /** Свободные места, какими их видит эта вкладка: они и предлагаются к выбору. */
 const freeBerths = (page: Page): Promise<string[]> =>
     page
@@ -325,7 +339,7 @@ test('перестановка из соседней вкладки не зат�
 
     await mine.locator(`[data-berth="${here}"]`).click();
     await theirs.locator(`[data-berth="${there}"]`).click();
-    await Promise.all([mine.locator('button[type=submit]').click(), theirs.locator('button[type=submit]').click()]);
+    await Promise.all([shipFormSubmit(mine).click(), shipFormSubmit(theirs).click()]);
 
     // Оба места свободны и оба разные — значит каждый корабль встал ровно туда, куда просили.
     // Терялась тут именно первая из двух записей: она уходила в состояние и тут же затиралась.
@@ -349,7 +363,7 @@ test('два корабля не встают на одно место, даже
 
     await mine.locator(`[data-berth="${shared}"]`).click();
     await theirs.locator(`[data-berth="${shared}"]`).click();
-    await Promise.all([mine.locator('button[type=submit]').click(), theirs.locator('button[type=submit]').click()]);
+    await Promise.all([shipFormSubmit(mine).click(), shipFormSubmit(theirs).click()]);
 
     // Место одно, а желающих двое: достаться оно должно кому-то одному, второму — другое.
     await expect

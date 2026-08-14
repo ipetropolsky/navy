@@ -51,20 +51,32 @@ export const openNewChannel = async (page: Page, slug: string): Promise<void> =>
  */
 const WRITE_MS = 300;
 
-/** Заполнить форму постановки в строй и отправить её. */
+/**
+ * Заполнить форму постановки в строй и отправить её.
+ *
+ * Кнопку берём из самой формы, а не со страницы: при переоснащении форма выезжает поверх
+ * разговора, и поле ввода со своей кнопкой отправки никуда не девается — «отправить» на
+ * странице в этот момент двое.
+ */
 export const join = async (page: Page, name: string, hullNumber: string, shipKind?: string): Promise<void> => {
+    const form = page.locator('form').filter({ has: page.getByPlaceholder('Гром') });
     await page.getByPlaceholder('Гром').fill(name);
     await page.locator('input[inputmode="numeric"]').fill(hullNumber);
     if (shipKind) {
         await page.getByText(shipKind, { exact: true }).click();
     }
-    await page.locator('button[type=submit]').click();
+    await form.locator('button[type=submit]').click();
     await page.waitForTimeout(WRITE_MS);
 };
 
-/** Открыть шторку со списком кораблей. */
+/**
+ * Открыть шторку со списком кораблей.
+ *
+ * Именно кнопку, а не «что угодно с такой подписью»: та же подпись стоит и на самой шторке,
+ * и только что закрытая ещё какое-то время едет вниз, оставаясь в разметке.
+ */
 export const openSheet = async (page: Page): Promise<void> => {
-    await page.getByLabel('Корабли на связи').click();
+    await page.getByRole('button', { name: 'Корабли на связи' }).click();
     await page.waitForTimeout(300);
 };
 

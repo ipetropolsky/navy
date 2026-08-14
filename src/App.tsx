@@ -1,4 +1,4 @@
-import { FocusEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { ChannelDraft, ChannelError, MemberDraft, backend, freeBerths, suggestBerth } from '@/backend';
 import { DEMO_CHANNEL_SLUG } from '@/backend/seed';
@@ -13,14 +13,13 @@ import IconButton from '@/components/ui/IconButton';
 import Panel from '@/components/ui/Panel';
 import Shade from '@/components/ui/Shade';
 import { useSnackbar } from '@/components/ui/Snackbar';
-import { ShadeStop, nextStop } from '@/components/ui/shadeStops';
+import TopFade from '@/components/ui/TopFade';
 import { HAIL_SIGNAL, morseDuration } from '@/hooks/morse';
 import { useChannel } from '@/hooks/useChannel';
+import { useSlide } from '@/hooks/useSlide';
 import { channelLink, useRoute } from '@/routing';
 import { Berth, MAX_MESSAGE_LENGTH, Message, MorseFeed, ShipKind, Side, isSameBerth, otherSide } from '@/types/channel';
 import { copyText } from '@/utils/clipboard';
-import { isTextField } from '@/utils/keyboard';
-import { useIsMobile, useIsShortWindow } from '@/utils/viewport';
 
 import styles from './App.module.less';
 
@@ -48,8 +47,13 @@ const randomCourse = (): Side => (Math.random() < 0.5 ? 'left' : 'right');
  *   channelId без memberId     — канал открыт, но корабль ещё не в строю: ставим его;
  *   channelId и memberId       — сам чат.
  *
- * Раскладка у всех трёх одна: сцена в шапке, панель под ней. Меняется только содержимое
- * панели, поэтому море не прыгает при переходах, а корабли видно ещё до входа в канал.
+ * Раскладка у всех трёх одна: кадр со сценой сверху, блок контента под ним. Меняется только
+ * содержимое блока, поэтому море не прыгает при переходах, а корабли видно ещё до входа
+ * в канал.
+ *
+ * Поверх этого — три вещи, и все три необязательные: раскладка «больше сцены» (одна кнопка
+ * в шапке), форма своего корабля (выезжает поверх разговора) и шторка со списком кораблей
+ * (выезжает поверх всего). Ничего четвёртого в приложении нет.
  *
  * Данные приходят из useChannel, а тот берёт их у ChannelBackend. Ни localStorage,
  * ни соседних вкладок здесь не видно: всё это дело бэкенда.
@@ -59,80 +63,19 @@ export default function App() {
     const channelState = useChannel(route.channel, route.memberId);
     const { channel, myId, typing, loading } = channelState;
     const [replyTo, setReplyTo] = useState<Message | null>(null);
-    // Открыт ли список кораблей. Он приезжает своей шторкой поверх всего остального — и в
-    // обычном виде, и в полноэкранном, — а не подменяет собой содержимое: подмена уносила
-    // вместе с разговором и место прокрутки, и набранное в поле, и выделение.
+    // Открыт ли список кораблей. Он приезжает шторкой поверх всего остального, а не подменяет
+    // собой содержимое: подмена уносила вместе с разговором и место прокрутки, и набранное
+    // в поле, и выделение.
     const [sheetOpen, setSheetOpen] = useState(false);
+    // Открыта ли форма своего корабля. Она выезжает поверх разговора — по той же причине
+    // и тем же движением, что и шторка.
     const [editing, setEditing] = useState(false);
     const notify = useSnackbar();
-    const mobile = useIsMobile();
-    // Короткое окно: сцене и шторке в нём вдвоём не поместиться, и шторки в нём нет —
-    // содержимое лежит под кадром неподвижно, а страница прокручивается целиком.
-    // Ступени в таком окне не считаются вовсе, поэтому и всё, что ими правит, ниже отключено.
-    const shortWindow = useIsShortWindow();
 
-    // Развёрнутая сцена. Режим один на всё приложение, а не на экран: развернул в чате —
-    // открыл форму корабля и выбираешь место на том же большом кадре. Ради этого он и заведён.
-    const [fullscreen, setFullscreen] = useState(false);
-    // На какой ступени стоит шторка полноэкранного вида. Держим здесь, а не в самой шторке:
-    // её положение отнимает и возвращает клавиатура (см. ниже), а отнять можно только чужое.
-    const [shadeStop, setShadeStop] = useState<ShadeStop>('peek');
-    // На какой ступени шторка стояла до того, как в поле ввода встал фокус. Пока тут не null,
-    // считается, что шторку подняла клавиатура, а не человек, и поднятое надо будет вернуть.
-    const shadeBeforeKeyboard = useRef<ShadeStop | null>(null);
-    // Ступень шторки со списком кораблей. Своя, отдельная от нижней: это две шторки, и ходят
-    // они порознь.
-    const [membersStop, setMembersStop] = useState<ShadeStop>('full');
-
-    // Разворачиваем — шторка опускается в щёлку: человек нажал кнопку ради кадра, и открывать
-    // ему поверх кадра ленту во весь экран значит не показать ничего.
-    const toggleFullscreen = (): void => {
-        setFullscreen((on) => !on);
-        setShadeStop('peek');
-        shadeBeforeKeyboard.current = null;
-    };
-
-    // Шторку двигает человек — значит, это и есть то положение, которое надо потом вернуть.
-    // Долг перед клавиатурой на этом списывается: вернуть прежнее теперь означало бы отменить
-    // то, что он только что сделал сам.
-    const handleShadeStop = (next: ShadeStop): void => {
-        shadeBeforeKeyboard.current = null;
-        setShadeStop(next);
-    };
-
-    // Клавиатуру браузер не показывает никак, поэтому ориентир — фокус в текстовом поле
-    // (см. utils/keyboard). Встал фокус — поднимаем шторку до верха: клавиатура съедает
-    // пол-экрана, и поле ввода в шторке на половине оказалось бы под ней.
-    //
-    // Только в телефонном виде. На десктопе экранной клавиатуры нет вовсе, а фокус в поле есть
-    // — и на этом уже наступили: форма корабля сама встаёт фокусом в позывной, и шторка от
-    // этого уезжала до верха, закрывая ровно тот кадр, ради которого её и разворачивали.
-    // Мерка та же, по которой форма решает, ставить ли фокус сразу (см. utils/viewport).
-    //
-    // Слушаем не сами поля, а всё приложение: полей в нём с десяток — позывной, номер, поле
-    // сообщения, — и вешать на каждое по паре обработчиков значит однажды завести одиннадцатое
-    // и забыть. React отдаёт focusin/focusout всплывающими, так что хватает одной пары наверху.
-    const handleFocusIn = (event: FocusEvent<HTMLDivElement>): void => {
-        if (!fullscreen || !mobile || shortWindow || !isTextField(event.target)) {
-            return;
-        }
-        // Прыжок из поля в поле — не новый заход клавиатуры: она и не убиралась. Прежнее
-        // положение при этом сохраняем то, самое первое.
-        if (shadeBeforeKeyboard.current === null) {
-            shadeBeforeKeyboard.current = shadeStop;
-        }
-        setShadeStop('full');
-    };
-
-    const handleFocusOut = (event: FocusEvent<HTMLDivElement>): void => {
-        const before = shadeBeforeKeyboard.current;
-        // relatedTarget — куда фокус ушёл. Ушёл в другое поле — клавиатура остаётся на месте.
-        if (before === null || isTextField(event.relatedTarget)) {
-            return;
-        }
-        shadeBeforeKeyboard.current = null;
-        setShadeStop(before);
-    };
+    // Раскладка «больше сцены»: кадр забирает окно, блоку контента остаётся сжатая мерка.
+    // Одно состояние на всё приложение, а не на экран: развернул в разговоре — открыл форму
+    // корабля и выбираешь место на том же большом кадре.
+    const [expanded, setExpanded] = useState(false);
 
     // Пустой список — тоже список, но новый на каждой отрисовке: без useMemo он менял бы
     // ссылку каждый раз и заставлял пересчитывать всё, что от него зависит.
@@ -150,11 +93,11 @@ export default function App() {
               facing: me.place.facing,
           }
         : undefined;
-    const inChat = Boolean(channel && me && !editing);
+    const inChat = Boolean(channel && me);
     // Место на рейде выбирают в форме корабля и только в ней: это её поле, просто вынесенное
     // на воду. На главной канала ещё нет, вставать некуда и не в чем — там рейд пустой
     // и ничего не предлагает.
-    const picking = !loading && Boolean(channel) && !inChat;
+    const picking = !loading && Boolean(channel) && (editing || !me);
 
     // Какой корабль выбран в форме. Держим здесь, а не в самой форме: от размера зависит,
     // куда этот корабль вообще влезет, и точки свободных мест на воде обязаны это знать.
@@ -311,6 +254,11 @@ export default function App() {
         }
     };
 
+    const handleLeave = () => {
+        setEditing(false);
+        void channelState.leave();
+    };
+
     const status = (): string => {
         if (!channel) {
             // На главной канала нет и статусу неоткуда взяться — там строчка работает
@@ -325,32 +273,9 @@ export default function App() {
         return members.length ? `${members.length} на связи` : 'никого нет';
     };
 
-    // Список кораблей. Приезжает он шторкой поверх всего — одинаково в обоих видах и поверх
-    // разговора, а не на его месте: подмена уносила с собой и место прокрутки ленты,
-    // и набранное в поле.
-    const membersList = (
-        <MembersList
-            members={members}
-            myId={myId}
-            seniorId={channel?.channel.owner?.memberId ?? null}
-            onEditMe={() => {
-                setSheetOpen(false);
-                setEditing(true);
-            }}
-            onLeave={() => {
-                setSheetOpen(false);
-                void channelState.leave();
-            }}
-            // Список остаётся открытым: высадив один корабль, старший чаще всего смотрит
-            // на список дальше, а не уходит из него.
-            onKick={(memberId) => void channelState.kick(memberId)}
-            onHail={handleHail}
-        />
-    );
-
-    // Содержимое панели: что лежит под сценой в обычном виде и что переезжает в шторку
-    // в полноэкранном. Разметка одна на оба вида — меняется только то, во что она обёрнута.
-    const panelContent = (
+    // Нижний слой блока контента: разговор или то, что стоит на его месте, пока разговаривать
+    // не с кем. Форма своего корабля выезжает поверх и этот слой не разбирает.
+    const baseContent = (
         <>
             {loading && <div className={styles.waiting}>Выходим на связь…</div>}
             {/* Адрес в ссылке есть, а канала по нему нет: ссылка устарела или в ней опечатка.
@@ -369,21 +294,22 @@ export default function App() {
                     onOpenDemo={() => route.openChannel(DEMO_CHANNEL_SLUG)}
                 />
             )}
-            {!loading && channel && !inChat && (
+            {/* Форма постановки в строй — это и есть содержимое блока: разговора у того, кто
+                ещё не в строю, нет, и накрывать ей нечего. Переоснащение, наоборот, выезжает
+                поверх разговора — см. ниже. */}
+            {!loading && channel && !me && (
                 <MemberForm
-                    mode={editing ? 'edit' : 'join'}
+                    mode="join"
                     crew={members}
                     myId={myId}
-                    initial={myDraft}
                     shipKind={shipKind}
                     onShipKind={setPickedKind}
                     facing={facing}
                     onFacing={setPickedFacing}
                     onSubmit={handleMemberSubmit}
-                    onCancel={editing ? () => setEditing(false) : undefined}
                 />
             )}
-            {inChat && channel && me && (
+            {channel && me && (
                 <>
                     <MessageList
                         messages={channel.messages}
@@ -405,43 +331,22 @@ export default function App() {
         </>
     );
 
-    /**
-     * Открыть список кораблей. Ступень ему достаётся та же, на которой стоит шторка под ним:
-     * человек уже выставил, сколько места отдать содержимому, и открывшийся поверх список
-     * не имеет права это переставлять — раньше он раскрывался до верха и заодно перекраивал
-     * весь экран.
-     *
-     * Поверх чего открываться нечему — в обычном виде шторки под списком нет, а в коротком
-     * окне она неподвижна, — там ступень берётся первой рабочей: в щёлке виден один заголовок.
-     */
-    const openMembers = (): void => {
-        setMembersStop(fullscreen && !shortWindow ? shadeStop : nextStop('peek', mobile));
-        setSheetOpen(true);
-    };
+    // Форма своего корабля: выезжает снизу поверх разговора и уходит туда же. Пока едет —
+    // остаётся на экране, см. useSlide.
+    const formSlide = useSlide(editing && inChat);
 
     return (
-        <div
-            className={[
-                styles.app,
-                fullscreen ? styles.appFull : '',
-                // Короткое окно: приложение становится обычной прокручиваемой страницей.
-                fullscreen && shortWindow ? styles.appShort : '',
-            ]
-                .filter(Boolean)
-                .join(' ')}
-            onFocus={handleFocusIn}
-            onBlur={handleFocusOut}
-        >
+        <div className={[styles.app, expanded ? styles.appExpanded : ''].filter(Boolean).join(' ')}>
             <header className={styles.header}>
                 <div className={styles.scene}>
                     <SeaScene
                         members={members}
                         myId={myId ?? ''}
                         morseFeeds={morseFeeds}
-                        full={fullscreen}
+                        full={expanded}
                         ready={!loading && Boolean(channel)}
-                        // Щелчок по своему кораблю открывает ту же форму, что и переоснащение:
-                        // и корабль, и место на рейде меняются в одном месте.
+                        // Щелчок по своему кораблю открывает ту же форму, что и кнопка
+                        // «Настроить корабль»: и корабль, и место на рейде меняются в одном месте.
                         onEditShip={() => setEditing(true)}
                         berths={
                             picking
@@ -450,7 +355,7 @@ export default function App() {
                         }
                     />
                 </div>
-                <div className={[styles.headerBar, fullscreen ? styles.headerBarFull : ''].filter(Boolean).join(' ')}>
+                <div className={[styles.headerBar, expanded ? styles.headerBarExpanded : ''].filter(Boolean).join(' ')}>
                     <div className={styles.headerInfo}>
                         {/* Название канала — это и кнопка «позвать остальных»: по нажатию
                             ссылка уходит в буфер. Показывать сам адрес негде, он длинный. */}
@@ -470,45 +375,64 @@ export default function App() {
                     </div>
                     {/* Кнопки идут вплотную: это один блок действий, а не два разных. */}
                     <div className={styles.headerActions}>
-                        {inChat && (
-                            // Кнопка переключает, а не только открывает, и меняет значок:
-                            // пока список открыт, на ней облачко разговора — иначе непонятно,
-                            // чем вернуться назад. Нажатие мимо списка делает то же самое,
-                            // но по нему надо догадаться.
-                            <IconButton
-                                large={fullscreen}
-                                onClick={() => (sheetOpen ? setSheetOpen(false) : openMembers())}
-                                aria-label={sheetOpen ? 'Вернуться к разговору' : 'Корабли на связи'}
-                            >
-                                {sheetOpen ? (
+                        {inChat &&
+                            (editing ? (
+                                // Пока открыта форма, на месте списка кораблей — выход с рейда:
+                                // это второе, что делают с собственным кораблём, и место ему
+                                // рядом с его настройками. Список в этот момент не нужен —
+                                // разговор всё равно накрыт формой.
+                                <IconButton onClick={handleLeave} aria-label="Уйти с рейда">
                                     <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
                                         <path
-                                            d="M20 3H4a2 2 0 0 0-2 2v9.5a2 2 0 0 0 2 2h2.5V21l4.5-4.5H20a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z"
-                                            fill="currentColor"
+                                            d="M14 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8M13 12H21M18 8l4 4-4 4"
+                                            stroke="currentColor"
+                                            strokeWidth="2"
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                            fill="none"
                                         />
                                     </svg>
-                                ) : (
-                                    <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
-                                        <path
-                                            d="M9 11a3.2 3.2 0 1 0 0-6.4A3.2 3.2 0 0 0 9 11zm7 .4a2.7 2.7 0 1 0 0-5.4 2.7 2.7 0 0 0 0 5.4zM9 13c-3 0-6 1.5-6 3.6V19h12v-2.4C15 14.5 12 13 9 13zm7 .8c-.5 0-1 .05-1.5.16 1.1.86 1.8 1.96 1.8 3.24V19H22v-2c0-1.8-2.6-3.2-6-3.2z"
-                                            fill="currentColor"
-                                        />
-                                    </svg>
-                                )}
-                            </IconButton>
-                        )}
-                        {/* Разворот сцены. Значок — стрелки по диагонали: в разные стороны, когда
-                            разворачивать, и к середине, когда сворачивать. Диагональ у обоих одна,
-                            меняются только концы, и переключение читается как одно движение. */}
+                                </IconButton>
+                            ) : (
+                                // Кнопка переключает, а не только открывает, и меняет значок:
+                                // пока список открыт, на ней облачко разговора — иначе непонятно,
+                                // чем вернуться назад. Нажатие мимо списка делает то же самое,
+                                // но по нему надо догадаться.
+                                <IconButton
+                                    large={expanded}
+                                    onClick={() => setSheetOpen((open) => !open)}
+                                    aria-label={sheetOpen ? 'Вернуться к разговору' : 'Корабли на связи'}
+                                >
+                                    {sheetOpen ? (
+                                        <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+                                            <path
+                                                d="M20 3H4a2 2 0 0 0-2 2v9.5a2 2 0 0 0 2 2h2.5V21l4.5-4.5H20a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z"
+                                                fill="currentColor"
+                                            />
+                                        </svg>
+                                    ) : (
+                                        <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+                                            <path
+                                                d="M9 11a3.2 3.2 0 1 0 0-6.4A3.2 3.2 0 0 0 9 11zm7 .4a2.7 2.7 0 1 0 0-5.4 2.7 2.7 0 0 0 0 5.4zM9 13c-3 0-6 1.5-6 3.6V19h12v-2.4C15 14.5 12 13 9 13zm7 .8c-.5 0-1 .05-1.5.16 1.1.86 1.8 1.96 1.8 3.24V19H22v-2c0-1.8-2.6-3.2-6-3.2z"
+                                                fill="currentColor"
+                                            />
+                                        </svg>
+                                    )}
+                                </IconButton>
+                            ))}
+                        {/* Переключатель раскладки. Значок — стрелки по диагонали: в разные
+                            стороны, когда разворачивать, и к середине, когда сворачивать.
+                            Диагональ у обоих одна, меняются только концы, и переключение
+                            читается как одно движение. */}
                         <IconButton
-                            large={fullscreen}
-                            onClick={toggleFullscreen}
-                            aria-label={fullscreen ? 'Свернуть сцену' : 'Развернуть сцену'}
+                            large={expanded}
+                            onClick={() => setExpanded((on) => !on)}
+                            aria-label={expanded ? 'Свернуть сцену' : 'Развернуть сцену'}
                         >
                             <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
                                 <path
                                     d={
-                                        fullscreen
+                                        expanded
                                             ? 'M20 10h-6V4M4 14h6v6M14 10l6-6M10 14l-6 6'
                                             : 'M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7'
                                     }
@@ -523,27 +447,50 @@ export default function App() {
                     </div>
                 </div>
             </header>
-            {fullscreen ? (
-                <Shade stop={shadeStop} onStop={handleShadeStop} label={inChat ? 'Разговор' : 'Форма'}>
-                    <div className={styles.shadePanel}>{panelContent}</div>
-                </Shade>
-            ) : (
-                <main className={styles.panel}>{panelContent}</main>
-            )}
-            {/* Список кораблей — вторым этажом поверх всего, одинаково в обоих видах. Своей
-                ступени у него нет только в одном смысле: закрывается он совсем, а не
-                складывается в щёлку, — поэтому у него крестик и нажатие мимо. */}
-            {sheetOpen && inChat && (
-                <Shade
-                    over
-                    stop={membersStop}
-                    onStop={setMembersStop}
-                    onClose={() => setSheetOpen(false)}
-                    label="Корабли на связи"
-                >
-                    {membersList}
-                </Shade>
-            )}
+            <main className={[styles.content, expanded ? styles.contentCompact : ''].filter(Boolean).join(' ')}>
+                <TopFade className={styles.base}>{baseContent}</TopFade>
+                {formSlide.mounted && me && (
+                    <div
+                        className={[styles.form, editing ? '' : styles.formLeaving].filter(Boolean).join(' ')}
+                        onTransitionEnd={formSlide.onTransitionEnd}
+                    >
+                        <TopFade>
+                            <MemberForm
+                                mode="edit"
+                                crew={members}
+                                myId={myId}
+                                initial={myDraft}
+                                shipKind={shipKind}
+                                onShipKind={setPickedKind}
+                                facing={facing}
+                                onFacing={setPickedFacing}
+                                onSubmit={handleMemberSubmit}
+                                onCancel={() => setEditing(false)}
+                            />
+                        </TopFade>
+                    </div>
+                )}
+            </main>
+            {/* Список кораблей — шторкой поверх всего. Закрывается совсем, а не складывается:
+                сложенный список был бы полоской ни с чем поверх разговора. */}
+            <Shade open={sheetOpen && inChat && !editing} onClose={() => setSheetOpen(false)} label="Корабли на связи">
+                <MembersList
+                    members={members}
+                    myId={myId}
+                    seniorId={channel?.channel.owner?.memberId ?? null}
+                    // Настройка своего корабля — та же форма, что и по щелчку по нему на рейде.
+                    // Список за собой закрываем: форма выезжает поверх разговора, и оставшаяся
+                    // сверху шторка накрыла бы её целиком.
+                    onEditMe={() => {
+                        setSheetOpen(false);
+                        setEditing(true);
+                    }}
+                    // Список остаётся открытым: высадив один корабль, старший чаще всего смотрит
+                    // на список дальше, а не уходит из него.
+                    onKick={(memberId) => void channelState.kick(memberId)}
+                    onHail={handleHail}
+                />
+            </Shade>
         </div>
     );
 }

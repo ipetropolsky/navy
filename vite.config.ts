@@ -7,14 +7,14 @@ import { defineConfig } from 'vite';
 // eslint-disable-next-line no-restricted-imports
 import {
     COLUMN_WIDTH,
+    COMPACT_HEIGHT,
+    CONTENT_DESKTOP_HEIGHT,
+    CONTENT_GAP,
+    CONTENT_OVERLAP,
+    FADE_HEIGHT,
     MOBILE_MAX_WIDTH,
-    PINNED_ACTIONS_MIN_HEIGHT,
-    SHADE_FADE_HEIGHT,
-    SHADE_PEEK_HEIGHT,
-    SHADE_SEA_OVERLAP,
-    SHADE_TOP_GAP,
-    SHORT_WINDOW_MAX_HEIGHT,
-    SHORT_WINDOW_PEEK,
+    SHEET_TOP_GAP,
+    SHEET_WIDTH,
 } from './src/config/layout';
 
 export default defineConfig({
@@ -26,14 +26,14 @@ export default defineConfig({
                 // берёт код: @mobile-width доступен в любом .less без импортов.
                 additionalData:
                     `@mobile-width: ${MOBILE_MAX_WIDTH}px;\n` +
-                    `@pinned-actions-height: ${PINNED_ACTIONS_MIN_HEIGHT}px;\n` +
-                    `@shade-peek: ${SHADE_PEEK_HEIGHT}px;\n` +
-                    `@shade-fade: ${SHADE_FADE_HEIGHT}px;\n` +
-                    `@shade-top-gap: ${SHADE_TOP_GAP}px;\n` +
-                    `@shade-sea-overlap: ${SHADE_SEA_OVERLAP}px;\n` +
-                    `@short-window-height: ${SHORT_WINDOW_MAX_HEIGHT}px;\n` +
-                    `@short-window-peek: ${SHORT_WINDOW_PEEK}px;\n` +
-                    `@column-width: ${COLUMN_WIDTH}px;\n`,
+                    `@column-width: ${COLUMN_WIDTH}px;\n` +
+                    `@compact-height: ${COMPACT_HEIGHT}px;\n` +
+                    `@content-desktop-height: ${CONTENT_DESKTOP_HEIGHT}px;\n` +
+                    `@content-overlap: ${CONTENT_OVERLAP}px;\n` +
+                    `@content-gap: ${CONTENT_GAP}px;\n` +
+                    `@sheet-width: ${SHEET_WIDTH}px;\n` +
+                    `@sheet-top-gap: ${SHEET_TOP_GAP}px;\n` +
+                    `@fade-height: ${FADE_HEIGHT}px;\n`,
             },
         },
     },

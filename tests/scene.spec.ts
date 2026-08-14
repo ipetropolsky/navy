@@ -31,6 +31,26 @@ const SPREAD_NEAR = 0.1;
 /** Насколько боковое место этой линии отстоит от середины кадра, доля его ширины. */
 const berthOffset = (slot: number): number => CORRIDOR_STEP + SPREAD_FAR + (SPREAD_NEAR - SPREAD_FAR) * slotShare(slot);
 
+/**
+ * Кнопка «Готово» самой формы корабля. Через страницу её не взять: форма выезжает поверх
+ * разговора, и у поля ввода под ней тоже кнопка-submit.
+ */
+const shipFormSubmit = (page: Page) =>
+    page
+        .locator('form')
+        .filter({ has: page.getByPlaceholder('Гром') })
+        .locator('button[type=submit]');
+
+/**
+ * Уйти с рейда. Выход живёт в шапке и только при открытой форме своего корабля: пока она
+ * открыта, значок списка подменён выходом.
+ */
+const leaveRaid = async (page: Page): Promise<void> => {
+    await page.getByRole('button', { name: 'Корабли на связи' }).click();
+    await page.getByRole('button', { name: 'Настроить корабль' }).click();
+    await page.getByRole('button', { name: 'Уйти с рейда' }).click();
+};
+
 /** Огни каждого корабля в кадре: чем является каждый и где он стоит по вертикали. */
 const lights = (page: Page, within = '[class*="shipSlot"]'): Promise<{ kind: string; top: number }[][]> =>
     page.evaluate(
@@ -138,7 +158,7 @@ test('курс выбирается в форме, и корабль встаё�
 
     // И курс можно переменить, оставшись на месте: корабль разворачивается там, где стоит.
     await page.getByLabel('Курс влево').click();
-    await page.locator('button[type=submit]').click();
+    await shipFormSubmit(page).click();
     await expect(ships(page).locator('[data-facing]')).toHaveAttribute('data-facing', 'left');
 
     const afterRefit = await readState(page);
@@ -311,8 +331,7 @@ test('на тесной линии первым уступает тот, кто 
     // Крупный уходит — и катер отпускает резинку. Уходить приходится его же вкладкой: с рейда
     // корабль снимает только свой хозяин.
     await openChannel(page, 'rezinka', resident.memberId);
-    await page.getByLabel('Корабли на связи').click();
-    await page.getByRole('button', { name: 'Уйти с рейда' }).click();
+    await leaveRaid(page);
 
     // Насколько именно он отошёл — не проверяем: это его разброс внутри полосы, а он считается
     // по позывному, который выдал бэкенд. Проверяем то, что от разброса не зависит: катер больше
@@ -932,8 +951,7 @@ test('корабль уходит за кромку и пропадает из �
     await openChannel(page, DEMO, ALBATROS);
     await expect(ships(page)).toHaveCount(3);
 
-    await page.getByLabel('Корабли на связи').click();
-    await page.getByRole('button', { name: 'Уйти с рейда' }).click();
+    await leaveRaid(page);
 
     // Сразу после выхода корабль ещё в кадре: он выбирается за кромку своим ходом.
     await expect(page.locator('[data-motion="leaving"]')).toHaveCount(1);
@@ -958,7 +976,7 @@ test('огни на рейде якорные, на ходу ходовые, и 
     // щелчок по своему кораблю открывает форму, там выбирается другое место, и корабль уходит.
     await page.locator('[class*="shipMine"]').click();
     await page.locator('[data-berth][aria-pressed="false"]').last().click();
-    await page.locator('button[type=submit]').click();
+    await shipFormSubmit(page).click();
     await expect(page.locator('[data-motion]')).toHaveCount(1);
     const underway = await lights(page, '[data-motion]');
     const kinds = underway[0].map((light) => light.kind);

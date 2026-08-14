@@ -1,17 +1,17 @@
 import { useSyncExternalStore } from 'react';
 
-import { MOBILE_MEDIA_QUERY, SHORT_WINDOW_MEDIA_QUERY } from '@/config/layout';
+import { MOBILE_MEDIA_QUERY } from '@/config/layout';
 
 /**
- * Мерки окна — один ответ на всё приложение, и тот же, что у стилей: медиавыражения берутся
- * из `config/layout`, откуда их же подставляет в Less сборка. Спрашивать размеры окна напрямую
+ * Мерки окна — один ответ на всё приложение, и тот же, что у стилей: медиавыражение берётся
+ * из `config/layout`, откуда его же подставляет в Less сборка. Спрашивать размеры окна напрямую
  * нельзя: так появляется второе мнение о том, где кончается телефон.
  *
  * Пользоваться этим стоит редко. Всё, что можно решить в CSS, решается в CSS; сюда попадает
  * только то, что стилями не выразить, — например, ставить ли фокус в поле сразу (на телефоне
- * это выкидывает клавиатуру поверх формы) и рисовать ли шторке ручку.
+ * это выкидывает клавиатуру поверх формы).
  *
- * Подписка и замер заведены на каждое выражение по разу и живут в замыкании: useSyncExternalStore
+ * Подписка и замер заведены на выражение по разу и живут в замыкании: useSyncExternalStore
  * зовёт их по ссылке и на новой отписывается и подписывается заново, то есть собранные на лету
  * они перетряхивали бы слушателей на каждой отрисовке.
  */
@@ -28,15 +28,8 @@ const matcher = (media: string) => {
 };
 
 const mobile = matcher(MOBILE_MEDIA_QUERY);
-const shortWindow = matcher(SHORT_WINDOW_MEDIA_QUERY);
 
 export const isMobile = (): boolean => mobile.matches();
 
 /** То же самое, но с перерисовкой: окно можно и растянуть, и повернуть телефон. */
 export const useIsMobile = (): boolean => useSyncExternalStore(mobile.subscribe, mobile.matches);
-
-/**
- * Короткое окно: такое, в котором сцене и шторке вдвоём не поместиться (см.
- * SHORT_WINDOW_MAX_HEIGHT). Телефон на боку — как раз оно.
- */
-export const useIsShortWindow = (): boolean => useSyncExternalStore(shortWindow.subscribe, shortWindow.matches);
