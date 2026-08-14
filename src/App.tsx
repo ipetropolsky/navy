@@ -6,7 +6,6 @@ import SeaScene from '@/components/SeaScene/SeaScene';
 import CreateChannel from '@/components/channel/CreateChannel';
 import MemberForm from '@/components/channel/MemberForm';
 import MembersList from '@/components/channel/MembersList';
-import MembersSheet from '@/components/channel/MembersSheet';
 import Composer from '@/components/chat/Composer';
 import MessageList from '@/components/chat/MessageList';
 import Button from '@/components/ui/Button';
@@ -60,6 +59,9 @@ export default function App() {
     const channelState = useChannel(route.channel, route.memberId);
     const { channel, myId, typing, loading } = channelState;
     const [replyTo, setReplyTo] = useState<Message | null>(null);
+    // Открыт ли список кораблей. Он приезжает своей шторкой поверх всего остального — и в
+    // обычном виде, и в полноэкранном, — а не подменяет собой содержимое: подмена уносила
+    // вместе с разговором и место прокрутки, и набранное в поле, и выделение.
     const [sheetOpen, setSheetOpen] = useState(false);
     const [editing, setEditing] = useState(false);
     const notify = useSnackbar();
@@ -78,6 +80,9 @@ export default function App() {
     // На какой ступени шторка стояла до того, как в поле ввода встал фокус. Пока тут не null,
     // считается, что шторку подняла клавиатура, а не человек, и поднятое надо будет вернуть.
     const shadeBeforeKeyboard = useRef<ShadeStop | null>(null);
+    // Ступень шторки со списком кораблей. Своя, отдельная от нижней: это две шторки, и ходят
+    // они порознь.
+    const [membersStop, setMembersStop] = useState<ShadeStop>('full');
 
     // Разворачиваем — шторка опускается в щёлку: человек нажал кнопку ради кадра, и открывать
     // ему поверх кадра ленту во весь экран значит не показать ничего.
@@ -320,9 +325,9 @@ export default function App() {
         return members.length ? `${members.length} на связи` : 'никого нет';
     };
 
-    // Список кораблей. В обычном виде он приезжает своей шторкой поверх всего, в полноэкранном
-    // — встаёт в большую шторку на место чата: две шторки одна поверх другой были бы уже
-    // не «показать список», а второй этаж.
+    // Список кораблей. Приезжает он шторкой поверх всего — одинаково в обоих видах и поверх
+    // разговора, а не на его месте: подмена уносила с собой и место прокрутки ленты,
+    // и набранное в поле.
     const membersList = (
         <MembersList
             members={members}
@@ -400,14 +405,18 @@ export default function App() {
         </>
     );
 
-    // Что показывает шторка и как она подписана для тех, кто её не видит. Заодно это ответ
-    // на вопрос, зачем шторке щёлка: из неё видно заголовок того, что там лежит.
-    const shadeIsMembers = sheetOpen && inChat;
-    const shadeLabel = (): string => {
-        if (shadeIsMembers) {
-            return 'Корабли на связи';
-        }
-        return inChat ? 'Разговор' : 'Форма';
+    /**
+     * Открыть список кораблей. Ступень ему достаётся та же, на которой стоит шторка под ним:
+     * человек уже выставил, сколько места отдать содержимому, и открывшийся поверх список
+     * не имеет права это переставлять — раньше он раскрывался до верха и заодно перекраивал
+     * весь экран.
+     *
+     * Поверх чего открываться нечему — в обычном виде шторки под списком нет, а в коротком
+     * окне она неподвижна, — там ступень берётся первой рабочей: в щёлке виден один заголовок.
+     */
+    const openMembers = (): void => {
+        setMembersStop(fullscreen && !shortWindow ? shadeStop : nextStop('peek', mobile));
+        setSheetOpen(true);
     };
 
     return (
@@ -462,30 +471,30 @@ export default function App() {
                     {/* Кнопки идут вплотную: это один блок действий, а не два разных. */}
                     <div className={styles.headerActions}>
                         {inChat && (
-                            // Кнопка переключает, а не только открывает: в полноэкранном виде
-                            // список приезжает в ту же шторку, что и чат, и закрыть его,
-                            // ткнув мимо, нельзя — мимо там сцена.
+                            // Кнопка переключает, а не только открывает, и меняет значок:
+                            // пока список открыт, на ней облачко разговора — иначе непонятно,
+                            // чем вернуться назад. Нажатие мимо списка делает то же самое,
+                            // но по нему надо догадаться.
                             <IconButton
                                 large={fullscreen}
-                                onClick={() => {
-                                    setSheetOpen((on) => !on);
-                                    // Открывать список в щёлке незачем: там видно один
-                                    // заголовок. Поднимаем на ступень выше, а дальше человек
-                                    // дотянет сам; на десктопе ступень эта сразу верхняя.
-                                    // В коротком окне ступеней нет — список просто занимает
-                                    // место разговора в неподвижной шторке.
-                                    if (!shortWindow && !sheetOpen && shadeStop === 'peek') {
-                                        setShadeStop(nextStop('peek', mobile));
-                                    }
-                                }}
-                                aria-label="Корабли на связи"
+                                onClick={() => (sheetOpen ? setSheetOpen(false) : openMembers())}
+                                aria-label={sheetOpen ? 'Вернуться к разговору' : 'Корабли на связи'}
                             >
-                                <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
-                                    <path
-                                        d="M9 11a3.2 3.2 0 1 0 0-6.4A3.2 3.2 0 0 0 9 11zm7 .4a2.7 2.7 0 1 0 0-5.4 2.7 2.7 0 0 0 0 5.4zM9 13c-3 0-6 1.5-6 3.6V19h12v-2.4C15 14.5 12 13 9 13zm7 .8c-.5 0-1 .05-1.5.16 1.1.86 1.8 1.96 1.8 3.24V19H22v-2c0-1.8-2.6-3.2-6-3.2z"
-                                        fill="currentColor"
-                                    />
-                                </svg>
+                                {sheetOpen ? (
+                                    <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+                                        <path
+                                            d="M20 3H4a2 2 0 0 0-2 2v9.5a2 2 0 0 0 2 2h2.5V21l4.5-4.5H20a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z"
+                                            fill="currentColor"
+                                        />
+                                    </svg>
+                                ) : (
+                                    <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+                                        <path
+                                            d="M9 11a3.2 3.2 0 1 0 0-6.4A3.2 3.2 0 0 0 9 11zm7 .4a2.7 2.7 0 1 0 0-5.4 2.7 2.7 0 0 0 0 5.4zM9 13c-3 0-6 1.5-6 3.6V19h12v-2.4C15 14.5 12 13 9 13zm7 .8c-.5 0-1 .05-1.5.16 1.1.86 1.8 1.96 1.8 3.24V19H22v-2c0-1.8-2.6-3.2-6-3.2z"
+                                            fill="currentColor"
+                                        />
+                                    </svg>
+                                )}
                             </IconButton>
                         )}
                         {/* Разворот сцены. Значок — стрелки по диагонали: в разные стороны, когда
@@ -515,18 +524,25 @@ export default function App() {
                 </div>
             </header>
             {fullscreen ? (
-                <Shade stop={shadeStop} onStop={handleShadeStop} label={shadeLabel()}>
-                    <div className={styles.shadePanel}>{shadeIsMembers ? membersList : panelContent}</div>
+                <Shade stop={shadeStop} onStop={handleShadeStop} label={inChat ? 'Разговор' : 'Форма'}>
+                    <div className={styles.shadePanel}>{panelContent}</div>
                 </Shade>
             ) : (
                 <main className={styles.panel}>{panelContent}</main>
             )}
-            {/* Список кораблей поверх обычного вида. В полноэкранном его показывает шторка
-                выше, и вторая шторка тут была бы шторкой над шторкой. */}
-            {!fullscreen && (
-                <MembersSheet open={sheetOpen} onClose={() => setSheetOpen(false)}>
+            {/* Список кораблей — вторым этажом поверх всего, одинаково в обоих видах. Своей
+                ступени у него нет только в одном смысле: закрывается он совсем, а не
+                складывается в щёлку, — поэтому у него крестик и нажатие мимо. */}
+            {sheetOpen && inChat && (
+                <Shade
+                    over
+                    stop={membersStop}
+                    onStop={setMembersStop}
+                    onClose={() => setSheetOpen(false)}
+                    label="Корабли на связи"
+                >
                     {membersList}
-                </MembersSheet>
+                </Shade>
             )}
         </div>
     );

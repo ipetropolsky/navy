@@ -2,6 +2,7 @@ import { PointerEvent as ReactPointerEvent, ReactNode, useRef, useState } from '
 
 import { useIsMobile, useIsShortWindow } from '@/utils/viewport';
 
+import IconButton from '@/components/ui/IconButton';
 import { ShadeStop, nearestStop, nextStop, shadeStops, stopHeight } from '@/components/ui/shadeStops';
 
 import styles from './Shade.module.less';
@@ -26,6 +27,18 @@ interface ShadeProps {
     onStop: (stop: ShadeStop) => void;
     /** Чем шторка подписана тем, кто её не видит. */
     label: string;
+    /**
+     * Шторка поверх другой шторки: второй этаж. Такая считает ступени от окна, а не от кадра,
+     * в котором лежит, и остаётся шторкой даже там, где нижняя ложится неподвижным блоком
+     * (короткое окно). Нижняя при этом остаётся на месте со всем, что в ней набрано.
+     */
+    over?: boolean;
+    /**
+     * Закрыть шторку совсем. Пока обработчик задан, у шторки есть крестик в верхнем углу,
+     * а нажатие мимо неё закрывает, а не складывает в щёлку: у второго этажа нижней ступени
+     * нет — сложить его значит оставить на экране полоску ни с чем.
+     */
+    onClose?: () => void;
     children: ReactNode;
 }
 
@@ -48,14 +61,18 @@ const clamp = (value: number, min: number, max: number): number => Math.min(Math
  * Кто на какой ступени стоит, шторка не помнит: положение приходит снаружи. Иначе его не
  * отнять и не вернуть, а отнимать придётся — на время клавиатуры (см. App).
  *
+ * Шторок бывает две, одна поверх другой (`over`): список кораблей приезжает вторым этажом
+ * над разговором, а не подменяет его собой. Подмена стоила дорого — вместе с разговором
+ * уезжали и место прокрутки, и набранное в поле, — а второй этаж не трогает ничего.
+ *
  * В коротком окне шторки нет вовсе: ступени в нём не из чего сделать — сложенная шторка
  * занимает больше, чем остаётся сцене (см. SHORT_WINDOW_MAX_HEIGHT). Там она ложится под
  * кадром неподвижным блоком, и всё, что ниже, — ручка, затемнение, ступени — не рисуется
- * и не считается.
+ * и не считается. На второй этаж это не распространяется: ему негде лечь под кадром.
  */
-export default function Shade({ stop, onStop, label, children }: ShadeProps) {
+export default function Shade({ stop, onStop, label, over = false, onClose, children }: ShadeProps) {
     const mobile = useIsMobile();
-    const still = useIsShortWindow();
+    const shortWindow = useIsShortWindow();
     const shadeRef = useRef<HTMLElement>(null);
     // Высота, пока шторку тянут. Она стоит inline-стилем и идёт за пальцем без перехода;
     // отпустили — стиль убираем, и высоту снова задаёт класс ступени, уже с анимацией.
@@ -72,7 +89,7 @@ export default function Shade({ stop, onStop, label, children }: ShadeProps) {
     // за неё нечего: страница прокручивается целиком, свайпом по чему угодно, включая саму
     // сцену, и снап доводит её до ближайшего экрана. Риска показывает, что снизу не обрезанный
     // край страницы, а её вторая половина.
-    if (still) {
+    if (shortWindow && !over) {
         return (
             <section className={[styles.shade, styles.shadeStill].join(' ')} aria-label={label}>
                 <div className={styles.stillHandle} aria-hidden="true">
@@ -83,11 +100,17 @@ export default function Shade({ stop, onStop, label, children }: ShadeProps) {
         );
     }
 
+    /**
+     * Кадр, в котором шторка ходит: от него считаются все ступени. Для обычной это её родитель
+     * — приложение ростом в окно, — а для второго этажа само окно: лежать он может и в
+     * прокручиваемой странице короткого окна, и высота родителя там уже не про экран.
+     */
+    const frameHeight = (shade: HTMLElement): number =>
+        over ? window.innerHeight : (shade.parentElement?.getBoundingClientRect().height ?? 0);
+
     const handlePointerDown = (event: ReactPointerEvent<HTMLButtonElement>) => {
         const shade = shadeRef.current;
-        // Кадр, в котором шторка ходит, — её родитель: ступени считаются от высоты окна,
-        // а не от длины содержимого.
-        const frame = shade?.parentElement?.getBoundingClientRect().height ?? 0;
+        const frame = shade ? frameHeight(shade) : 0;
         if (!shade || !frame) {
             return;
         }
@@ -150,27 +173,34 @@ export default function Shade({ stop, onStop, label, children }: ShadeProps) {
               )
             : Number(stop === 'full');
 
-    const look = [styles.shade, STOP_CLASS[stop], dragHeight === null ? '' : styles.shadeDragging]
+    const look = [
+        styles.shade,
+        over ? styles.shadeOver : '',
+        STOP_CLASS[stop],
+        dragHeight === null ? '' : styles.shadeDragging,
+    ]
         .filter(Boolean)
         .join(' ');
 
     return (
         <>
-            {/* Затемнение, оно же «мимо шторки»: нажатие по нему опускает её в щёлку.
-                Ловит оно только пока темнит, то есть на верхней ступени. Ниже кадр под ним
-                живой — по воде выбирают место на рейде, и делают это как раз при открытой
-                наполовину шторке с формой корабля, — поэтому там затемнение выключено вовсе,
-                а не просто прозрачно.
+            {/* Затемнение, оно же «мимо шторки»: нажатие по нему опускает её в щёлку, а шторку
+                с крестиком — закрывает совсем. Ловит оно только пока темнит, то есть на верхней
+                ступени. Ниже кадр под ним живой — по воде выбирают место на рейде, и делают это
+                как раз при открытой наполовину шторке с формой корабля, — поэтому там затемнение
+                выключено вовсе, а не просто прозрачно.
+                У закрываемой шторки оно ловит на любой ступени: за ней лежит не живой кадр,
+                а другая шторка, и нажатие мимо второго этажа означает «убери его».
                 Шапка канала при этом нажимаема на любой ступени: она лежит выше затемнения
                 (см. z-index в App.module.less), и кнопка «Свернуть сцену» из-под шторки
                 достаётся по-прежнему. */}
             <button
                 type="button"
-                className={styles.backdrop}
+                className={[styles.backdrop, over ? styles.backdropOver : ''].filter(Boolean).join(' ')}
                 style={{ opacity: dim }}
-                disabled={dim === 0}
+                disabled={!onClose && dim === 0}
                 aria-label="Закрыть шторку"
-                onClick={() => onStop('peek')}
+                onClick={() => (onClose ? onClose() : onStop('peek'))}
             />
             <section
                 className={look}
@@ -190,6 +220,25 @@ export default function Shade({ stop, onStop, label, children }: ShadeProps) {
                 >
                     <span className={styles.grip} />
                 </button>
+                {/* Крестик в верхнем углу — справа от заголовка, который рисует само содержимое.
+                    Он нужен там, где шторку закрывают, а не складывают: складывать второй этаж
+                    некуда, и без крестика единственным выходом остаётся нажатие мимо — а по нему
+                    ещё надо догадаться. */}
+                {onClose && (
+                    <div className={styles.close}>
+                        <IconButton variant="muted" onClick={onClose} aria-label="Закрыть">
+                            <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+                                <path
+                                    d="M7 7l10 10M17 7L7 17"
+                                    stroke="currentColor"
+                                    strokeWidth="2"
+                                    strokeLinecap="round"
+                                    fill="none"
+                                />
+                            </svg>
+                        </IconButton>
+                    </div>
+                )}
                 <div className={styles.body}>{children}</div>
             </section>
         </>

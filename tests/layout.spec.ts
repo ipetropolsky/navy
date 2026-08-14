@@ -1102,8 +1102,21 @@ test('на форме настройки корабля разворот раз�
 // Именно ручка: слово «шторку» стоит ещё и на затемнении, которым её закрывают нажатием мимо.
 const SHADE_HANDLE = /(Поднять|Опустить) шторку/;
 
-const shadeHeight = async (page: Page): Promise<number> => {
-    const box = await page.getByRole('region').first().boundingBox();
+/**
+ * Подпись шторки со списком кораблей. Шторок на экране бывает две — разговор и приехавший
+ * поверх него список, — и всё, что ниже, надо уметь спросить у нужной. Без имени берётся
+ * первая по разметке, а это всегда нижняя: список рисуется после неё.
+ */
+const MEMBERS_SHADE = 'Корабли на связи';
+
+const shadeRegion = (page: Page, name?: string) =>
+    name ? page.getByRole('region', { name }) : page.getByRole('region').first();
+
+/** Ручка нужной шторки: у второго этажа она своя. */
+const shadeHandle = (page: Page, name?: string) => shadeRegion(page, name).getByRole('button', { name: SHADE_HANDLE });
+
+const shadeHeight = async (page: Page, name?: string): Promise<number> => {
+    const box = await shadeRegion(page, name).boundingBox();
     return Math.round(box!.height);
 };
 
@@ -1130,8 +1143,8 @@ const dragShade = async (page: Page, by: number): Promise<void> => {
     await page.mouse.up();
 };
 
-const expectShade = (page: Page, height: number, message: string) =>
-    expect.poll(() => shadeHeight(page), { message }).toBe(height);
+const expectShade = (page: Page, height: number, message: string, name?: string) =>
+    expect.poll(() => shadeHeight(page, name), { message }).toBe(height);
 
 test('шторка ходит по ступеням от нажатия на ручку, и лестниц этих две', async ({ page }) => {
     await openChannel(page, DEMO, ALBATROS);
@@ -1237,15 +1250,19 @@ test('на широком окне шторка держит колонку, а 
     expect(Math.round(box.width), 'шторка растянулась вслед за кадром').toBe(COLUMN_WIDTH);
     expect(Math.round(box.x + box.width / 2), 'шторка встала не по центру кадра').toBe(window.width / 2);
 
-    // Список кораблей — там кнопки как раз прилипающие. Открывается он сразу до верха:
-    // на широком окне следующая ступень за сложенной — она же и последняя.
+    // Список кораблей — там кнопки как раз прилипающие. Приезжает он вторым этажом и берёт
+    // ту же ступень, на которой стоит шторка под ним: сколько места отдать содержимому,
+    // человек уже выбрал (см. openMembers в App).
     await openSheet(page);
-    await expectShade(page, stops.full, 'список кораблей открылся не до верха');
-    expect(await actionsPosition(page), 'на верхней ступени кнопки не прилипли').toBe('sticky');
-
-    await page.getByRole('button', { name: SHADE_HANDLE }).click();
-    await expectShade(page, stops.peek, 'шторка не сложилась обратно');
+    await expectShade(page, stops.peek, 'список кораблей переставил ступень под собой', MEMBERS_SHADE);
     expect(await actionsPosition(page), 'в сложенной шторке кнопки отлипли').toBe('sticky');
+
+    // Ступени у второго этажа те же, и ходит он по ним своей ручкой.
+    await shadeHandle(page, MEMBERS_SHADE).click();
+    await expectShade(page, stops.full, 'список кораблей не дошёл до верха', MEMBERS_SHADE);
+    expect(await actionsPosition(page), 'на верхней ступени кнопки не прилипли').toBe('sticky');
+    // Нижняя всё это время стоит там, где стояла.
+    await expectShade(page, stops.peek, 'список утащил за собой шторку под ним');
 });
 
 /**
@@ -1261,14 +1278,14 @@ test('в телефонной щёлке кнопки не липнут, а с �
     const stops = shadeStops(page.viewportSize()!.height, true);
     await expectShade(page, stops.peek, 'развёрнутая сцена открылась не со щёлкой');
 
+    // Список приезжает на ту же ступень, что и шторка под ним, — то есть в щёлку.
     await openSheet(page);
-    await expectShade(page, stops.half, 'список кораблей открылся не на половине');
-    expect(await actionsPosition(page), 'на половине кнопки не прилипли').toBe('sticky');
-
-    await page.getByRole('button', { name: SHADE_HANDLE }).click();
-    await page.getByRole('button', { name: SHADE_HANDLE }).click();
-    await expectShade(page, stops.peek, 'шторка не вернулась в щёлку');
+    await expectShade(page, stops.peek, 'список кораблей открылся не в щёлку', MEMBERS_SHADE);
     expect(await actionsPosition(page), 'в щёлке кнопки всё равно прилипли').toBe('static');
+
+    await shadeHandle(page, MEMBERS_SHADE).click();
+    await expectShade(page, stops.half, 'список кораблей не поднялся на половину', MEMBERS_SHADE);
+    expect(await actionsPosition(page), 'на половине кнопки не прилипли').toBe('sticky');
 });
 
 /**
@@ -1293,6 +1310,59 @@ test('нажатие мимо шторки складывает её, а сло�
     await expectShade(page, stops.full, 'шторка не дошла до верха');
     await page.mouse.click(aside.x, aside.y);
     await expectShade(page, stops.peek, 'нажатие мимо шторки не сложило её обратно');
+});
+
+/**
+ * Список кораблей приезжает вторым этажом, а не встаёт на место разговора. Прежде он подменял
+ * собой содержимое шторки, и разговор при этом собирался заново: набранное в поле, место
+ * прокрутки ленты и выделение уезжали вместе с ним.
+ *
+ * Проверяется поэтому не «текст на месте» (его можно было бы и сохранить снаружи), а что поле
+ * — тот же самый узел: всё остальное живёт в нём и уцелеет вместе с ним.
+ */
+test('открытый список кораблей не трогает разговор под собой', async ({ page }) => {
+    await openChannel(page, DEMO, ALBATROS);
+    await page.getByRole('button', { name: 'Развернуть сцену' }).click();
+
+    const input = page.getByPlaceholder('Сообщение');
+    await input.fill('недописанное');
+    // Метка прямо на узле: заново созданное такое же поле её не унаследует.
+    await input.evaluate((node) => node.setAttribute('data-probe', 'тот же самый'));
+
+    await openSheet(page);
+    await expect(page.getByRole('button', { name: 'Настроить корабль' }), 'список не открылся').toBeVisible();
+    // Кнопка в шапке на время списка меняется на облачко разговора: она же и возвращает назад.
+    await expect(
+        page.getByRole('button', { name: 'Корабли на связи' }),
+        'кнопка списка осталась кнопкой списка'
+    ).toHaveCount(0);
+    await page.getByRole('button', { name: 'Вернуться к разговору' }).click();
+
+    await expect(input, 'разговор пересобрался: поле стало другим узлом').toHaveAttribute('data-probe', 'тот же самый');
+    await expect(input, 'набранное в поле пропало').toHaveValue('недописанное');
+});
+
+/**
+ * Второй этаж закрывают, а не складывают: щёлки у него нет — сложенный список кораблей был бы
+ * полоской ни с чем поверх разговора. Выходов из него два: крестик в верхнем углу и нажатие
+ * мимо. Мимо здесь работает с любой ступени, в отличие от нижней шторки: за списком лежит
+ * не живой кадр с рейдом, а разговор, и нажатие по нему означает «убери список».
+ */
+test('список кораблей закрывают крестиком и нажатием мимо, а шторка под ним стоит на месте', async ({ page }) => {
+    await openChannel(page, DEMO, ALBATROS);
+    await page.getByRole('button', { name: 'Развернуть сцену' }).click();
+    const stops = shadeStops(page.viewportSize()!.height, false);
+
+    await openSheet(page);
+    await shadeRegion(page, MEMBERS_SHADE).getByRole('button', { name: 'Закрыть', exact: true }).click();
+    await expect(shadeRegion(page, MEMBERS_SHADE), 'крестик не закрыл список').toHaveCount(0);
+
+    // Ступень тут сложенная — та самая, с которой у нижней шторки нажатие мимо ничего не делает.
+    await openSheet(page);
+    await expectShade(page, stops.peek, 'список открылся не на ступени шторки под ним', MEMBERS_SHADE);
+    await page.mouse.click(60, 300);
+    await expect(shadeRegion(page, MEMBERS_SHADE), 'нажатие мимо не закрыло список').toHaveCount(0);
+    await expectShade(page, stops.peek, 'закрытый список утащил за собой шторку под ним');
 });
 
 /**
@@ -1578,9 +1648,10 @@ test.describe('короткое окно', () => {
             .toBe(SHORT_WINDOW_PEEK);
     });
 
-    // Список кораблей в коротком окне занимает место разговора в той же неподвижной шторке:
-    // ступеней, на которые его можно было бы поднять, там нет.
-    test('список кораблей открывается на месте разговора', async ({ page }) => {
+    // Список кораблей приезжает шторкой и здесь: лечь под кадром вторым этажом ему негде,
+    // а разговор он не подменяет — тот остаётся на своём месте со всем, что в нём набрано.
+    // Ступени второй этаж считает от окна, а не от страницы в два экрана: она тут длиннее.
+    test('список кораблей приезжает поверх неподвижной шторки, не сдвигая её', async ({ page }) => {
         await openChannel(page, DEMO, ALBATROS);
         await page.getByRole('button', { name: 'Развернуть сцену' }).click();
         await openSheet(page);
@@ -1588,5 +1659,10 @@ test.describe('короткое окно', () => {
         expect(await shadeTop(page), 'список сдвинул неподвижную шторку').toBe(
             page.viewportSize()!.height - SHORT_WINDOW_PEEK
         );
+
+        const list = (await shadeRegion(page, MEMBERS_SHADE).boundingBox())!;
+        const window = page.viewportSize()!;
+        expect(Math.round(list.y + list.height), 'список встал не по нижней кромке окна').toBe(window.height);
+        expect(list.height, 'список отмерил ступень от страницы, а не от окна').toBeLessThanOrEqual(window.height);
     });
 });
