@@ -59,10 +59,16 @@ test('реплика уходит и привязывается ответом',
     }, 'лента так и не показала, на что отвечает').toPass({ timeout: 20_000 });
     await send(page, 'Идём следом');
 
+    // Ждём, а не читаем сразу: запись в состояние идёт через общую очередь (см. exclusive
+    // в localBackend), и к возврату из send реплика ещё в пути.
+    await expect
+        .poll(async () => (await readState(page)).channels['ch-demo'].messages.at(-1)!.text, {
+            message: 'реплика не дошла до состояния',
+        })
+        .toBe('Идём следом');
     const state = await readState(page);
     const messages = state.channels['ch-demo'].messages;
     const reply = messages.at(-1)!;
-    expect(reply.text).toBe('Идём следом');
     expect(reply.thread?.messageId).toBe(messages[0].messageId);
     expect(reply.author.memberId).toBe(ALBATROS);
 });
@@ -264,4 +270,116 @@ test('лента держится низа, пока её не отмотали,
             message: 'после своей реплики лента не вернулась к низу',
         })
         .toBeLessThan(24);
+});
+
+/**
+ * Две вкладки, переставляющие корабли в один и тот же миг.
+ *
+ * Состояние «сервера» лежит одним JSON-ом на весь браузер, и всякая перестановка — это
+ * «прочитал целиком, поменял, записал целиком». Пока вкладка одна, это неделимо: JS однопоточен.
+ * Вкладок две — и они читают одно и то же состояние, а записывают каждая своё: записавшая второй
+ * стирает чужую перестановку. Место на рейде обе выбирают по своему снимку, обе видят точку
+ * свободной и обе на неё встают. В кадре это и выглядит как пропажа корабля: один стоит
+ * на другом, а после перезагрузки уезжает туда, откуда уходил.
+ *
+ * Чинится общей очередью на запись (Web Locks, см. exclusive в localBackend), и проверяется
+ * это здесь: с двух вкладок разом — сперва на разные места, потом на одно.
+ */
+
+/** Открыть форму настройки своего корабля: оттуда и переставляют. */
+const openShipForm = async (page: Page): Promise<void> => {
+    await openSheet(page);
+    await page.getByRole('button', { name: 'Настроить корабль' }).click();
+    await expect(page.locator('[data-berth]').first()).toBeVisible();
+};
+
+/** Свободные места, какими их видит эта вкладка: они и предлагаются к выбору. */
+const freeBerths = (page: Page): Promise<string[]> =>
+    page
+        .locator('[data-berth][aria-pressed="false"]')
+        .evaluateAll((nodes) => nodes.map((node) => (node as HTMLElement).dataset.berth ?? ''));
+
+/** Где корабль стоит по состоянию «сервера». */
+const berthOf = async (page: Page, memberId: string): Promise<string> => {
+    const member = (await readState(page)).channels['ch-demo'].members.find((item) => item.memberId === memberId);
+    return member ? `${member.place.slot}-${member.place.corridor}` : 'нет в канале';
+};
+
+/** Место, которое вкладка считает своим: оно отмечено в форме нажатым. */
+const ownBerth = async (page: Page): Promise<string> =>
+    (await page.locator('[data-berth][aria-pressed="true"]').getAttribute('data-berth')) ?? 'ничего не выбрано';
+
+test('перестановка из соседней вкладки не затирает свою', async ({ context }) => {
+    const mine = await context.newPage();
+    const theirs = await context.newPage();
+    await openChannel(mine, DEMO, ALBATROS);
+    await openChannel(theirs, DEMO, VYMPEL);
+
+    await openShipForm(mine);
+    await openShipForm(theirs);
+    const [here] = await freeBerths(mine);
+    // Второе место берём подальше от первого: рядом с занявшим соседний корабль может уже
+    // и не поместиться, и тогда непонятно, чем кончилось — теснотой или гонкой.
+    const line = Number(here.split('-')[0]);
+    const there = (await freeBerths(theirs)).find((berth) => Math.abs(Number(berth.split('-')[0]) - line) > 1)!;
+
+    await mine.locator(`[data-berth="${here}"]`).click();
+    await theirs.locator(`[data-berth="${there}"]`).click();
+    await Promise.all([mine.locator('button[type=submit]').click(), theirs.locator('button[type=submit]').click()]);
+
+    // Оба места свободны и оба разные — значит каждый корабль встал ровно туда, куда просили.
+    // Терялась тут именно первая из двух записей: она уходила в состояние и тут же затиралась.
+    await expect
+        .poll(() => berthOf(mine, ALBATROS), { message: 'свою перестановку затёрла соседняя вкладка' })
+        .toBe(here);
+    expect(await berthOf(mine, VYMPEL), 'перестановка из соседней вкладки не доехала').toBe(there);
+    expect((await readState(mine)).channels['ch-demo'].members, 'кораблей в канале стало меньше').toHaveLength(3);
+});
+
+test('два корабля не встают на одно место, даже если выбрали его разом', async ({ context }) => {
+    const mine = await context.newPage();
+    const theirs = await context.newPage();
+    await openChannel(mine, DEMO, ALBATROS);
+    await openChannel(theirs, DEMO, VYMPEL);
+
+    await openShipForm(mine);
+    await openShipForm(theirs);
+    const free = await freeBerths(theirs);
+    const shared = (await freeBerths(mine)).find((berth) => free.includes(berth))!;
+
+    await mine.locator(`[data-berth="${shared}"]`).click();
+    await theirs.locator(`[data-berth="${shared}"]`).click();
+    await Promise.all([mine.locator('button[type=submit]').click(), theirs.locator('button[type=submit]').click()]);
+
+    // Место одно, а желающих двое: достаться оно должно кому-то одному, второму — другое.
+    await expect
+        .poll(
+            async () => {
+                const members = (await readState(mine)).channels['ch-demo'].members;
+                return members.map((member) => `${member.place.slot}-${member.place.corridor}`).sort();
+            },
+            { message: 'на рейде так и не стало трёх разных мест' }
+        )
+        .toHaveLength(3);
+    const berths = (await readState(mine)).channels['ch-demo'].members.map(
+        (member) => `${member.place.slot}-${member.place.corridor}`
+    );
+    expect(new Set(berths).size, 'два корабля встали на одно место').toBe(3);
+    expect(
+        berths.filter((berth) => berth === shared),
+        'место досталось не одному'
+    ).toHaveLength(1);
+
+    // И каждая вкладка держит своим то место, которое ей и досталось. До общей очереди обе
+    // оставались при своём выборе — том самом спорном, — и вкладка рисовала свой корабль там,
+    // где на деле уже стоял чужой.
+    await openShipForm(mine);
+    await openShipForm(theirs);
+    const ownMine = await ownBerth(mine);
+    const ownTheirs = await ownBerth(theirs);
+    expect(ownMine, 'вкладка держит своим место, которое ей не досталось').toBe(await berthOf(mine, ALBATROS));
+    expect(ownTheirs, 'соседняя вкладка держит своим место, которое ей не досталось').toBe(
+        await berthOf(theirs, VYMPEL)
+    );
+    expect(ownMine, 'обе вкладки считают своим одно и то же место').not.toBe(ownTheirs);
 });

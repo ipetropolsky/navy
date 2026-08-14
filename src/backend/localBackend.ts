@@ -143,17 +143,58 @@ const isSlugFree = (state: ServerState, slug: string, exceptId?: string): boolea
         (snapshot) => snapshot.channel.slug === slug && snapshot.channel.channelId !== exceptId
     );
 
-/** Прочитал — поменял — записал одним движением: между вкладками так теряется меньше. */
-const mutate = <T>(channelId: string, change: (channel: ChannelSnapshot) => T): T => {
-    const state = readState();
-    const channel = state.channels[channelId];
-    if (!channel) {
-        throw new ChannelError('channel-not-found', 'Канал не найден');
+/**
+ * Имя общей очереди на изменение состояния. Одно на все вкладки — они и стоят в ней друг
+ * за другом.
+ */
+const STATE_LOCK = 'kilvater.state';
+
+/**
+ * Выполнить, пока никто другой не пишет. Это и есть то, чего у эмулятора не было: настоящий
+ * сервер обрабатывает запросы по очереди, а здесь их обрабатывают вкладки, и каждая — у себя.
+ *
+ * Без очереди выходила потерянная запись, и она была видна глазами. Состояние лежит одним
+ * JSON-ом, и всякое изменение — это «прочитал целиком, поменял, записал целиком». Две вкладки,
+ * переставляющие корабли в один и тот же миг, читают одно и то же состояние, а записывают
+ * каждая своё: та, что записала второй, стирает чужую перестановку. Хуже того, место на рейде
+ * обе выбирают по своему снимку — обе видят точку свободной и обе на неё встают. В кадре это
+ * и выглядит как пропажа: два корабля стоят на одном месте, ближний закрывает дальнего.
+ *
+ * Web Locks — межвкладочный замок, ровно для этого и заведённый: очередь у него общая на
+ * происхождение, и пока один держит замок, остальные ждут. Внутрь замка убрано всё решение
+ * целиком — и чтение состояния, и проверки, и выбор места, — иначе вкладка решала бы по
+ * снимку, снятому до своей очереди.
+ *
+ * Замка может не быть (старый браузер, jsdom в юнит-проверках) — тогда работаем без него:
+ * без очереди, но так же, как раньше. Одной вкладке она и не нужна: JS однопоточен,
+ * и «прочитал — поменял — записал» внутри вкладки и так неделимо.
+ */
+const exclusive = <T>(run: () => T): Promise<T> => {
+    const locks = typeof navigator === 'undefined' ? undefined : navigator.locks;
+    if (!locks) {
+        return Promise.resolve().then(run);
     }
-    const result = change(channel);
-    writeState(state);
-    return result;
+    return locks.request(STATE_LOCK, run);
 };
+
+/** Прочитал — поменял — записал, стоя в общей очереди. Бросил — не записал вовсе. */
+const mutateState = <T>(change: (state: ServerState) => T): Promise<T> =>
+    exclusive(() => {
+        const state = readState();
+        const result = change(state);
+        writeState(state);
+        return result;
+    });
+
+/** То же самое, но про один канал: его отсутствие — общая для всех ошибка. */
+const mutate = <T>(channelId: string, change: (channel: ChannelSnapshot) => T): Promise<T> =>
+    mutateState((state) => {
+        const channel = state.channels[channelId];
+        if (!channel) {
+            throw new ChannelError('channel-not-found', 'Канал не найден');
+        }
+        return change(channel);
+    });
 
 export function createLocalBackend(): ChannelBackend {
     // Чтение состояния при старте заодно кладёт демо-канал в хранилище, если его там нет.
@@ -184,18 +225,10 @@ export function createLocalBackend(): ChannelBackend {
     };
 
     /** Записать в ленту строчку от самого канала и разослать её как обычное сообщение. */
-    const postNotice = (channelId: string, memberId: string, text: string, sentAt: number): void => {
+    const postNotice = async (channelId: string, memberId: string, text: string, sentAt: number): Promise<void> => {
         const notice: Message = { messageId: randomId('msg'), author: { memberId }, kind: 'system', text, sentAt };
-        mutate(channelId, (current) => current.messages.push(notice));
+        await mutate(channelId, (current) => current.messages.push(notice));
         emit(channelId, { type: 'message-added', message: notice });
-    };
-
-    const requireChannel = (channelId: string): ChannelSnapshot => {
-        const found = readState().channels[channelId];
-        if (!found) {
-            throw new ChannelError('channel-not-found', 'Канал не найден');
-        }
-        return found;
     };
 
     /** Позывной и бортовой номер должны быть свободны: иначе в ленте не различить, кто говорит. */
@@ -216,9 +249,18 @@ export function createLocalBackend(): ChannelBackend {
      * Старшинство переходит к тому, кто дольше всех на рейде. Оставлять канал без старшего
      * нельзя: высаживать тогда некому, и первый же ушедший запирал бы правило навсегда.
      * Ушли все — старшего снова нет, и им станет тот, кто придёт следующим.
+     *
+     * Проверки высадки приходят сюда отдельным доводом и выполняются в той же очереди, что
+     * и само вычёркивание: спрошенное до очереди к моменту записи успевает устареть — старший
+     * мог смениться, а высаживаемый уйти сам.
      */
-    const dropMember = (channelId: string, memberId: string): Member | null => {
-        const { gone, channel } = mutate(channelId, (snapshot) => {
+    const dropMember = async (
+        channelId: string,
+        memberId: string,
+        check?: (snapshot: ChannelSnapshot) => void
+    ): Promise<Member | null> => {
+        const { gone, channel } = await mutate(channelId, (snapshot) => {
+            check?.(snapshot);
             const member = snapshot.members.find((item) => item.memberId === memberId) ?? null;
             snapshot.members = snapshot.members.filter((item) => item.memberId !== memberId);
             if (snapshot.channel.owner?.memberId !== memberId) {
@@ -242,34 +284,40 @@ export function createLocalBackend(): ChannelBackend {
             delay(Object.values(readState().channels).find((snapshot) => snapshot.channel.slug === slug) ?? null),
 
         createChannel: async ({ channel: { slug, title } }) => {
-            const state = readState();
             if (!isValidSlug(slug)) {
                 throw new ChannelError('slug-invalid', 'В адресе только латинские буквы, цифры и дефис');
             }
-            if (!isSlugFree(state, slug)) {
-                throw new ChannelError('slug-taken', 'Канал с таким адресом уже есть');
-            }
-            const channel: Channel = {
-                channelId: randomId('ch'),
-                slug,
-                title: title.trim(),
-                createdAt: Date.now(),
-            };
-            state.channels[channel.channelId] = { channel, members: [], messages: [] };
-            writeState(state);
+            // Свободен ли адрес, спрашиваем в той же очереди, в которой канал и заводится:
+            // между вопросом и записью адрес мог занять кто-то из соседней вкладки.
+            const channel = await mutateState((state) => {
+                if (!isSlugFree(state, slug)) {
+                    throw new ChannelError('slug-taken', 'Канал с таким адресом уже есть');
+                }
+                const created: Channel = {
+                    channelId: randomId('ch'),
+                    slug,
+                    title: title.trim(),
+                    createdAt: Date.now(),
+                };
+                state.channels[created.channelId] = { channel: created, members: [], messages: [] };
+                return created;
+            });
             emit(channel.channelId, { type: 'channel-created', channel });
             return delay({ channel });
         },
 
         updateChannel: async ({ channelId, channel: { slug, title } }) => {
-            const state = readState();
             if (!isValidSlug(slug)) {
                 throw new ChannelError('slug-invalid', 'В адресе только латинские буквы, цифры и дефис');
             }
-            if (!isSlugFree(state, slug, channelId)) {
-                throw new ChannelError('slug-taken', 'Канал с таким адресом уже есть');
-            }
-            const updated = mutate(channelId, (snapshot) => {
+            const updated = await mutateState((state) => {
+                if (!isSlugFree(state, slug, channelId)) {
+                    throw new ChannelError('slug-taken', 'Канал с таким адресом уже есть');
+                }
+                const snapshot = state.channels[channelId];
+                if (!snapshot) {
+                    throw new ChannelError('channel-not-found', 'Канал не найден');
+                }
                 snapshot.channel.slug = slug;
                 snapshot.channel.title = title.trim();
                 return { ...snapshot.channel };
@@ -279,36 +327,39 @@ export function createLocalBackend(): ChannelBackend {
         },
 
         join: async ({ channelId, member: draft }) => {
-            const snapshot = requireChannel(channelId);
-            if (snapshot.members.length >= MAX_MEMBERS) {
-                throw new ChannelError('channel-full', 'В канале уже пять кораблей');
-            }
-            checkDraftIsFree(snapshot, draft);
-            // Место на рейде назначаем здесь, а не в сцене: тогда оно уедет вместе с участником
-            // во все вкладки, и корабль у всех окажется в одном и том же месте. Выбранное
-            // в форме место — пожелание: занято, значит корабль встанет на свободное.
-            const place = placeShip(draft.shipKind, snapshot.members, draft.berth, draft.facing);
-            if (!place) {
-                throw new ChannelError('channel-full', 'На рейде не осталось свободного места');
-            }
-            const member: Member = {
-                memberId: randomId('m'),
-                name: draft.name.trim(),
-                hullNumber: draft.hullNumber.trim(),
-                shipKind: draft.shipKind,
-                color: draft.color,
-                place,
-                joinedAt: Date.now(),
-            };
-            // Первый вставший на рейд становится старшим: канал заводят пустым, и до этого
-            // мига отвечать за него некому.
-            const channel = mutate(channelId, (current) => {
-                current.members.push(member);
-                if (current.channel.owner) {
-                    return null;
+            // Всё решение целиком — в одной очереди: и сколько кораблей в канале, и свободен ли
+            // позывной, и какое место достанется. Спрошенное до очереди устаревает к записи,
+            // и на рейде от этого появлялись два корабля на одной точке.
+            const { member, channel } = await mutate(channelId, (current) => {
+                if (current.members.length >= MAX_MEMBERS) {
+                    throw new ChannelError('channel-full', 'В канале уже пять кораблей');
                 }
-                current.channel.owner = { memberId: member.memberId };
-                return { ...current.channel };
+                checkDraftIsFree(current, draft);
+                // Место на рейде назначаем здесь, а не в сцене: тогда оно уедет вместе
+                // с участником во все вкладки, и корабль у всех окажется в одном и том же месте.
+                // Выбранное в форме место — пожелание: занято, значит корабль встанет
+                // на свободное.
+                const place = placeShip(draft.shipKind, current.members, draft.berth, draft.facing);
+                if (!place) {
+                    throw new ChannelError('channel-full', 'На рейде не осталось свободного места');
+                }
+                const joined: Member = {
+                    memberId: randomId('m'),
+                    name: draft.name.trim(),
+                    hullNumber: draft.hullNumber.trim(),
+                    shipKind: draft.shipKind,
+                    color: draft.color,
+                    place,
+                    joinedAt: Date.now(),
+                };
+                current.members.push(joined);
+                // Первый вставший на рейд становится старшим: канал заводят пустым, и до этого
+                // мига отвечать за него некому.
+                if (current.channel.owner) {
+                    return { member: joined, channel: null };
+                }
+                current.channel.owner = { memberId: joined.memberId };
+                return { member: joined, channel: { ...current.channel } };
             });
             emit(channelId, { type: 'member-joined', member });
             if (channel) {
@@ -317,14 +368,14 @@ export function createLocalBackend(): ChannelBackend {
             // Вход отмечается в ленте: корабль заплывает в кадр молча, и без строчки в чате
             // непонятно, кто пришёл. Текст складывает бэкенд — тогда он останется прежним,
             // даже если корабль потом сменит позывной.
-            postNotice(channelId, member.memberId, `${shipTitle(member)} встал на рейд`, member.joinedAt);
+            await postNotice(channelId, member.memberId, `${shipTitle(member)} встал на рейд`, member.joinedAt);
             return delay({ member });
         },
 
         updateMember: async ({ channelId, memberId, member: draft }) => {
-            checkDraftIsFree(requireChannel(channelId), draft, memberId);
             let before: Member | null = null;
-            const updated = mutate(channelId, (current) => {
+            const updated = await mutate(channelId, (current) => {
+                checkDraftIsFree(current, draft, memberId);
                 const member = current.members.find((item) => item.memberId === memberId);
                 if (!member) {
                     throw new ChannelError('member-not-found', 'Такого корабля в канале нет');
@@ -357,7 +408,7 @@ export function createLocalBackend(): ChannelBackend {
             emit(channelId, { type: 'member-updated', member: updated });
             const text = before && refitNotice(before, updated);
             if (text) {
-                postNotice(channelId, updated.memberId, text, Date.now());
+                await postNotice(channelId, updated.memberId, text, Date.now());
             }
             return delay({ member: updated });
         },
@@ -365,31 +416,31 @@ export function createLocalBackend(): ChannelBackend {
         leave: async ({ channelId, memberId }) => {
             // Кем корабль был, узнаём до того, как вычеркнем его: после вычёркивания
             // называть в строчке будет нечего.
-            const gone = dropMember(channelId, memberId);
+            const gone = await dropMember(channelId, memberId);
             if (gone) {
                 // «Сняться с рейда» — это и значит покинуть якорную стоянку: подняли якорь
                 // и пошли. Ровно то, что происходит в кадре, и ровно так об этом и говорят.
-                postNotice(channelId, memberId, `${shipTitle(gone)} снялся с рейда`, Date.now());
+                await postNotice(channelId, memberId, `${shipTitle(gone)} снялся с рейда`, Date.now());
             }
             return delay(undefined);
         },
 
         kick: async ({ channelId, memberId, member: { memberId: targetId } }) => {
-            const snapshot = requireChannel(channelId);
-            if (snapshot.channel.owner?.memberId !== memberId) {
-                throw new ChannelError('not-senior', 'Высадить корабль может только старший на рейде');
-            }
-            if (targetId === memberId) {
-                throw new ChannelError('not-senior', 'Старший снимается с рейда сам, а не высаживает себя');
-            }
-            if (!snapshot.members.some((item) => item.memberId === targetId)) {
-                throw new ChannelError('member-not-found', 'Такого корабля в канале нет');
-            }
-            const gone = dropMember(channelId, targetId);
+            const gone = await dropMember(channelId, targetId, (snapshot) => {
+                if (snapshot.channel.owner?.memberId !== memberId) {
+                    throw new ChannelError('not-senior', 'Высадить корабль может только старший на рейде');
+                }
+                if (targetId === memberId) {
+                    throw new ChannelError('not-senior', 'Старший снимается с рейда сам, а не высаживает себя');
+                }
+                if (!snapshot.members.some((item) => item.memberId === targetId)) {
+                    throw new ChannelError('member-not-found', 'Такого корабля в канале нет');
+                }
+            });
             if (gone) {
                 // Строчка от старшего, а не от высаженного: распорядился он, и по цвету
                 // позывного в ленте это видно.
-                postNotice(channelId, memberId, `${shipTitle(gone)} выдворен с рейда`, Date.now());
+                await postNotice(channelId, memberId, `${shipTitle(gone)} выдворен с рейда`, Date.now());
             }
             return delay(undefined);
         },
@@ -410,7 +461,7 @@ export function createLocalBackend(): ChannelBackend {
                 thread: draft.thread,
                 sentAt: Date.now(),
             };
-            mutate(channelId, (snapshot) => snapshot.messages.push(message));
+            await mutate(channelId, (snapshot) => snapshot.messages.push(message));
             emit(channelId, { type: 'message-added', message });
             return delay({ message });
         },
