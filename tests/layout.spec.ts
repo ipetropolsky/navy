@@ -1634,6 +1634,128 @@ test('снимок неба накрывает небо целиком, а не 
     }, Promise.resolve());
 });
 
+// Те же числа, что и в стилях сцены: @sky-drop, @sky-image-drop, @moon-above, @moon-top-mobile
+// и доля кадра, на которой месяц стоит в развёрнутой сцене (см. --moon-above в .sceneFull).
+// Достать их оттуда нечем — проверки стилей не собирают, — поэтому они здесь повторены.
+const SKY_DROP = 30;
+const SKY_IMAGE_DROP = 0.1;
+const MOON_ABOVE = 70;
+const MOON_ABOVE_FULL_SHARE = 0.17;
+const MOON_TOP_MOBILE = 31;
+
+/**
+ * Всё, что стоит на небе, — мерками от горизонта, px. Мерка одна на всех, потому что опора
+ * одна: небо привязано к воде и, сжимаясь, обрезается сверху, — и звёзды, и месяц, и облака
+ * держатся линии воды, а не верхней кромки кадра.
+ */
+const skyFrame = (page: Page) =>
+    page.evaluate(() => {
+        const box = (selector: string): DOMRect => document.querySelector(selector)!.getBoundingClientRect();
+        const scene = box('[class*="scene_"]');
+        const horizon = box('[class*="sea_"]').top;
+        const tile = box('[class*="skyTile"]');
+        const moon = box('[class*="moon_"]');
+        return {
+            sceneHeight: Math.round(scene.height),
+            /** Насколько низ снимка неба ушёл ниже горизонта: снимок прижат к нему и опущен. */
+            photoBelow: Math.round(tile.bottom - horizon),
+            photoHeight: Math.round(tile.height),
+            moonTop: Math.round(moon.top - scene.top),
+            moonAbove: Math.round(horizon - moon.bottom),
+            cloudFar: Math.round(horizon - box('[class*="cloudFar"]').bottom),
+            cloudNear: Math.round(horizon - box('[class*="cloudNear"]').bottom),
+        };
+    });
+
+/** Кадр заданного размера, свёрнутый или развёрнутый, — и замер неба в нём. */
+const skyIn = async (page: Page, frame: { width: number; height: number }, full: boolean) => {
+    await page.setViewportSize(frame);
+    const switcher = page.getByRole('button', { name: full ? 'Развернуть сцену' : 'Свернуть сцену' });
+    if (await switcher.isVisible()) {
+        await switcher.click();
+    }
+    await expect(page.getByRole('button', { name: full ? 'Свернуть сцену' : 'Развернуть сцену' })).toBeVisible();
+    // Горизонт едет @expand-seconds, и всё, что от него отмерено, едет вместе с ним: замер
+    // посреди перехода поймал бы небо не на своём месте.
+    await page.waitForTimeout(700);
+    return skyFrame(page);
+};
+
+/** Четыре раскладки разом: десктоп и телефон, свёрнутая сцена и развёрнутая. */
+const skyFrames = async (page: Page) => {
+    await page.setViewportSize({ width: 1200, height: 900 });
+    await openChannel(page, DEMO, ALBATROS);
+    // Цепочкой, а не циклом: окно одно, раскладки примеряются по очереди.
+    const desk = await skyIn(page, { width: 1200, height: 900 }, false);
+    const deskFull = await skyIn(page, { width: 1200, height: 900 }, true);
+    const phone = await skyIn(page, { width: 390, height: 844 }, false);
+    const phoneFull = await skyIn(page, { width: 390, height: 844 }, true);
+    return { desk, deskFull, phone, phoneFull };
+};
+
+/**
+ * Небо опущено к воде — и месяц вместе с ним: он стоит на этом же небе, и уехать от него
+ * не должен. Свёрнутый телефонный кадр не в счёт: неба в нём полоса в 60–135px, тридцать
+ * пикселей съели бы добрую его половину, а месяц там и вовсе отмерен не от горизонта,
+ * а от строки состояния канала.
+ *
+ * Проверяется отношение, а не место снимка в кадре: низ его лежит ниже горизонта на свою
+ * десятую долю (запас, из-за которого у самой воды остаётся дымка) плюс общий сдвиг. Само
+ * место в кадре ни о чём не говорит — высота снимка считается по двум разным правилам,
+ * см. --sky-tile.
+ */
+test('небо и месяц опущены к воде, а на свёрнутом телефоне остаются на месте', async ({ page }) => {
+    const frames = await skyFrames(page);
+
+    const expectDropped = (frame: Awaited<ReturnType<typeof skyFrame>>, drop: number, label: string): void => {
+        const expected = frame.photoHeight * SKY_IMAGE_DROP + drop;
+        // Пиксель допуска: и высота снимка, и его кромка меряются с дробями.
+        expect(Math.abs(frame.photoBelow - expected), `${label}: небо стоит не на своей высоте`).toBeLessThanOrEqual(1);
+    };
+
+    expectDropped(frames.desk, SKY_DROP, 'десктоп');
+    expectDropped(frames.deskFull, SKY_DROP, 'десктоп во весь экран');
+    expectDropped(frames.phoneFull, SKY_DROP, 'телефон во весь экран');
+    expectDropped(frames.phone, 0, 'телефон, свёрнутая сцена');
+
+    expect(frames.desk.moonAbove, 'месяц на десктопе стоит не на своей высоте').toBe(MOON_ABOVE);
+    // В развёрнутом кадре высота месяца — доля самого кадра: неба в нём вдоволь, и пиксельная
+    // мерка увела бы месяц к самой воде.
+    for (const frame of [frames.deskFull, frames.phoneFull]) {
+        const expected = frame.sceneHeight * MOON_ABOVE_FULL_SHARE;
+        expect(Math.abs(frame.moonAbove - expected), 'месяц в развёрнутом кадре не на своей доле').toBeLessThanOrEqual(
+            1
+        );
+    }
+    expect(frames.phone.moonTop, 'месяц на телефоне сошёл со строки состояния').toBe(MOON_TOP_MOBILE);
+});
+
+/**
+ * Облака стоят на своей высоте над горизонтом и за опущенным небом не идут: облако — это
+ * не рисунок звёзд, а воздух над водой. Дальнее и вовсе лежит на самой линии воды и заходит
+ * за неё; опустись оно вместе с небом — ушло бы в море.
+ *
+ * Второе условие — про развёрнутый телефонный кадр: ближнему облаку там доставалась телефонная
+ * высота, заведённая под тесноту свёрнутой сцены, и на весь экран оно стояло ниже, чем везде.
+ */
+test('облака держатся горизонта: одна высота на все кадры, кроме свёрнутого телефонного', async ({ page }) => {
+    const frames = await skyFrames(page);
+    const all = [frames.desk, frames.deskFull, frames.phone, frames.phoneFull];
+
+    // Дальнее облако одно на все четыре раскладки: своей мерки у него нет нигде.
+    expect(new Set(all.map((frame) => frame.cloudFar)).size, 'дальнее облако разъехалось по раскладкам').toBe(1);
+    expect(frames.desk.cloudFar, 'дальнее облако сошло с линии воды').toBeLessThan(0);
+
+    expect(frames.deskFull.cloudNear, 'ближнее облако разъехалось между кадрами десктопа').toBe(frames.desk.cloudNear);
+    expect(frames.phoneFull.cloudNear, 'на телефоне во весь экран ближнее облако стоит не как везде').toBe(
+        frames.desk.cloudNear
+    );
+    // В свёрнутом телефонном кадре у него своя высота, ниже общей: неба там полоса.
+    expect(frames.phone.cloudNear, 'в свёрнутом телефонном кадре ближнее облако не на своей высоте').toBeLessThan(
+        frames.desk.cloudNear
+    );
+});
+
 /** Риска неподвижной шторки короткого окна: та же полоска, что у ручки обычной. */
 const gripBox = (page: Page) => page.locator('[class*="stillHandle"]').boundingBox();
 
