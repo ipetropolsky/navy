@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { SHADE_DESK_PEEK_HEIGHT, SHADE_PEEK_HEIGHT, SHADE_TOP_GAP } from '@/config/layout';
 
-import { nearestStop, nextStop, shadeStops, stopHeight } from '@/components/ui/shadeStops';
+import { nearestStop, nextStop, shadeStops, stepStop, stopHeight } from '@/components/ui/shadeStops';
 
 /** Обычное окно телефона: щёлка, половина и верх на нём хорошо разнесены. */
 const FRAME = 800;
@@ -100,5 +100,25 @@ describe('nextStop', () => {
         expect(nextStop('full', DESK)).toBe('peek');
         // Так бывает, когда телефонное окно растянули: ступень осталась, лестницы под ней нет.
         expect(nextStop('half', DESK)).toBe('peek');
+    });
+});
+
+describe('stepStop', () => {
+    it('ходит по одной ступени в обе стороны и на краю лестницы стоит', () => {
+        expect(stepStop('peek', PHONE, 1)).toBe('half');
+        expect(stepStop('half', PHONE, 1)).toBe('full');
+        expect(stepStop('half', PHONE, -1)).toBe('peek');
+        // Край: колесо вверх на верхней ступени и вниз на нижней ничего не переставляет.
+        // Этим шаг и отличается от нажатия на ручку, которое с верхней уходит по кругу в щёлку.
+        expect(stepStop('full', PHONE, 1)).toBe('full');
+        expect(stepStop('peek', PHONE, -1)).toBe('peek');
+    });
+
+    it('на десктопе перекладывает между двумя, а половину считает сложенной', () => {
+        expect(stepStop('peek', DESK, 1)).toBe('full');
+        expect(stepStop('full', DESK, -1)).toBe('peek');
+        // Ступень, оставшаяся с телефонной раскладки после того, как окно растянули.
+        expect(stepStop('half', DESK, 1)).toBe('full');
+        expect(stepStop('half', DESK, -1)).toBe('peek');
     });
 });

@@ -1,18 +1,67 @@
-import { PointerEvent as ReactPointerEvent, ReactNode, useRef, useState } from 'react';
+import {
+    MouseEvent as ReactMouseEvent,
+    PointerEvent as ReactPointerEvent,
+    ReactNode,
+    WheelEvent as ReactWheelEvent,
+    useEffect,
+    useRef,
+    useState,
+} from 'react';
 
+import { isTextField } from '@/utils/keyboard';
 import { useIsMobile, useIsShortWindow } from '@/utils/viewport';
 
 import IconButton from '@/components/ui/IconButton';
-import { ShadeStop, nearestStop, nextStop, shadeStops, stopHeight } from '@/components/ui/shadeStops';
+import {
+    ShadeStop,
+    WHEEL_STEP,
+    nearestStop,
+    nextStop,
+    shadeStops,
+    stepStop,
+    stopHeight,
+} from '@/components/ui/shadeStops';
 
 import styles from './Shade.module.less';
 
 /**
  * Сколько палец должен пройти, чтобы это считалось перетаскиванием, px. Меньше — нажатие:
  * попасть в ручку и не сдвинуть её на пиксель-другой невозможно, и без этого зазора каждое
- * нажатие оборачивалось бы броском на ту же ступень, с которой начали.
+ * нажатие оборачивалось бы броском на ту же ступень, с которой начали. Тем же зазором
+ * отделяются друг от друга нажатие на кнопку внутри шторки и потяг за то место, где она лежит.
  */
 const DRAG_SLOP = 4;
+
+/**
+ * Пауза, после которой накрученное забывается, мс. Без неё остаток одного движения дожидался
+ * бы следующего и складывался с ним: шторка шагала бы через раз не пойми от чего.
+ */
+const WHEEL_REST_MS = 300;
+
+/** Колесо считает не только в пикселях: в строках (1) и в экранах (2). Приводим к пикселям. */
+const WHEEL_UNIT = [1, 16, 400];
+
+/**
+ * Есть ли под указателем своя прокрутка — где-то между ним и самой шторкой.
+ *
+ * Прокрутка главнее: тянуть шторку можно за любое место, но лента, список и всё, что мотается
+ * само, обязаны мотаться, а не превращать движение пальца в открытие и закрытие. Смотрим
+ * поэтому не на то, где именно лежит ручка, а на то, есть ли под пальцем что мотать.
+ *
+ * Направление движения при этом не учитывается нарочно. «Домотал ленту до верха — дальше
+ * тянется шторка» выглядит находчиво ровно до первого промаха: палец у нижнего края ленты
+ * то листает её, то закрывает разговор, и предсказать это нельзя. Область с прокруткой
+ * прокручивается, и только.
+ */
+const hasOwnScroll = (target: EventTarget | null, root: HTMLElement): boolean => {
+    for (let node = target instanceof Element ? target : null; node && node !== root; node = node.parentElement) {
+        const overflow = getComputedStyle(node).overflowY;
+        if ((overflow === 'auto' || overflow === 'scroll') && node.scrollHeight > node.clientHeight) {
+            return true;
+        }
+    }
+    return false;
+};
 
 /** Класс ступени. Отдельной таблицей, а не именем, собранным из строк: имена классов в модуле
  *  всё равно перебиты сборкой, и собирать их по кускам значит терять проверку на опечатку. */
@@ -54,6 +103,11 @@ const clamp = (value: number, min: number, max: number): number => Math.min(Math
  * соседнюю ступень, длинным дотягиваешь до верха за раз. Нажатие на ручку — тот же путь для
  * тех, кто не тянет: следующая ступень вверх, с верхней возврат в щёлку.
  *
+ * Тянут её за любое место, а не за одну ручку: попадать пальцем в полоску шириной в палец —
+ * занятие для тех, кому некуда спешить. Не тянут только те места, у которых есть своя
+ * прокрутка (лента, список) и текстовые поля: там движение уже занято делом. Колесо над
+ * теми же местами шагает по ступеням — мышью цеплять и волочить неудобно.
+ *
  * Анимируется высота, а не сдвиг: содержимое внутри должно перекладываться под новый размер.
  * Сдвинутая шторка держала бы раскладку полной высоты, и в щёлке было бы видно её верхние
  * 132 px — то есть самые старые сообщения ленты — вместо последней строчки с полем ввода.
@@ -77,10 +131,25 @@ export default function Shade({ stop, onStop, label, over = false, onClose, chil
     // Высота, пока шторку тянут. Она стоит inline-стилем и идёт за пальцем без перехода;
     // отпустили — стиль убираем, и высоту снова задаёт класс ступени, уже с анимацией.
     const [dragHeight, setDragHeight] = useState<number | null>(null);
-    const dragRef = useRef<{ startY: number; startHeight: number; frame: number; moved: boolean } | null>(null);
-    // Перетаскивание кончается тем же click, что и нажатие. Флаг отличает одно от другого:
-    // без него бросок на ступень тут же догонялся бы шагом «нажали на ручку».
+    const dragRef = useRef<{
+        pointerId: number;
+        startY: number;
+        startHeight: number;
+        frame: number;
+        moved: boolean;
+        height: number | null;
+    } | null>(null);
+    // Чем отписаться от окна, пока шторку тянут. Держим снаружи, чтобы снять слушателей и тогда,
+    // когда шторка ушла с экрана посреди движения: закрыть её можно и не отпуская пальца.
+    const listeningRef = useRef<(() => void) | null>(null);
+    useEffect(() => () => listeningRef.current?.(), []);
+    // Перетаскивание кончается тем же click, что и нажатие, — и кончается им где угодно,
+    // хоть на кнопке внутри шторки. Флаг гасит этот click: без него потяг за полосу кнопок
+    // заодно нажимал бы ту, с которой начали.
     const draggedRef = useRef(false);
+    // Сколько накручено колесом и когда: одно движение колеса приходит десятком событий,
+    // и ступень должна идти за движение, а не за событие.
+    const wheelRef = useRef({ turned: 0, at: 0 });
 
     // Неподвижная шторка: тот же блок с тем же содержимым, но без ручки и без затемнения.
     // Уходит она отсюда сразу, до всего счёта ступеней, — считать в ней нечего.
@@ -108,55 +177,132 @@ export default function Shade({ stop, onStop, label, over = false, onClose, chil
     const frameHeight = (shade: HTMLElement): number =>
         over ? window.innerHeight : (shade.parentElement?.getBoundingClientRect().height ?? 0);
 
-    const handlePointerDown = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    /**
+     * Докуда шторка сжимается пальцем. Обычную ниже нижней ступени не пускаем — там ничего нет;
+     * у закрываемой ниже щёлки лежит «убрать совсем», и дотянуть туда надо дать.
+     */
+    const lowestHeight = (frame: number): number => (onClose ? 0 : stopHeight('peek', frame, mobile));
+
+    const handlePointerDown = (event: ReactPointerEvent<HTMLElement>) => {
         const shade = shadeRef.current;
         const frame = shade ? frameHeight(shade) : 0;
-        if (!shade || !frame) {
+        // Вторичные кнопки мыши шторку не тянут: у правой своё дело — меню. Текстовое поле
+        // тоже не тянет: движение по нему ставит курсор и выделяет набранное.
+        if (!shade || !frame || event.button !== 0 || isTextField(event.target) || hasOwnScroll(event.target, shade)) {
             return;
         }
-        dragRef.current = {
+        const drag = {
+            pointerId: event.pointerId,
             startY: event.clientY,
             startHeight: shade.getBoundingClientRect().height,
             frame,
             moved: false,
+            height: null as number | null,
         };
-        // Палец может уйти с ручки и даже за край окна — движение всё равно наше.
-        event.currentTarget.setPointerCapture(event.pointerId);
+        dragRef.current = drag;
+
+        const move = (moveEvent: PointerEvent) => {
+            if (moveEvent.pointerId !== drag.pointerId) {
+                return;
+            }
+            if (!drag.moved) {
+                if (Math.abs(moveEvent.clientY - drag.startY) <= DRAG_SLOP) {
+                    return;
+                }
+                drag.moved = true;
+                // Выделение, начатое этим же движением, снимаем: тянут шторку, а не выделяют
+                // текст. Дальше его не даёт набрать `user-select` (см. .shadeDragging).
+                window.getSelection()?.removeAllRanges();
+            }
+            // Вверх — растём: экранный y уменьшается, а высота прибавляется.
+            const height = drag.startHeight + (drag.startY - moveEvent.clientY);
+            drag.height = clamp(height, lowestHeight(drag.frame), stopHeight('full', drag.frame, mobile));
+            setDragHeight(drag.height);
+        };
+
+        // Отписка объявлена раньше самих обработчиков: она им и нужна — движение кончается тем,
+        // что мы перестаём его слушать.
+        const stopListening = () => {
+            window.removeEventListener('pointermove', move);
+            // eslint-disable-next-line @typescript-eslint/no-use-before-define -- взаимная ссылка: отписка снимает обработчик, обработчик её зовёт
+            window.removeEventListener('pointerup', up);
+            // eslint-disable-next-line @typescript-eslint/no-use-before-define -- то же самое
+            window.removeEventListener('pointercancel', up);
+            listeningRef.current = null;
+        };
+
+        const up = () => {
+            stopListening();
+            dragRef.current = null;
+            setDragHeight(null);
+            if (!drag.moved || drag.height === null) {
+                return;
+            }
+            draggedRef.current = true;
+            // Утянутая ниже половины щёлки закрываемая шторка закрывается: «ниже нижней ступени»
+            // у неё означает не ступень, а то, что её убрали.
+            if (onClose && drag.height < stopHeight('peek', drag.frame, mobile) / 2) {
+                onClose();
+                return;
+            }
+            onStop(nearestStop(drag.height, drag.frame, mobile));
+        };
+
+        // Слушаем окно, а не саму шторку. Движение уходит с неё сразу же: первый шаг вверх
+        // выносит палец за её верхнюю кромку, и обработчик на шторке не увидел бы дальше ничего.
+        // Захват указателя (setPointerCapture) вместо этого не годится — он уводит к шторке
+        // и нажатия, и ни одна кнопка внутри неё больше не нажималась бы.
+        listeningRef.current = stopListening;
+        window.addEventListener('pointermove', move);
+        window.addEventListener('pointerup', up);
+        window.addEventListener('pointercancel', up);
     };
 
-    const handlePointerMove = (event: ReactPointerEvent<HTMLButtonElement>) => {
-        const drag = dragRef.current;
-        if (!drag) {
+    /**
+     * Колесо над тем же местом, за которое тянут. Мышью цеплять и волочить неудобно — колесо
+     * делает то же самое привычным движением. Ступень идёт за движение, а не за событие:
+     * одно движение колеса приходит десятком, и шторка иначе улетала бы с нижней ступени
+     * на верхнюю за один щелчок.
+     */
+    const handleWheel = (event: ReactWheelEvent<HTMLElement>) => {
+        const shade = shadeRef.current;
+        if (!shade || hasOwnScroll(event.target, shade)) {
             return;
         }
-        if (Math.abs(event.clientY - drag.startY) > DRAG_SLOP) {
-            drag.moved = true;
+        const wheel = wheelRef.current;
+        if (event.timeStamp - wheel.at > WHEEL_REST_MS) {
+            wheel.turned = 0;
         }
-        // Вверх — растём: экранный y уменьшается, а высота прибавляется.
-        const height = drag.startHeight + (drag.startY - event.clientY);
-        setDragHeight(clamp(height, stopHeight('peek', drag.frame, mobile), stopHeight('full', drag.frame, mobile)));
+        wheel.at = event.timeStamp;
+        wheel.turned += event.deltaY * (WHEEL_UNIT[event.deltaMode] ?? 1);
+        if (Math.abs(wheel.turned) < WHEEL_STEP) {
+            return;
+        }
+        const up = wheel.turned < 0;
+        wheel.turned = 0;
+        // Вниз с нижней ступени — то же, что дотянуть туда пальцем: закрываемая закрывается.
+        if (!up && onClose && stop === shadeStops(mobile)[0]) {
+            onClose();
+            return;
+        }
+        onStop(stepStop(stop, mobile, up ? 1 : -1));
     };
 
-    const handlePointerUp = () => {
-        const drag = dragRef.current;
-        const height = dragHeight;
-        dragRef.current = null;
-        setDragHeight(null);
-        if (!drag?.moved || height === null) {
-            return;
+    /**
+     * Нажатие, которым кончилось перетаскивание, до содержимого не доходит: тянут шторку
+     * за любое место, в том числе за кнопку, и без этого бросок на ступень заодно нажимал бы
+     * то, с чего начался. Ловится оно на погружении — до всех обработчиков внутри.
+     */
+    const handleClickCapture = (event: ReactMouseEvent<HTMLElement>) => {
+        if (draggedRef.current) {
+            draggedRef.current = false;
+            event.preventDefault();
+            event.stopPropagation();
         }
-        draggedRef.current = true;
-        onStop(nearestStop(height, drag.frame, mobile));
     };
 
     // Нажатие на ручку — с клавиатуры в том числе, поэтому click, а не pointerup.
-    const handleClick = () => {
-        if (draggedRef.current) {
-            draggedRef.current = false;
-            return;
-        }
-        onStop(nextStop(stop, mobile));
-    };
+    const handleClick = () => onStop(nextStop(stop, mobile));
 
     const drag = dragRef.current;
     // Затемнение набирается на последней ступени: от предпоследней к верху. Пока тянут, считаем
@@ -202,19 +348,21 @@ export default function Shade({ stop, onStop, label, over = false, onClose, chil
                 aria-label="Закрыть шторку"
                 onClick={() => (onClose ? onClose() : onStop('peek'))}
             />
+            {/* Тянут шторку за неё саму, а не за одну ручку: за любое место, у которого нет
+                своей прокрутки (см. hasOwnScroll). Ручка при этом остаётся — она показывает,
+                что шторку вообще можно двигать, и отвечает на нажатие с клавиатуры. */}
             <section
                 className={look}
                 style={dragHeight === null ? undefined : { height: `${dragHeight}px` }}
                 aria-label={label}
                 ref={shadeRef}
+                onPointerDown={handlePointerDown}
+                onWheel={handleWheel}
+                onClickCapture={handleClickCapture}
             >
                 <button
                     type="button"
                     className={styles.handle}
-                    onPointerDown={handlePointerDown}
-                    onPointerMove={handlePointerMove}
-                    onPointerUp={handlePointerUp}
-                    onPointerCancel={handlePointerUp}
                     onClick={handleClick}
                     aria-label={stop === 'full' ? 'Опустить шторку' : 'Поднять шторку'}
                 >

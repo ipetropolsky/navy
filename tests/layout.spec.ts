@@ -1,6 +1,7 @@
 import { Page, expect, test } from '@playwright/test';
 
 import { EDGE_MARGIN } from '@/backend/placement';
+import { WHEEL_STEP } from '@/components/ui/shadeStops';
 import {
     COLUMN_WIDTH,
     MOBILE_MAX_WIDTH,
@@ -1130,17 +1131,23 @@ const shadeStops = (height: number, mobile: boolean) => ({
     full: height - SHADE_TOP_GAP,
 });
 
-/** Потянуть за ручку вверх на `by` пикселей и отпустить. */
-const dragShade = async (page: Page, by: number): Promise<void> => {
-    const box = (await page.getByRole('button', { name: SHADE_HANDLE }).boundingBox())!;
-    const x = box.x + box.width / 2;
-    const y = box.y + box.height / 2;
+/** Потянуть от точки вверх на `by` пикселей (вниз — отрицательное) и отпустить. */
+const dragAt = async (page: Page, x: number, y: number, by: number): Promise<void> => {
     await page.mouse.move(x, y);
     await page.mouse.down();
     // Шагами, а не прыжком: перетаскивание считается по pointermove, и одного события
     // хватило бы шторке, но не браузеру — он на прыжок курсора отвечает не всегда.
     await page.mouse.move(x, y - by, { steps: 12 });
     await page.mouse.up();
+};
+
+/** Потянуть за середину блока: за ручку, за заголовок — за что дали. */
+const dragBox = (page: Page, box: { x: number; y: number; width: number; height: number }, by: number) =>
+    dragAt(page, box.x + box.width / 2, box.y + box.height / 2, by);
+
+/** Потянуть за ручку вверх на `by` пикселей и отпустить. */
+const dragShade = async (page: Page, by: number): Promise<void> => {
+    await dragBox(page, (await page.getByRole('button', { name: SHADE_HANDLE }).boundingBox())!, by);
 };
 
 const expectShade = (page: Page, height: number, message: string, name?: string) =>
@@ -1310,6 +1317,68 @@ test('нажатие мимо шторки складывает её, а сло�
     await expectShade(page, stops.full, 'шторка не дошла до верха');
     await page.mouse.click(aside.x, aside.y);
     await expectShade(page, stops.peek, 'нажатие мимо шторки не сложило её обратно');
+});
+
+/**
+ * Тянут шторку за любое место, а не за одну ручку: попадать пальцем в полоску шириной в палец
+ * — занятие для тех, кому некуда спешить. Не тянут только области со своей прокруткой и
+ * текстовые поля: там движение уже занято делом.
+ *
+ * Проверяется это на списке кораблей: он раскрыт до верха, кораблей в нём двое, и прокручивать
+ * ему нечего — то есть заголовок списка и есть «любое место». Заодно проверяется и то, ради
+ * чего у второго этажа отобрана нижняя ступень: утянутый ниже щёлки, он закрывается.
+ */
+test('шторку тянут за любое место без своей прокрутки, а утянутый вниз список закрывается', async ({ page }) => {
+    await openChannel(page, DEMO, ALBATROS);
+    await page.getByRole('button', { name: 'Развернуть сцену' }).click();
+    const stops = shadeStops(page.viewportSize()!.height, false);
+    await openSheet(page);
+    await shadeHandle(page, MEMBERS_SHADE).click();
+    await expectShade(page, stops.full, 'список не поднялся до верха', MEMBERS_SHADE);
+
+    const title = page.getByText('На связи', { exact: true });
+    await dragBox(page, (await title.boundingBox())!, -(stops.full - stops.peek));
+    await expectShade(page, stops.peek, 'потяг за заголовок не сдвинул шторку', MEMBERS_SHADE);
+
+    // Ниже щёлки у второго этажа ступени нет — там «убрать совсем».
+    await dragBox(page, (await title.boundingBox())!, -stops.peek);
+    await expect(shadeRegion(page, MEMBERS_SHADE), 'утянутый вниз список не закрылся').toHaveCount(0);
+});
+
+/**
+ * Колесо над тем же местом, за которое тянут: мышью цеплять и волочить неудобно, а колесо
+ * — движение привычное. Над областью со своей прокруткой оно её и мотает: прокрутка главнее,
+ * иначе лента при каждой попытке почитать старое схлопывала бы разговор.
+ */
+test('колесо над шторкой переставляет её по ступеням, а над лентой мотает ленту', async ({ page }) => {
+    await openChannel(page, DEMO, ALBATROS);
+    await page.getByRole('button', { name: 'Развернуть сцену' }).click();
+    const stops = shadeStops(page.viewportSize()!.height, false);
+    await expectShade(page, stops.peek, 'развёрнутая сцена открылась не сложенной шторкой');
+
+    // Ручка — то самое «место без своей прокрутки», просто она всегда на виду.
+    const overHandle = async () => {
+        const box = (await page.getByRole('button', { name: SHADE_HANDLE }).boundingBox())!;
+        await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    };
+    await overHandle();
+    await page.mouse.wheel(0, -WHEEL_STEP);
+    await expectShade(page, stops.full, 'колесо вверх не подняло шторку на ступень');
+    await overHandle();
+    await page.mouse.wheel(0, WHEEL_STEP);
+    await expectShade(page, stops.peek, 'колесо вниз не опустило шторку обратно');
+
+    // Лента: своя прокрутка, и колесо достаётся ей целиком.
+    const feed = page.locator('[class*="dateChip"]').locator('xpath=..');
+    const scrolled = async () => feed.evaluate((node) => Math.round(node.scrollTop));
+    await feed.evaluate((node) => {
+        node.scrollTop = 0;
+    });
+    const box = (await feed.boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.wheel(0, WHEEL_STEP);
+    await expect.poll(scrolled, { message: 'колесо над лентой не смотало её' }).toBeGreaterThan(0);
+    await expectShade(page, stops.peek, 'колесо над лентой сдвинуло шторку');
 });
 
 /**
