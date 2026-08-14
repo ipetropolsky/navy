@@ -369,8 +369,10 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
             }
         }
         // Сменилось место — значит корабль встал на другое. Сменился силуэт — значит человек
-        // сменил корабль, а это тот же манёвр: прежний уходит с рейда, новый заходит. Меняться
-        // на глазах, оставаясь на месте, кораблю нельзя — на рейде так не бывает.
+        // сменил корабль, а это тот же манёвр: прежний уходит с рейда, новый заходит. Сменился
+        // курс — то же самое: развернуться на якоре корабль не может, а отзеркалить силуэт
+        // на глазах — то же, что подменить его. Меняться на глазах, оставаясь на месте,
+        // кораблю нельзя — на рейде так не бывает.
         //
         // Позывной и бортовой номер к этому не относятся: имя меняют на словах, номер
         // перекрашивают по борту, и сниматься ради этого с якоря незачем.
@@ -383,7 +385,9 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
             return (
                 shown &&
                 !relocatingIds.current.has(member.memberId) &&
-                (!isSameBerth(shown.place, member.place) || shown.shipKind !== member.shipKind)
+                (!isSameBerth(shown.place, member.place) ||
+                    shown.shipKind !== member.shipKind ||
+                    shown.place.facing !== member.place.facing)
             );
         });
         for (const member of relocated) {

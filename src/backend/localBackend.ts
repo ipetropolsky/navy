@@ -395,13 +395,13 @@ export function createLocalBackend(): ChannelBackend {
                 const others = current.members.filter((item) => item.memberId !== memberId);
                 const wanted = draft.berth ?? member.place;
                 const stays = isSameBerth(member.place, wanted) && isBerthFree(member.place, draft.shipKind, others);
-                if (!stays) {
+                // Смена курса — тоже перемена, и такая же, как перемена места: развернуться
+                // на якоре корабль не может, а отзеркалить силуэт на глазах — то же самое,
+                // что подменить его. Поэтому и здесь корабль снимается с места и заходит
+                // заново, с другого борта: сторона захода считается от нового курса.
+                const turns = Boolean(draft.facing) && draft.facing !== member.place.facing;
+                if (!stays || turns) {
                     member.place = placeShip(draft.shipKind, others, wanted, draft.facing) ?? member.place;
-                } else if (draft.facing && draft.facing !== member.place.facing) {
-                    // Место оставили, а курс сменили: корабль разворачивается там, где стоит,
-                    // никуда не идя. Сторону захода при этом не трогаем — она про то, откуда
-                    // он сюда пришёл, и разворот на якоре её не отменяет.
-                    member.place = { ...member.place, facing: draft.facing };
                 }
                 return { ...member };
             });

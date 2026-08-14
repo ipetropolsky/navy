@@ -156,15 +156,24 @@ test('курс выбирается в форме, и корабль встаё�
     await page.getByRole('button', { name: 'Настроить корабль' }).click();
     await expect(page.getByLabel('Курс вправо')).toHaveAttribute('aria-pressed', 'true');
 
-    // И курс можно переменить, оставшись на месте: корабль разворачивается там, где стоит.
+    // Курс можно переменить — но это не разворот на якоре: корабль снимается с места
+    // и заходит заново, теперь уже с другого борта. Развернуться, стоя на якоре, он не может,
+    // а отзеркалить силуэт на глазах — то же самое, что подменить его.
     await page.getByLabel('Курс влево').click();
     await shipFormSubmit(page).click();
-    await expect(ships(page).locator('[data-facing]')).toHaveAttribute('data-facing', 'left');
+    await expect(page.locator('[data-motion="leaving"]'), 'корабль не пошёл на перезаход').toHaveCount(1);
 
-    const afterRefit = await readState(page);
-    const [turned] = Object.values(afterRefit.channels).find((one) => one.channel.slug === 'kurs')!.members;
-    expect(turned.place.facing, 'корабль не развернулся').toBe('left');
-    expect(`${turned.place.slot}-${turned.place.corridor}`, 'разворот сдвинул корабль с места').toBe('9-center');
+    // Место осталось тем же, а сторона захода переменилась вслед за курсом: заходят
+    // носом вперёд, то есть с противоположного борта. Сам перезаход дальше не досматриваем —
+    // он такой же, как при перемене места, и проверен там.
+    await expect
+        .poll(
+            async () =>
+                Object.values((await readState(page)).channels).find((one) => one.channel.slug === 'kurs')!.members[0]
+                    .place,
+            { message: 'новый курс не дошёл до состояния' }
+        )
+        .toMatchObject({ slot: 9, corridor: 'center', facing: 'left', enterFrom: 'right' });
 });
 
 test('на одной линии помещаются двое, и борта не налезают друг на друга', async ({ page }) => {
