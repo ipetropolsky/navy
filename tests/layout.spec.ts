@@ -759,6 +759,40 @@ test.describe('десктоп', () => {
         expectBandLooksLikePanel(bar);
         expect(bar.buttons[0].width, 'одинокая кнопка не заняла ширину формы').toBeCloseTo(bar.width, 0);
     });
+
+    /**
+     * Полоса кнопок в списке кораблей и есть его нижняя кромка: под ней не остаётся ничего.
+     * Своё нижнее поле список отдал полосе нарочно — поле прокручиваемого блока входит в его
+     * полосу прокрутки, содержимое едет прямо через него, а прилипшую полосу за кромку
+     * содержимого не выпускают. В оставшуюся щель было видно, как проезжает список.
+     *
+     * Второе обещание — про короткий список: остаток места уходит над полосой, и кнопки стоят
+     * внизу, а не посреди пустого поля.
+     */
+    test('кнопки списка стоят у нижней кромки и не пропускают под собой список', async ({ page }) => {
+        await openChannel(page, DEMO, ALBATROS);
+        await page.getByRole('button', { name: 'Развернуть сцену' }).click();
+        // Шторку до верха: в сложенной список не помещается, и проверять «остаток ушёл
+        // над полосой» было бы не на чем. Ручка тут та же, что и в проверках ступеней ниже.
+        await page.getByRole('button', { name: /(Поднять|Опустить) шторку/ }).click();
+        await openSheet(page);
+
+        const band = await page.evaluate(() => {
+            const bar = document.querySelector('[class*="actionsPinned"]')!;
+            const list = bar.parentElement!;
+            const rows = [...list.querySelectorAll('[class*="row_"], [class*="rowActive"]')];
+            return {
+                top: bar.getBoundingClientRect().top,
+                bottom: bar.getBoundingClientRect().bottom,
+                listBottom: list.getBoundingClientRect().bottom,
+                lastRow: rows.at(-1)!.getBoundingClientRect().bottom,
+            };
+        });
+        expect(Math.round(band.bottom), 'под кнопками осталась щель, и в неё видно список').toBe(
+            Math.round(band.listBottom)
+        );
+        expect(band.top, 'кнопки встали посреди пустого поля вместо нижней кромки').toBeGreaterThan(band.lastRow + 100);
+    });
 });
 
 /**
