@@ -14,6 +14,7 @@ import {
     SHADE_SEA_OVERLAP,
     SHADE_TOP_GAP,
     SHORT_WINDOW_MAX_HEIGHT,
+    SHORT_WINDOW_PEEK,
 } from './src/config/layout';
 
 export default defineConfig({
@@ -31,6 +32,7 @@ export default defineConfig({
                     `@shade-top-gap: ${SHADE_TOP_GAP}px;\n` +
                     `@shade-sea-overlap: ${SHADE_SEA_OVERLAP}px;\n` +
                     `@short-window-height: ${SHORT_WINDOW_MAX_HEIGHT}px;\n` +
+                    `@short-window-peek: ${SHORT_WINDOW_PEEK}px;\n` +
                     `@column-width: ${COLUMN_WIDTH}px;\n`,
             },
         },

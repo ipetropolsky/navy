@@ -10,6 +10,7 @@ import {
     SHADE_SEA_OVERLAP,
     SHADE_TOP_GAP,
     SHORT_WINDOW_MAX_HEIGHT,
+    SHORT_WINDOW_PEEK,
 } from '@/config/layout';
 import { SLOT_COUNT, slotDepth, slotShare } from '@/types/channel';
 
@@ -1467,6 +1468,9 @@ test('на телефоне развёрнутый кадр кончается �
  *
  * Поэтому ниже отсечки шторки нет: содержимое лежит под кадром неподвижным блоком без ручки
  * и без ступеней, а приложение становится обычной страницей в два экрана — сцена и разговор.
+ *
+ * Экраны эти не ровно в окно, а на полоску ниже (SHORT_WINDOW_PEEK): в каждом конце полосы
+ * виден край соседнего, за него и тянут.
  */
 test.describe('короткое окно', () => {
     // Телефон на боку: заведомо ниже отсечки и заведомо шире телефонной ширины — то есть
@@ -1477,11 +1481,13 @@ test.describe('короткое окно', () => {
         await openChannel(page, DEMO, ALBATROS);
         await page.getByRole('button', { name: 'Развернуть сцену' }).click();
         const window = page.viewportSize()!;
+        // Полоска берётся с потолком в 20svh — в этом окне (390px) потолок выше самой полоски.
+        const screen = window.height - SHORT_WINDOW_PEEK;
 
-        // Кадр занял окно целиком: щёлки под ним нет, потому что нет и шторки.
+        // Кадр занял окно во всю ширину и почти во всю высоту: снизу видна кромка шторки.
         await expect
             .poll(async () => (await sceneBox(page)).height, { message: 'кадр не занял окно по высоте' })
-            .toBe(window.height);
+            .toBe(screen);
         expect((await sceneBox(page)).width, 'кадр не занял окно по ширине').toBe(window.width);
         await expect(
             page.getByRole('button', { name: SHADE_HANDLE }),
@@ -1490,8 +1496,8 @@ test.describe('короткое окно', () => {
 
         // Разговор лежит следом за кадром и ростом в тот же экран: страница выходит в два экрана.
         const shade = (await page.getByRole('region').first().boundingBox())!;
-        expect(Math.round(shade.y), 'шторка легла не под кадром').toBe(window.height);
-        expect(Math.round(shade.height), 'шторка легла не в рост экрана').toBe(window.height);
+        expect(Math.round(shade.y), 'шторка легла не под кадром').toBe(screen);
+        expect(Math.round(shade.height), 'шторка легла не в рост экрана').toBe(screen);
         // Колонку она держит ту же, что и в обычном виде: во весь экран просили сцену.
         expect(Math.round(shade.width), 'шторка растянулась вслед за кадром').toBe(COLUMN_WIDTH);
 
@@ -1500,6 +1506,12 @@ test.describe('короткое окно', () => {
         await page.mouse.wheel(0, window.height);
         await expect(page.getByPlaceholder('Сообщение'), 'до разговора не доехали').toBeInViewport();
         await expect(page.getByRole('button', { name: 'Свернуть сцену' }), 'кадр не уехал вверх').not.toBeInViewport();
+
+        // В самом низу полосы шторка встаёт не под верхнюю кромку окна, а на полоску ниже:
+        // над ней остаётся видна вода, за которую и тянут обратно к кадру.
+        await expect
+            .poll(() => shadeTop(page), { message: 'шторка уехала верхом под кромку окна' })
+            .toBe(SHORT_WINDOW_PEEK);
     });
 
     // Список кораблей в коротком окне занимает место разговора в той же неподвижной шторке:
@@ -1509,6 +1521,8 @@ test.describe('короткое окно', () => {
         await page.getByRole('button', { name: 'Развернуть сцену' }).click();
         await openSheet(page);
         await expect(page.getByRole('button', { name: 'Настроить корабль' }), 'список не открылся').toBeVisible();
-        expect(await shadeTop(page), 'список сдвинул неподвижную шторку').toBe(page.viewportSize()!.height);
+        expect(await shadeTop(page), 'список сдвинул неподвижную шторку').toBe(
+            page.viewportSize()!.height - SHORT_WINDOW_PEEK
+        );
     });
 });
