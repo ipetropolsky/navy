@@ -28,6 +28,15 @@ const CORRIDOR_STEP = (0.3 * (100 - 2 * EDGE_MARGIN)) / 100;
 const SPREAD_FAR = -0.04;
 const SPREAD_NEAR = 0.1;
 
+/**
+ * Сколько ждать конца манёвра, мс. Мерка не запасная, а расчётная: самый длинный ход в кадре —
+ * уход с ближней линии через весь рейд, — идёт на наименьшем ходу по кадру (`MIN_SAIL_PACE`)
+ * около 53 с. Отсюда и минута с небольшим: меньше — и проверки начнут падать от того, что
+ * корабль ещё в пути, а не от того, что он идёт не туда. Сбавят ход ещё — это число сбавляют
+ * вместе с ним, иначе падение будет ждать полторы минуты вместо секунды.
+ */
+const SAIL_TIMEOUT = 70_000;
+
 /** Насколько боковое место этой линии отстоит от середины кадра, доля его ширины. */
 const berthOffset = (slot: number): number => CORRIDOR_STEP + SPREAD_FAR + (SPREAD_NEAR - SPREAD_FAR) * slotShare(slot);
 
@@ -238,8 +247,8 @@ test('на одной линии помещаются двое, и борта н
 
 test('на тесной линии первым уступает тот, кто мельче, и он же отпускает резинку', async ({ page }) => {
     // Проверка длиннее общего срока: в ней два захода на рейд подряд, и каждый идёт по морю
-    // своим настоящим ходом — ждать приходится дважды по полминуты.
-    test.setTimeout(150_000);
+    // своим настоящим ходом — ждать приходится дважды почти по минуте.
+    test.setTimeout(240_000);
 
     // Рейд предлагает и такие линии, где двоим не разойтись, стоя каждый в своей полосе: место
     // там есть, просто вставать придётся теснее. Уступает первым тот, кто мельче: ему и ходу
@@ -296,14 +305,16 @@ test('на тесной линии первым уступает тот, кто 
                             })
                             .every((off) => off < 1);
                     }),
-                { message: 'корабли так и не встали на свои места', timeout: 30000 }
+                { message: 'корабли так и не встали на свои места', timeout: SAIL_TIMEOUT }
             )
             .toBe(true);
         return hulls();
     };
 
     // Ждём, пока корабль закончит заход: мерить его на ходу — мерить кромку кадра.
-    await expect(page.locator('[data-motion]'), 'корабль так и не встал на место').toHaveCount(0, { timeout: 30000 });
+    await expect(page.locator('[data-motion]'), 'корабль так и не встал на место').toHaveCount(0, {
+        timeout: SAIL_TIMEOUT,
+    });
     const [aloneBig] = await settled();
 
     // Второй встаёт слева от соседа. Куда именно внутри своей полосы — заранее неизвестно:
@@ -316,7 +327,9 @@ test('на тесной линии первым уступает тот, кто 
     expect(spot, 'слева от соседа не нашлось места').toBeTruthy();
     await page.mouse.click(spot!.x + spot!.width / 2, spot!.y + spot!.height / 2);
     await join(page, 'Малыш', '111');
-    await expect(page.locator('[data-motion]'), 'катер так и не встал на место').toHaveCount(0, { timeout: 30000 });
+    await expect(page.locator('[data-motion]'), 'катер так и не встал на место').toHaveCount(0, {
+        timeout: SAIL_TIMEOUT,
+    });
 
     const [tightSmall, tightBig] = await settled();
     expect(tightSmall.right, 'корабли на тесной линии налезли друг на друга').toBeLessThan(tightBig.left);
@@ -341,6 +354,26 @@ test('на тесной линии первым уступает тот, кто 
     // корабль снимает только свой хозяин.
     await openChannel(page, 'rezinka', resident.memberId);
     await leaveRaid(page);
+
+    // Резинка отпускает не мгновенно: уход соседа сперва доходит до канала, и только потом
+    // расстановка переписывает дорожку. Покой сам по себе тут не признак — застать его можно
+    // и до перемены, на старом месте, — поэтому сперва ждём саму перемену мерки. Катер узнаём
+    // по ширине корпуса: он на этой линии самый узкий, и уходящий сосед этого не меняет.
+    await expect
+        .poll(
+            () =>
+                page.evaluate(
+                    () =>
+                        [...document.querySelectorAll<HTMLElement>('[class*="shipLane"]')]
+                            .map((lane) => ({
+                                width: lane.querySelector('[class*="shipSlot"]')!.getBoundingClientRect().width,
+                                at: parseFloat(lane.style.getPropertyValue('--slot-left')),
+                            }))
+                            .sort((one, other) => one.width - other.width)[0].at
+                ),
+            { message: 'катер так и не получил новую мерку', timeout: SAIL_TIMEOUT }
+        )
+        .toBeGreaterThan(tightSmall.at);
 
     // Насколько именно он отошёл — не проверяем: это его разброс внутри полосы, а он считается
     // по позывному, который выдал бэкенд. Проверяем то, что от разброса не зависит: катер больше
@@ -920,7 +953,7 @@ test('ход корабля идёт с правдоподобной скоро�
     // и меняется вместе с ним, поэтому и стоит с запасом, а не впритык к замеру.
     for (const value of [cutter, sweeper]) {
         expect(value).toBeGreaterThan(2);
-        expect(value).toBeLessThanOrEqual(45);
+        expect(value).toBeLessThanOrEqual(60);
     }
 });
 
@@ -965,7 +998,7 @@ test('корабль уходит за кромку и пропадает из �
     // Сразу после выхода корабль ещё в кадре: он выбирается за кромку своим ходом.
     await expect(page.locator('[data-motion="leaving"]')).toHaveCount(1);
     // И через отведённое ему время исчезает — иначе уходящие копились бы в разметке.
-    await expect(ships(page)).toHaveCount(2, { timeout: 40_000 });
+    await expect(ships(page)).toHaveCount(2, { timeout: SAIL_TIMEOUT });
 });
 
 test('огни на рейде якорные, на ходу ходовые, и от 50 метров их по два', async ({ page }) => {
@@ -1128,7 +1161,9 @@ test('на соседний коридор своей линии корабль 
 
     // Заход должен отыграться до конца: пока он идёт, у корабля свой вид движения, и новый
     // на него не наложить.
-    await expect(page.locator('[data-motion]'), 'корабль так и не встал на рейде').toHaveCount(0, { timeout: 30000 });
+    await expect(page.locator('[data-motion]'), 'корабль так и не встал на рейде').toHaveCount(0, {
+        timeout: SAIL_TIMEOUT,
+    });
     const scene = (await page.locator('[class*="scene"]').first().boundingBox())!;
     const before = (await ships(page).first().boundingBox())!;
 
@@ -1164,7 +1199,7 @@ test('на соседний коридор своей линии корабль 
     expect(overboard, 'посреди перехода корабль пропал из кадра или вышел за кромку').toHaveLength(0);
 
     // Пришёл он туда, куда шёл: место переменилось, курс — нет.
-    await expect(page.locator('[data-motion]'), 'переход не кончился').toHaveCount(0, { timeout: 30000 });
+    await expect(page.locator('[data-motion]'), 'переход не кончился').toHaveCount(0, { timeout: SAIL_TIMEOUT });
     const after = (await ships(page).first().boundingBox())!;
     expect(after.x, 'корабль не сдвинулся влево').toBeLessThan(before.x);
     await expect(ships(page).locator('[data-facing]'), 'корабль развернулся вместо заднего хода').toHaveAttribute(

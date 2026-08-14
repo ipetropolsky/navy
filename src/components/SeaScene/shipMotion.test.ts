@@ -1,8 +1,15 @@
 import { describe, expect, test } from 'vitest';
 
-import { ISLAND_FREE_SLOT, ShipKind, ShipPlacement, Side } from '@/types/channel';
+import { ISLAND_FREE_SLOT, SHIP_SPECS, ShipKind, ShipPlacement, Side, shipWidthPercent } from '@/types/channel';
 
-import { leaveCourse, relocateCourse, shiftAcross } from '@/components/SeaScene/shipMotion';
+import {
+    LEAVE_GUARD,
+    leaveCourse,
+    pathToEdge,
+    relocateCourse,
+    sailSeconds,
+    shiftAcross,
+} from '@/components/SeaScene/shipMotion';
 
 /**
  * Куда корабль уходит из кадра. Правило это целиком счётное и в браузере проверяется дорого:
@@ -104,6 +111,38 @@ describe('перезаход на новое место', () => {
     });
 });
 
+/** Наименьший ход по кадру, % ширины сцены в секунду: тот самый MIN_SAIL_PACE. */
+const PACE = 3.2;
+
+/** Все линии рейда — от самой дальней до самой ближней. */
+const SLOTS = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+
+describe('ход по кадру', () => {
+    test('всякий манёвр в кадре идёт этим самым малым, а не своими узлами', () => {
+        // Проверка не на число, а на то, что число это единственное. Ход на рейде расписан
+        // по длине корпуса (4 узла у самого длинного, 6.7 у самого короткого), но кадр
+        // шириной в сотню-другую метров: на таких узлах корабль пересекал бы его минутами.
+        // Поэтому сверху стоит наименьший ход по кадру, и упирается в него каждый манёвр —
+        // от катера на ближней линии до тральщика у горизонта. Отсюда и вывод для правок:
+        // скорость в кадре меняет только MIN_SAIL_PACE, а узлы её не трогают вовсе.
+        const kinds = Object.keys(SHIP_SPECS) as ShipKind[];
+        const paces = SLOTS.flatMap((slot) =>
+            kinds.flatMap((kind) => {
+                const path = pathToEdge(50, shipWidthPercent(slot, kind), 'right', LEAVE_GUARD);
+                return [false, true].map((astern) => path / sailSeconds(path, slot, kind, astern));
+            })
+        );
+        paces.forEach((pace) => expect(pace).toBeCloseTo(PACE, 5));
+    });
+
+    test('время идёт за путём, а не стоит на месте', () => {
+        // Ровно то, ради чего мерка экранная, а не временная: вдвое короче путь — вдвое
+        // короче и манёвр. Плоский потолок в секундах, стоявший тут раньше, растягивал
+        // короткий ход на те же полминуты.
+        expect(sailSeconds(40, 5, KIND, false)).toBeCloseTo(sailSeconds(20, 5, KIND, false) * 2, 5);
+    });
+});
+
 describe('переход по воде', () => {
     test('на соседний коридор своей же линии корабль переходит, а не перезаходит', () => {
         // Ходу тут меньше трети кадра, и весь он на глазах. Уходить ради этого за кромку
@@ -121,7 +160,7 @@ describe('переход по воде', () => {
         expect(astern).toMatchObject({ toward: 'left', astern: true });
         // Времени задний ход при этом не добавляет, и это не оплошность: манёвр упирается
         // в наименьший ход по кадру (MIN_SAIL_PACE), а не в узлы. Замер: на переход
-        // между соседними коридорами уходит 6.97 с на любой линии и любому кораблю
+        // между соседними коридорами уходит 8.72 с на любой линии и любому кораблю
         // справочника, хоть носом, хоть кормой. Медленнее этого корабль в кадре не ходит —
         // ниже уже начинается ожидание, а не манёвр.
         expect(astern!.path).toBeCloseTo(ahead!.path, 5);
