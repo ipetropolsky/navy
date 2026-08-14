@@ -2,12 +2,14 @@ import {
     MouseEvent as ReactMouseEvent,
     PointerEvent as ReactPointerEvent,
     ReactNode,
+    UIEvent as ReactUIEvent,
     WheelEvent as ReactWheelEvent,
     useEffect,
     useRef,
     useState,
 } from 'react';
 
+import { SHADE_FADE_HEIGHT } from '@/config/layout';
 import { isTextField } from '@/utils/keyboard';
 import { useIsMobile, useIsShortWindow } from '@/utils/viewport';
 
@@ -41,6 +43,12 @@ const WHEEL_REST_MS = 300;
 /** Колесо считает не только в пикселях: в строках (1) и в экранах (2). Приводим к пикселям. */
 const WHEEL_UNIT = [1, 16, 400];
 
+/** Мотается ли этот блок сам: и разрешено, и есть что мотать. */
+const scrolls = (node: Element): boolean => {
+    const overflow = getComputedStyle(node).overflowY;
+    return (overflow === 'auto' || overflow === 'scroll') && node.scrollHeight > node.clientHeight;
+};
+
 /**
  * Есть ли под указателем своя прокрутка — где-то между ним и самой шторкой.
  *
@@ -55,12 +63,25 @@ const WHEEL_UNIT = [1, 16, 400];
  */
 const hasOwnScroll = (target: EventTarget | null, root: HTMLElement): boolean => {
     for (let node = target instanceof Element ? target : null; node && node !== root; node = node.parentElement) {
-        const overflow = getComputedStyle(node).overflowY;
-        if ((overflow === 'auto' || overflow === 'scroll') && node.scrollHeight > node.clientHeight) {
+        if (scrolls(node)) {
             return true;
         }
     }
     return false;
+};
+
+/**
+ * Первое, что мотается внутри шторки: под полоску уходит именно оно. Ищем в порядке разметки —
+ * верхнее и есть то, чей край подходит к полоске. Мотающихся блоков внутри бывает несколько
+ * (лента внутри панели, у которой своя прокрутка), но верхний из них один.
+ */
+const topScroller = (root: HTMLElement): HTMLElement | null => {
+    for (const node of root.querySelectorAll<HTMLElement>('*')) {
+        if (scrolls(node)) {
+            return node;
+        }
+    }
+    return null;
 };
 
 /** Класс ступени. Отдельной таблицей, а не именем, собранным из строк: имена классов в модуле
@@ -151,6 +172,41 @@ export default function Shade({ stop, onStop, label, over = false, onClose, chil
     // и ступень должна идти за движение, а не за событие.
     const wheelRef = useRef({ turned: 0, at: 0 });
 
+    // Полоска у верхней кромки: в полную силу, когда содержимое под неё уехало, и ничего,
+    // когда оно домотано до верха. Держим её силой от 0 до 1, а не «есть или нет»: набирается
+    // она на первых пикселях прокрутки, и содержимое подходит под неё, а не подскакивает.
+    const [fade, setFade] = useState(0);
+    const bodyRef = useRef<HTMLDivElement>(null);
+    // Чей край подходит к полоске. Ищем его не на каждое событие прокрутки, а на смену
+    // содержимого: обход разметки в обработчике, который зовут по разу на кадр, — самое
+    // верное место, чтобы лента начала запинаться.
+    const scrollerRef = useRef<HTMLElement | null>(null);
+    const fadeFor = (scroller: HTMLElement | null): number =>
+        scroller ? clamp(scroller.scrollTop / SHADE_FADE_HEIGHT, 0, 1) : 0;
+
+    // Содержимое сменилось или шторка встала на другую ступень — мотающийся блок мог смениться,
+    // а мог и перестать мотаться вовсе (форма влезла в раскрытую шторку целиком). Ступень
+    // при этом ещё едет, и настоящий размер будет к концу перехода — там пересчитаем ещё раз
+    // (см. onTransitionEnd).
+    useEffect(() => {
+        scrollerRef.current = bodyRef.current && topScroller(bodyRef.current);
+        setFade(fadeFor(scrollerRef.current));
+    }, [stop, children]);
+
+    /**
+     * Прокрутка внутри шторки. Ловим на погружении: событие прокрутки не всплывает, и на самой
+     * шторке его иначе не увидеть. Считаем только по верхнему блоку — нижние (лента внутри
+     * панели со своей прокруткой) до полоски не достают.
+     */
+    const handleScrollCapture = (event: ReactUIEvent<HTMLElement>) => {
+        if (event.target === scrollerRef.current) {
+            setFade(fadeFor(scrollerRef.current));
+        }
+    };
+
+    /** Полоска: лежит поверх содержимого у верхней кромки и ничего под собой не ловит. */
+    const fadeStrip = <div className={styles.fade} style={{ opacity: fade }} aria-hidden="true" />;
+
     // Неподвижная шторка: тот же блок с тем же содержимым, но без ручки и без затемнения.
     // Уходит она отсюда сразу, до всего счёта ступеней, — считать в ней нечего.
     //
@@ -160,11 +216,18 @@ export default function Shade({ stop, onStop, label, over = false, onClose, chil
     // край страницы, а её вторая половина.
     if (shortWindow && !over) {
         return (
-            <section className={[styles.shade, styles.shadeStill].join(' ')} aria-label={label}>
+            <section
+                className={[styles.shade, styles.shadeStill].join(' ')}
+                aria-label={label}
+                onScrollCapture={handleScrollCapture}
+            >
                 <div className={styles.stillHandle} aria-hidden="true">
                     <span className={styles.grip} />
                 </div>
-                <div className={styles.body}>{children}</div>
+                <div className={styles.body} ref={bodyRef}>
+                    {fadeStrip}
+                    {children}
+                </div>
             </section>
         );
     }
@@ -359,6 +422,13 @@ export default function Shade({ stop, onStop, label, over = false, onClose, chil
                 onPointerDown={handlePointerDown}
                 onWheel={handleWheel}
                 onClickCapture={handleClickCapture}
+                onScrollCapture={handleScrollCapture}
+                // Ступень доехала — размеры внутри стали настоящими: то, что в пути ещё моталось,
+                // могло уже и поместиться целиком.
+                onTransitionEnd={() => {
+                    scrollerRef.current = bodyRef.current && topScroller(bodyRef.current);
+                    setFade(fadeFor(scrollerRef.current));
+                }}
             >
                 <button
                     type="button"
@@ -387,7 +457,10 @@ export default function Shade({ stop, onStop, label, over = false, onClose, chil
                         </IconButton>
                     </div>
                 )}
-                <div className={styles.body}>{children}</div>
+                <div className={styles.body} ref={bodyRef}>
+                    {fadeStrip}
+                    {children}
+                </div>
             </section>
         </>
     );

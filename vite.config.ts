@@ -9,6 +9,7 @@ import {
     COLUMN_WIDTH,
     MOBILE_MAX_WIDTH,
     PINNED_ACTIONS_MIN_HEIGHT,
+    SHADE_FADE_HEIGHT,
     SHADE_PEEK_HEIGHT,
     SHADE_SEA_OVERLAP,
     SHADE_TOP_GAP,
@@ -27,6 +28,7 @@ export default defineConfig({
                     `@mobile-width: ${MOBILE_MAX_WIDTH}px;\n` +
                     `@pinned-actions-height: ${PINNED_ACTIONS_MIN_HEIGHT}px;\n` +
                     `@shade-peek: ${SHADE_PEEK_HEIGHT}px;\n` +
+                    `@shade-fade: ${SHADE_FADE_HEIGHT}px;\n` +
                     `@shade-top-gap: ${SHADE_TOP_GAP}px;\n` +
                     `@shade-sea-overlap: ${SHADE_SEA_OVERLAP}px;\n` +
                     `@short-window-height: ${SHORT_WINDOW_MAX_HEIGHT}px;\n` +

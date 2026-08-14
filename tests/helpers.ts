@@ -38,6 +38,19 @@ export const openNewChannel = async (page: Page, slug: string): Promise<void> =>
     await page.waitForTimeout(SCENE_READY_MS);
 };
 
+/**
+ * Сколько ждём, пока «сервер» запишет отправленное, мс.
+ *
+ * Запись идёт не в тот же тик, что нажатие: сперва общая очередь на запись, потом сама запись
+ * (см. exclusive в localBackend). «Сервер» при этом живёт в самой вкладке — уйти с неё на другой
+ * адрес раньше, чем очередь дошла до записи, значит унести отправленное с собой. Человек столько
+ * не успевает, а проверка, у которой следом стоит переход, успевает всегда.
+ *
+ * 300 мс — с запасом: сама задержка эмулятора 40 мс, очередь при незанятом замке проходится
+ * за такт.
+ */
+const WRITE_MS = 300;
+
 /** Заполнить форму постановки в строй и отправить её. */
 export const join = async (page: Page, name: string, hullNumber: string, shipKind?: string): Promise<void> => {
     await page.getByPlaceholder('Гром').fill(name);
@@ -46,6 +59,7 @@ export const join = async (page: Page, name: string, hullNumber: string, shipKin
         await page.getByText(shipKind, { exact: true }).click();
     }
     await page.locator('button[type=submit]').click();
+    await page.waitForTimeout(WRITE_MS);
 };
 
 /** Открыть шторку со списком кораблей. */
