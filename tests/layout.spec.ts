@@ -447,8 +447,10 @@ const measureHeights = async (page: Page, width: number, heights: number[]) => {
     const frames = [];
     for (const height of heights) {
         await page.setViewportSize({ width, height });
-        // Сцена меняет высоту не в тот же кадр: ждём, пока раскладка устоится.
-        await page.waitForTimeout(200);
+        // Сцена меняет высоту не в тот же кадр: ждём, пока раскладка устоится. Ждать приходится
+        // дольше самого перехода (@expand-seconds в motion.less): по нему едет не только коробка
+        // кадра, но и горизонт внутри — а меряем мы как раз его.
+        await page.waitForTimeout(600);
         frames.push({ height, ...(await seaFrame(page)) });
     }
     return frames;
@@ -916,6 +918,103 @@ test('сцена разворачивается во весь экран и св
         .poll(async () => (await sceneBox(page)).width, { message: 'сцена не вернулась в колонку' })
         .toBe(small.width);
     expect(await buttonWidth(page), 'кнопки в шапке остались крупными').toBe(smallButton);
+});
+
+/**
+ * Разворот — движение вниз, а не прыжок вверх и обратно. Держится это на двух вещах.
+ *
+ * Первая: --scene-height объявлена длиной (@property в index.less) и потому переходит
+ * во времени. Пока она менялась скачком, коробка шапки ехала своим переходом, а всё, что
+ * от этой мерки отмерено, вставало в конечное значение первым же кадром — и море под сценой
+ * полперехода не доставало до шторки, отчего в прогалине светился фон чата.
+ *
+ * Вторая: сама сцена в развёрнутом кадре считается другими правилами (см. .sceneFull), и её
+ * мерки — горизонт, вода под ним, месяц, отметки — переходят каждая сама, теми же секундами
+ * и той же кривой. Без этого смена класса в один кадр поднимала горизонт на полсотни пикселей,
+ * а месяц вместе с ним уходил под верхнюю кромку и менялся в размере.
+ *
+ * Проверяем поэтому не одну мерку, а всё, что должно ехать вместе, и в обе стороны: кадр,
+ * линию воды, месяц и его диск. Порознь каждая из них выглядела бы правильной — расходились
+ * они именно между собой.
+ */
+test('разворот на весь экран растекается вниз, а сворачивание — обратно', async ({ page }) => {
+    await openChannel(page, DEMO, ALBATROS);
+
+    // Замер идёт покадрово и изнутри страницы: снаружи каждый заход стоит миллисекунд, и весь
+    // переход в четыре десятых секунды успел бы кончиться за три замера.
+    const record = (label: string) =>
+        page.evaluate(async (name) => {
+            const probe = () => {
+                const moon = document.querySelector('[class*="moon_"]')!.getBoundingClientRect();
+                return {
+                    header: document.querySelector('header')!.getBoundingClientRect().height,
+                    sea: document.querySelector('[class*="sea_"]')!.getBoundingClientRect().top,
+                    moon: moon.top,
+                    disc: moon.height,
+                };
+            };
+            const taken = [probe()];
+            document.querySelector<HTMLElement>(`[aria-label="${name}"]`)!.click();
+            await new Promise<void>((resolve) => {
+                const tick = (): void => {
+                    taken.push(probe());
+                    if (taken.length < 40) {
+                        requestAnimationFrame(tick);
+                    } else {
+                        resolve();
+                    }
+                };
+                requestAnimationFrame(tick);
+            });
+            return taken;
+        }, label);
+
+    // Каждая мерка идёт подряд в одну сторону, без возвратов. Допуск в полпикселя — на дробную
+    // высоту и округление разметки, а не на движение: прыжки, которые ловит проверка, были
+    // в десятки пикселей.
+    const SLACK = 0.5;
+    const monotone = (values: number[], up: boolean): boolean =>
+        values.every((value, i) => i === 0 || (up ? value >= values[i - 1] - SLACK : value <= values[i - 1] + SLACK));
+    const check = (frames: Awaited<ReturnType<typeof record>>, up: boolean): void => {
+        const names = ['header', 'sea', 'moon', 'disc'] as const;
+        for (const name of names) {
+            const values = frames.map((frame) => frame[name]);
+            expect(monotone(values, up), `${name}: движение с возвратом`).toBe(true);
+        }
+    };
+
+    const out = await record('Развернуть сцену');
+    expect(out[out.length - 1].header, 'сцена не дошла до полного экрана').toBeGreaterThan(out[0].header * 1.4);
+    check(out, true);
+
+    const back = await record('Свернуть сцену');
+    expect(back[back.length - 1].header, 'сцена не вернулась в колонку').toBeLessThan(back[0].header * 0.6);
+    check(back, false);
+});
+
+/**
+ * Дымка над водой: полоска, засветляющая небо у горизонта. Проверяем не красоту, а два числа,
+ * на которых она держится, — рост и место: пятьдесят пикселей ровно над линией воды.
+ */
+test('дымка стоит над водой полоской в пятьдесят пикселей', async ({ page }) => {
+    await openChannel(page, DEMO, ALBATROS);
+
+    const measure = () =>
+        page.evaluate(() => {
+            const haze = document.querySelector('[class*="haze"]')!.getBoundingClientRect();
+            const sea = document.querySelector('[class*="_sea_"]')!.getBoundingClientRect();
+            return { height: haze.height, gap: haze.bottom - sea.top };
+        });
+
+    const small = await measure();
+    expect(small.height, 'дымка не в пятьдесят пикселей').toBe(50);
+    expect(Math.abs(small.gap), 'дымка не лежит на линии воды').toBeLessThan(1);
+
+    // На весь экран рост тот же: это слой воздуха у воды, а не часть рисунка, которую
+    // перспектива тянет вместе с кадром.
+    await page.getByRole('button', { name: 'Развернуть сцену' }).click();
+    await expect.poll(async () => (await measure()).height, { message: 'дымка выросла вместе с кадром' }).toBe(50);
+    expect(Math.abs((await measure()).gap), 'дымка сошла с линии воды').toBeLessThan(1);
 });
 
 /**

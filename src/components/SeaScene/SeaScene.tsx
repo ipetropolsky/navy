@@ -793,6 +793,10 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
             </div>
             <img className={styles.cloudFar} src={cloudFarUrl} alt="" />
             <img className={styles.cloudNear} src={cloudNearUrl} alt="" />
+            {/* Дымка над водой. Идёт после облаков и месяца, а не внутри неба: воздух у горизонта
+                затягивает всё, что стоит вдали, — и звёзды, и облако, лежащее на самой линии воды.
+                Небом её накрыть было бы нечем: месяц с облаками лежат отдельными слоями поверх. */}
+            <div className={styles.haze} />
             {/* Вода: та же склеенная полоса, что и небо, а поверх — она же, перевёрнутая ещё раз.
                 Верхняя проступает и гаснет, отчего рябь перетекает в собственное отражение. */}
             <div className={styles.sea} ref={seaRef}>

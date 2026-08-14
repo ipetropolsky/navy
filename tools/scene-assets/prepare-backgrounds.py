@@ -80,16 +80,18 @@ PENNANT_WIDTH = 320
 ARROW_SOURCE = 'arrow.png'
 ARROW_WIDTH = 320
 
-# В новом небе месяца нет, берём его из первой присланной картинки неба.
-MOON_SOURCE = 'sky_clean_3296x1028.png'
-MOON_REACH = 230
-MOON_WIDTH = 320
-MOON_CONTRAST = 55
-# Насколько пиксель должен быть ярче окрестного неба, чтобы попасть в слой вообще.
-# На исходнике у месяца, кроме серпа, слабо светится и вся остальная половина диска —
-# пепельный свет, превышение над фоном 10–30 против 95–190 у серпа. В кадре сцены он
-# читается не свечением, а большим мутным кругом вокруг месяца, и порог его срезает.
-MOON_FLOOR = 32
+# Месяц: готовая вырезка со свечением, уже с прозрачным фоном и уже в нужном размере.
+#
+# Раньше его вынимали из первой присланной картинки неба — в новом небе месяца нет, — и
+# вынимали тяжело: небо вокруг оценивали многократным размытием, а серп отделяли от него
+# порогом по превышению яркости. Порог этот заодно срезал и слабое свечение вокруг серпа,
+# которое в кадре читалось не свечением, а мутным кругом. Здесь свечение нарисовано, а не
+# осталось от вырезки, и срезать его больше нечем и незачем.
+#
+# Серп в новой картинке стоит там же, где стоял в вырезанной, — и в том же холсте 320×320,
+# — поэтому мерки месяца в стилях (@moon-disc, @moon-image, @moon-image-drop) остались
+# прежними: поменялось только то, что вокруг серпа.
+MOON_SOURCE = 'moon_glow_320x320.png'
 
 
 def prepare_sky() -> None:
@@ -181,47 +183,10 @@ def prepare_arrow() -> None:
 
 
 def prepare_moon() -> None:
-    img = Image.open(SOURCES / MOON_SOURCE).convert('RGB')
-    arr = np.asarray(img).astype(np.float32)
-    grey = arr.mean(axis=2)
-
-    # Месяц — самое яркое пятно на небе.
-    bright = grey > grey.max() * 0.93
-    labels, count = ndimage.label(ndimage.binary_dilation(bright, np.ones((5, 5))))
-    sizes = ndimage.sum(bright, labels, range(1, count + 1))
-    ys, xs = np.where(labels == int(np.argmax(sizes)) + 1)
-    center = (int(xs.mean()), int(ys.mean()))
-
-    box = (
-        max(center[0] - MOON_REACH, 0),
-        max(center[1] - MOON_REACH, 0),
-        min(center[0] + MOON_REACH, img.width),
-        min(center[1] + MOON_REACH, img.height),
-    )
-    crop = arr[box[1] : box[3], box[0] : box[2]]
-
-    # Небо вокруг месяца — плавный градиент: оцениваем его сильным размытием без яркой части.
-    lit = crop.mean(axis=2) > np.percentile(crop.mean(axis=2), 80)
-    background = crop.copy()
-    for _ in range(120):
-        blurred = np.dstack([ndimage.gaussian_filter(background[..., c], 6) for c in range(3)])
-        background[lit] = blurred[lit]
-
-    # Берём только то, что ярче неба: тёмного здесь нет вовсе (замер по исходнику: минимум
-    # превышения −3), а модуль разницы тянул бы в слой шум размытого фона.
-    alpha = np.clip(((crop - background).max(axis=2) - MOON_FLOOR) / MOON_CONTRAST, 0, 1)
-
-    # Гасим всё за пределами круга вокруг месяца, чтобы не тащить соседние звёзды и дымку.
-    rows, cols = np.ogrid[: crop.shape[0], : crop.shape[1]]
-    distance = np.hypot(rows - crop.shape[0] / 2, cols - crop.shape[1] / 2)
-    alpha *= np.clip((MOON_REACH * 0.8 - distance) / (MOON_REACH * 0.3), 0, 1)
-
-    moon = Image.fromarray(crop.astype(np.uint8), 'RGB').convert('RGBA')
-    moon.putalpha(Image.fromarray((alpha * 255).astype(np.uint8)))
-
-    height = round(moon.height * MOON_WIDTH / moon.width)
-    moon.resize((MOON_WIDTH, height), Image.LANCZOS).save(OUT / 'moon.png', optimize=True)
-    print('moon', (MOON_WIDTH, height))
+    """Месяц: перекладываем как есть — вырезка пришла готовой, см. MOON_SOURCE."""
+    moon = Image.open(SOURCES / MOON_SOURCE).convert('RGBA')
+    moon.save(OUT / 'moon.png', optimize=True)
+    print('moon', moon.size)
 
 
 def prepare_sea() -> None:
