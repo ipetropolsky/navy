@@ -38,13 +38,16 @@ import {
 } from '@/types/channel';
 
 import {
+    EdgeCourse,
     ENTER_GUARD,
     LEAVE_GUARD,
+    RelocateCourse,
     Shift,
     berthWidthPercent,
     leaveCourse,
     nodAngle,
     pathToEdge,
+    relocateCourse,
     sailSeconds,
     sailTrim,
     shiftAcross,
@@ -258,10 +261,15 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
     // Кто сейчас перезаходит: ушёл со старого места и ещё не появился на новом. Пока он в этом
     // списке, живого участника не рисуем — в кадре только его уходящий двойник из leavingById.
     const relocatingIds = useRef(new Set<string>());
-    // Куда перезаходящий вернётся: сторона захода на новом месте. Нужна ему, пока он ещё
-    // уходит со старого, — уход и заход считаются одним счётом, иначе корабль уходит в одну
-    // сторону, а появляется с другой, и выходит круг вокруг всей сцены (см. leaveCourse).
-    const returningTo = useRef(new Map<string, Side>());
+    // Весь манёвр перезаходящего: которой кромкой он уходит и которой вернётся. Считается
+    // один раз, в тот рендер, когда место переменилось, — и обеими сторонами сразу, иначе
+    // корабль уходит в одну сторону, а появляется с другой, и выходит круг вокруг всей сцены
+    // (см. relocateCourse). Живёт до конца захода: обе половины манёвра берут стороны отсюда.
+    //
+    // Хранится у каждой вкладки своё, а не в самом месте, — и это не оплошность: расклад
+    // на входе один и тот же во всех вкладках, а счёт не гадает. Так же считается и уход,
+    // и в кадре они сходятся.
+    const relocateCourses = useRef(new Map<string, RelocateCourse>());
     // Кто переходит по воде: сменил коридор, оставшись на своей дальности. Такой ход
     // отыгрывается целиком в кадре, без ухода за кромку, — см. shiftAcross. Здесь же
     // и весь его расчёт: он делается один раз, в тот рендер, когда место переменилось.
@@ -390,7 +398,16 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
                 shiftingById.current.set(member.memberId, shift);
             } else {
                 leavingById.current.set(member.memberId, { ...member, ...shown });
-                returningTo.current.set(member.memberId, member.place.enterFrom);
+                relocateCourses.current.set(
+                    member.memberId,
+                    relocateCourse(
+                        shown,
+                        next,
+                        // Помеха — те, кто остаётся стоять: сам себе корабль не помеха
+                        // ни на старом месте, ни на новом.
+                        members.filter((other) => other.memberId !== member.memberId).map((other) => other.place)
+                    )
+                );
                 relocatingIds.current.add(member.memberId);
             }
         }
@@ -512,6 +529,9 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
         // Перешедший по воде на этом и всё: он никуда не уходил и остаётся там же, где встал.
         shiftingById.current.delete(id);
         if (!leavingById.current.has(id)) {
+            // Сюда же приходит и перезаходящий, отработавший вторую половину манёвра: он встал
+            // на новое место, и стороны ему больше не нужны.
+            relocateCourses.current.delete(id);
             redraw();
             return;
         }
@@ -521,7 +541,6 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
         nodTimers.current.delete(id);
         noddingIds.current.delete(id);
         leavingById.current.delete(id);
-        returningTo.current.delete(id);
         if (!relocatingIds.current.has(id)) {
             redraw();
             return;
@@ -827,28 +846,35 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
                     // он не стоит — там стоит отметка места, а корабль разбросан внутри полосы
                     // и мог ещё и отойти от тесного соседа.
                     const shown = leftOf(member);
-                    const enterPath = pathToEdge(shown, width, member.place.enterFrom, ENTER_GUARD, overhang);
-                    // Уход: обычно вперёд, но счёт общий с заходом — см. leaveCourse. Задним ходом
-                    // корабль уходит, если впереди остров или сосед, а ещё если вперёд означает
-                    // круг вокруг всей сцены: перезаходящий возвращается с той стороны, куда ушёл.
-                    const leave = leaveCourse(
-                        member.place,
-                        member.shipKind,
-                        // Дорогу загораживают те, кто остаётся: сам себе корабль не помеха,
-                        // и уходящий сосед тоже — он уже трогается с места.
-                        placed
-                            .filter(
-                                (other) =>
-                                    other.memberId !== member.memberId && !leavingById.current.has(other.memberId)
-                            )
-                            .map((other) => other.place),
-                        returningTo.current.get(member.memberId)
-                    );
+                    // Перезаходящему обе стороны уже посчитаны разом, ещё на перемене места,
+                    // — см. relocateCourse. Новичку заход достался от бэкенда вместе с местом,
+                    // а уход считается здесь: обычно вперёд, но задним ходом, если впереди
+                    // остров или сосед.
+                    const relocating = relocateCourses.current.get(member.memberId);
+                    const enter: EdgeCourse = relocating?.enter ?? {
+                        side: member.place.enterFrom,
+                        // Заход обычно носом вперёд, но не всегда: на дальних слотах слева
+                        // остров, и корабль, которому назначен курс на остров, подходит справа
+                        // задним ходом. Видно это по месту: нос смотрит туда же, откуда пришёл.
+                        astern: member.place.facing === member.place.enterFrom,
+                    };
+                    const enterPath = pathToEdge(shown, width, enter.side, ENTER_GUARD, overhang);
+                    const leave =
+                        relocating?.leave ??
+                        leaveCourse(
+                            member.place,
+                            member.shipKind,
+                            // Дорогу загораживают те, кто остаётся: сам себе корабль не помеха,
+                            // и уходящий сосед тоже — он уже трогается с места.
+                            placed
+                                .filter(
+                                    (other) =>
+                                        other.memberId !== member.memberId && !leavingById.current.has(other.memberId)
+                                )
+                                .map((other) => other.place)
+                        );
                     const leavePath = pathToEdge(shown, width, leave.side, LEAVE_GUARD, overhang);
-                    // Заход обычно носом вперёд, но не всегда: на дальних слотах слева остров,
-                    // и корабль, которому назначен курс на остров, подходит справа задним ходом.
-                    // Видно это по месту: нос смотрит туда же, откуда корабль пришёл.
-                    const enterAstern = member.place.facing === member.place.enterFrom;
+                    const enterAstern = enter.astern;
                     const enterSeconds = sailSeconds(enterPath, member.place.slot, member.shipKind, enterAstern);
                     // Задний ход отличается только длительностью: кривая та же, а скорость ниже.
                     const leaveSeconds = sailSeconds(leavePath, member.place.slot, member.shipKind, leave.astern);
@@ -856,7 +882,7 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
                     // остальные — той же, которой заходили на рейд. Стоящему это не пустое значение,
                     // а память о последнем ходе: кивок на остановке отыгрывается уже без движения,
                     // а клюнуть носом корабль должен в ту сторону, в которую шёл.
-                    const course = leaving ? leave.side : (shift?.toward ?? otherSide(member.place.enterFrom));
+                    const course = leaving ? leave.side : (shift?.toward ?? otherSide(enter.side));
                     // Положительный угол поднимает левый край, поэтому идущему влево он и достаётся.
                     const bowUp = course === 'left' ? 1 : -1;
                     // Дифферент: приподнята та оконечность, которой корабль идёт вперёд.
@@ -915,7 +941,7 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
                                     // Ход в процентах ширины кадра: столько корабль смещён от своего
                                     // места, когда только появляется из-за кромки. Знак — сторона,
                                     // с которой он приходит.
-                                    '--enter-from': `${member.place.enterFrom === 'right' ? '' : '-'}${enterPath.toFixed(1)}%`,
+                                    '--enter-from': `${enter.side === 'right' ? '' : '-'}${enterPath.toFixed(1)}%`,
                                     '--enter-seconds': `${enterSeconds.toFixed(1)}s`,
                                     '--leave-to': `${leave.side === 'right' ? '' : '-'}${leavePath.toFixed(1)}%`,
                                     '--leave-seconds': `${leaveSeconds.toFixed(1)}s`,

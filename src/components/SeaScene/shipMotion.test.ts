@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest';
 
 import { ISLAND_FREE_SLOT, ShipKind, ShipPlacement, Side } from '@/types/channel';
 
-import { leaveCourse, shiftAcross } from '@/components/SeaScene/shipMotion';
+import { leaveCourse, relocateCourse, shiftAcross } from '@/components/SeaScene/shipMotion';
 
 /**
  * Куда корабль уходит из кадра. Правило это целиком счётное и в браузере проверяется дорого:
@@ -57,31 +57,52 @@ describe('уход с рейда', () => {
         // А сосед за кормой не помеха вовсе: корабль уходит вперёд, как и на пустом рейде.
         expect(leaveCourse(place, KIND, [at(NEAR, 'right', 'left')])).toEqual({ side: 'left', astern: false });
     });
-
-    test('перезаходящий уходит туда, откуда будет заходить, — хоть бы и задним ходом', () => {
-        // Наблюдённый случай, с которого шаг и начинался: корабль стоял в правом коридоре
-        // носом влево, а переставили его в левый коридор — заходить туда слева. Уход считался
-        // отдельно и уводил корабль вправо задним ходом: слева стоял сосед через линию.
-        // Выходил круг вокруг всей сцены, да ещё и кормой вперёд на первом перегоне.
-        const place = at(NEAR, 'right', 'left');
-        const neighbour = [at(NEAR - 1, 'left', 'right')];
-        expect(leaveCourse(place, KIND, neighbour, 'left')).toEqual({ side: 'left', astern: false });
-        // И наоборот: заходить справа — значит и уходить вправо, даже кормой вперёд. Круг
-        // вокруг сцены дороже разворота.
-        expect(leaveCourse(place, KIND, [], 'right')).toEqual({ side: 'right', astern: true });
-    });
-
-    test('круг вокруг сцены дешевле, чем сквозь соседа по своей линии', () => {
-        // Заходить кораблю слева, но слева же на его линии стоит другой. Пройти сквозь него
-        // нельзя ничем, и корабль уходит вправо, соглашаясь на круг.
-        const place = at(NEAR, 'right', 'left');
-        const sameLine = [at(NEAR, 'left', 'right')];
-        expect(leaveCourse(place, KIND, sameLine, 'left')).toEqual({ side: 'right', astern: true });
-    });
 });
 
 /** Корабль, каким его видит кадр: место да силуэт. Ровно это сцена и сравнивает при перемене. */
 const afloat = (place: ShipPlacement, shipKind: ShipKind = KIND) => ({ place, shipKind });
+
+describe('перезаход на новое место', () => {
+    test('на соседнюю линию своего коридора корабль выходит за ближнюю кромку и с неё же возвращается', () => {
+        // Наблюдённый случай: корабль в правом коридоре носом вправо переставили на соседнюю
+        // линию того же коридора. Заход был назначен наперёд, носом вперёд, то есть слева, —
+        // и уход подстраивался под него: корабль пятился через весь кадр влево и оттуда же
+        // шёл направо. Четыре пролёта там, где хватает двух.
+        //
+        // Считая оба перегона вместе, дешевле выходит выйти за правую кромку носом и оттуда же
+        // вернуться кормой вперёд: задний ход стоит два корпуса, а круг вокруг сцены — восемь.
+        const way = relocateCourse(afloat(at(9, 'right', 'right')), afloat(at(8, 'right', 'right')), []);
+        expect(way.leave).toEqual({ side: 'right', astern: false });
+        expect(way.enter).toEqual({ side: 'right', astern: true });
+    });
+
+    test('через весь рейд корабль по-прежнему заходит носом вперёд', () => {
+        // А вот когда места стоят у разных кромок, привычный ход и остаётся лучшим: уйти
+        // вперёд за правую кромку и зайти носом с левой. Возвращаться к правой ради того,
+        // чтобы пятиться через весь кадр, себе дороже даже с кругом вокруг сцены.
+        const way = relocateCourse(afloat(at(NEAR, 'right', 'right')), afloat(at(NEAR - 1, 'left', 'right')), []);
+        expect(way.leave).toEqual({ side: 'right', astern: false });
+        expect(way.enter).toEqual({ side: 'left', astern: false });
+    });
+
+    test('в остров не заходит никто', () => {
+        // На дальних слотах слева берег: заходить оттуда нельзя ни при каком курсе, и корабль
+        // с курсом на остров подходит справа — носом вперёд, потому что идёт он от правой
+        // кромки влево, туда же, куда смотрит.
+        const far = ISLAND_FREE_SLOT - 1;
+        const way = relocateCourse(afloat(at(NEAR, 'center', 'left')), afloat(at(far, 'center', 'left')), []);
+        expect(way.enter).toEqual({ side: 'right', astern: false });
+    });
+
+    test('сквозь соседа по своей линии корабль не заходит, даже соглашаясь на круг', () => {
+        // Заходить кораблю было бы удобно справа, но справа же на его новой линии стоит другой.
+        // Пройти сквозь него нельзя ничем — заход идёт с левой кромки, а с ним и уход.
+        const sameLine = [at(8, 'right', 'left')];
+        const way = relocateCourse(afloat(at(9, 'center', 'right')), afloat(at(8, 'center', 'right')), sameLine);
+        expect(way.enter.side).toBe('left');
+        expect(way.leave.side).toBe('left');
+    });
+});
 
 describe('переход по воде', () => {
     test('на соседний коридор своей же линии корабль переходит, а не перезаходит', () => {
