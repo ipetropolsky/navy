@@ -7,6 +7,7 @@ import {
     PINNED_ACTIONS_MIN_HEIGHT,
     SHADE_DESK_PEEK_HEIGHT,
     SHADE_PEEK_HEIGHT,
+    SHADE_SEA_OVERLAP,
     SHADE_TOP_GAP,
 } from '@/config/layout';
 import { SLOT_COUNT, slotDepth, slotShare } from '@/types/channel';
@@ -899,8 +900,10 @@ test('сцена разворачивается во весь экран и св
         .poll(async () => (await sceneBox(page)).width, { message: 'сцена не разошлась на всю ширину окна' })
         .toBe(window.width);
     // Не всё окно: снизу сцену поджимает сложенная шторка — из-под кадра всегда торчит её край.
+    // Заезжает она при этом на воду (SHADE_SEA_OVERLAP): нижняя полоска моря уходит под шторку,
+    // и кадр ровно на столько же выше, чем если бы они встали встык.
     expect((await sceneBox(page)).height, 'сцена не заняла окно по высоте').toBe(
-        window.height - SHADE_DESK_PEEK_HEIGHT
+        window.height - SHADE_DESK_PEEK_HEIGHT + SHADE_SEA_OVERLAP
     );
     expect(await buttonWidth(page), 'кнопки в шапке остались прежними').toBeGreaterThan(smallButton);
 
