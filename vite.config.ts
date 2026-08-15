@@ -13,7 +13,7 @@ import {
     MOBILE_MAX_WIDTH,
     SHEET_TOP_GAP,
     SHEET_WIDTH,
-    SIDE_MIN_WIDTH,
+    SIDE_GRIP,
     SIDE_WIDTH,
 } from './src/config/layout';
 
@@ -33,7 +33,7 @@ export default defineConfig({
                     `@sheet-top-gap: ${SHEET_TOP_GAP}px;\n` +
                     `@fade-height: ${FADE_HEIGHT}px;\n` +
                     `@side-width: ${SIDE_WIDTH}px;\n` +
-                    `@side-min-width: ${SIDE_MIN_WIDTH}px;\n`,
+                    `@side-grip: ${SIDE_GRIP}px;\n`,
             },
         },
     },

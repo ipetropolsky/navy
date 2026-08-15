@@ -1,9 +1,9 @@
 import { Channel, MAX_MESSAGE_LENGTH, Member, Message, SHIP_KIND_LABELS, ShipKind, isSameBerth } from '@/types/channel';
 import { isValidSlug } from '@/utils/slug';
+import { localStore } from '@/utils/storage';
 
 import { isBerthFree, placeShip } from '@/backend/placement';
 import { DEMO_CHANNEL_ID, createDemoChannel } from '@/backend/seed';
-import { localStore } from '@/backend/storage';
 import {
     ChannelBackend,
     ChannelError,

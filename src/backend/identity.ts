@@ -1,4 +1,4 @@
-import { sessionStore } from '@/backend/storage';
+import { sessionStore } from '@/utils/storage';
 
 /**
  * Кто эта вкладка в канале. Лежит отдельно от данных «сервера»: бэкенд знает про всех

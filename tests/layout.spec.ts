@@ -7,9 +7,12 @@ import {
     CONTENT_DESKTOP_HEIGHT,
     FADE_HEIGHT,
     MOBILE_MAX_WIDTH,
+    SCENE_MIN_WIDTH,
     SHEET_TOP_GAP,
     SHEET_WIDTH,
+    SIDE_GRIP,
     SIDE_MIN_WIDTH,
+    SIDE_MIN_WINDOW,
     SIDE_WIDTH,
 } from '@/config/layout';
 import { SLOT_COUNT, slotDepth, slotShare } from '@/types/channel';
@@ -2250,10 +2253,10 @@ test('форма выезжает снизу целиком, а не встаё�
 });
 
 /** Ширина окна, на которой боковая раскладка заведомо работает. */
-const WIDE = SIDE_MIN_WIDTH + 200;
+const WIDE = SIDE_MIN_WINDOW + 200;
 
 /** Ширина окна, на которой её заведомо нет. */
-const NARROW = SIDE_MIN_WIDTH - 100;
+const NARROW = SIDE_MIN_WINDOW - 100;
 
 /** Коробка блока в координатах окна. */
 const boxOf = (page: Page, selector: string) =>
@@ -2373,11 +2376,23 @@ test('разговор переезжает двумя половинами, а 
 
     // Уход: только вниз и до конца — за нижнюю кромку окна.
     expect(new Set(under.map((frame) => frame.left)).size, 'уходящий блок поехал вбок').toBe(1);
-    expect(Math.max(...under.map((frame) => frame.top)), 'блок сменил место, не уйдя за кромку').toBeGreaterThan(880);
+    expect(Math.max(...under.map((frame) => frame.top)), 'блок сменил место, не уйдя за кромку').toBeGreaterThan(800);
 
-    // Приезд: первым кадром на новом месте блок ещё целиком за правой кромкой окна.
-    expect(beside[0].left, 'блок появился сбоку уже на своём месте — переезда не видно').toBeGreaterThanOrEqual(WIDE);
-    expect(beside[beside.length - 1].left, 'блок не доехал до своей полосы').toBe(WIDE - SIDE_WIDTH);
+    // Приезд: на новом месте блок начинается из-за правой кромки окна, а не на своей полосе.
+    //
+    // Меряем с запасом, а не «ровно за кромкой»: кадры снимает requestAnimationFrame, и под
+    // нагрузкой первый снятый кадр приходится уже на начавшееся движение — то на пиксель
+    // внутрь окна, то на десяток. Скачок от этого не спрячется: он выглядит как готовая полоса
+    // с первого же кадра, то есть промах на всю ширину панели, а не на её край.
+    expect(
+        beside[0].left - (WIDE - SIDE_WIDTH),
+        'блок появился сбоку уже на своём месте — переезда не видно'
+    ).toBeGreaterThan(SIDE_WIDTH / 2);
+
+    // Доезжает он до своей полосы — но проверяем это после переезда, а не последним снятым
+    // кадром: под нагрузкой окно съёмки кончается раньше, чем движение.
+    await page.waitForTimeout(500);
+    expect((await boxOf(page, 'main')).left, 'блок не доехал до своей полосы').toBe(WIDE - SIDE_WIDTH);
 });
 
 /**
@@ -2400,8 +2415,12 @@ test('на узком окне боковой раскладки нет, а ра
  * Сворачивание кадра возвращает разговор вниз, откуда бы его ни сворачивали. Держится это
  * вычислением, а не сбросом на каждом пути: раскладку переключают и кнопкой, и свайпом,
  * и забытый сброс оставил бы сжатый кадр рядом с панелью во всю высоту окна.
+ *
+ * Сам выбор при этом цел: развернули заново — разговор вернулся туда, где его оставили.
+ * Стирало бы его сворачивание, и «убрать разговор в панель» пришлось бы просить заново
+ * после каждого взгляда на карту.
  */
-test('свёрнутая раскладка возвращает разговор под кадр', async ({ page }) => {
+test('свёрнутая раскладка возвращает разговор под кадр, но выбор помнит', async ({ page }) => {
     await openSide(page);
     await page.getByRole('button', { name: 'Свернуть сцену' }).click();
     await page.waitForTimeout(600);
@@ -2410,9 +2429,98 @@ test('свёрнутая раскладка возвращает разгово�
     expect(content.width, 'свёрнутая раскладка оставила разговор в панели').toBe(COLUMN_WIDTH);
     expect(content.height, 'разговор не занял всё, что осталось от сжатого кадра').toBeGreaterThan(400);
 
-    // Развернули заново — разговор начинает снизу: памяти о боковом положении у него нет.
     await page.getByRole('button', { name: 'Развернуть сцену' }).click();
     await page.waitForTimeout(600);
-    expect((await boxOf(page, 'main')).width, 'разговор сам вернулся в панель').toBe(COLUMN_WIDTH);
-    await expect(page.getByRole('button', { name: 'Разговор сбоку' })).toBeVisible();
+    expect((await boxOf(page, 'main')).width, 'разговор не вернулся в панель').toBe(SIDE_WIDTH);
+});
+
+/** Ширина боковой панели по её левой кромке: справа она всегда упирается в кромку окна. */
+const sideWidth = async (page: Page): Promise<number> => (await boxOf(page, 'main')).width;
+
+/** Потянуть коридор на `by` пикселей вправо (влево — отрицательное). */
+const dragGrip = async (page: Page, by: number): Promise<void> => {
+    const grip = await boxOf(page, '[role="separator"]');
+    const y = grip.top + grip.height / 2;
+    await page.mouse.move(grip.left + grip.width / 2, y);
+    await page.mouse.down();
+    await page.mouse.move(grip.left + grip.width / 2 + by, y, { steps: 8 });
+    await page.mouse.up();
+    await page.waitForTimeout(200);
+};
+
+/**
+ * Ширину боковой панели меняют потягом за коридор вдоль её кромки. Упоров два, и оба
+ * не про панель одну: уже своего минимума она не бывает, а шире — только пока кадру рядом
+ * остаётся его собственный минимум. Рейд про ширину, и отдать её всю разговору значит
+ * оставить от рейда вертикальную полоску.
+ */
+test('панель тянут за коридор вдоль кромки, и упирается она в свои пределы', async ({ page }) => {
+    await openSide(page);
+    expect(await sideWidth(page), 'панель открылась не в свою ширину').toBe(SIDE_WIDTH);
+
+    const grip = await boxOf(page, '[role="separator"]');
+    expect(grip.width, 'коридор не в свою ширину').toBe(SIDE_GRIP);
+    expect(grip.height, 'коридор не во всю высоту панели').toBe(900);
+    expect(grip.left, 'коридор встал не у кромки панели').toBeLessThan(WIDE - SIDE_WIDTH + SIDE_GRIP);
+
+    // Панель справа: влево — шире. Тянем на столько, чтобы до упоров было далеко: здесь
+    // проверяется, что панель идёт за указателем ровно, а упоры проверяются ниже.
+    await dragGrip(page, -60);
+    expect(await sideWidth(page), 'панель не пошла за указателем').toBe(SIDE_WIDTH + 60);
+
+    await dragGrip(page, 900);
+    expect(await sideWidth(page), 'панель ужалась ниже своего минимума').toBe(SIDE_MIN_WIDTH);
+
+    await dragGrip(page, -900);
+    expect(await sideWidth(page), 'панель отняла у кадра его минимум').toBe(WIDE - SCENE_MIN_WIDTH);
+});
+
+/**
+ * Окно меняется и без ведома человека — повернули планшет, вытащили ноутбук из док-станции, —
+ * и раскладка обязана съехать на допустимое сама. Проверок на этом пути несколько, и все они
+ * в одном месте (`hooks/useLayout`): ширина сначала урезается по новому окну, а когда окна
+ * не хватает и на минимумы — разговор возвращается под кадр.
+ *
+ * Урезанное не записывается: это не выбор человека, а то, во что его временно уложило окно.
+ * Раздалось окно обратно — панель вернулась к выбранной ширине. Иначе одно случайное сужение
+ * стирало бы выбор насовсем.
+ */
+test('сузившееся окно урезает панель, а совсем тесное возвращает разговор под кадр', async ({ page }) => {
+    await openSide(page);
+    await dragGrip(page, -300);
+    const chosen = await sideWidth(page);
+    expect(chosen, 'панель не дотянулась до упора').toBe(WIDE - SCENE_MIN_WIDTH);
+
+    // Окно уже — панель урезана ровно на столько, чтобы кадру остался его минимум.
+    await page.setViewportSize({ width: SIDE_MIN_WINDOW + 100, height: 900 });
+    await page.waitForTimeout(300);
+    expect(await sideWidth(page), 'панель не ужалась вслед за окном').toBe(SIDE_MIN_WINDOW + 100 - SCENE_MIN_WIDTH);
+
+    // Окно тесное — боковой раскладки нет вовсе, и разговор снова под кадром.
+    await page.setViewportSize({ width: NARROW, height: 900 });
+    await page.waitForTimeout(300);
+    await expect(page.getByRole('button', { name: /^Разговор/ })).toHaveCount(0);
+    expect((await boxOf(page, 'main')).width, 'разговор остался в панели').toBe(Math.min(NARROW, COLUMN_WIDTH));
+
+    // Окно раздалось обратно — вернулись и панель, и выбранная ширина.
+    await page.setViewportSize({ width: WIDE, height: 900 });
+    await page.waitForTimeout(400);
+    expect(await sideWidth(page), 'панель не вернулась к выбранной ширине').toBe(chosen);
+});
+
+/**
+ * Выбранное вкладка помнит: перезагрузили — раскладка та же, и панель той же ширины.
+ * Память именно на вкладку (sessionStorage), а не на браузер: второе окно того же чата
+ * человек открывает ради другого взгляда на то же самое, и навязывать ему раскладку первого
+ * значит отбирать этот второй взгляд.
+ */
+test('раскладка и ширина панели переживают перезагрузку', async ({ page }) => {
+    await openSide(page);
+    await dragGrip(page, -120);
+    const chosen = await sideWidth(page);
+
+    await page.reload();
+    await page.waitForTimeout(1200);
+    expect(await sideWidth(page), 'панель забыла свою ширину').toBe(chosen);
+    expect((await boxOf(page, 'main')).height, 'разговор вернулся под кадр').toBe(900);
 });

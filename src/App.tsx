@@ -1,5 +1,8 @@
 import {
     AnimationEvent as ReactAnimationEvent,
+    CSSProperties,
+    KeyboardEvent as ReactKeyboardEvent,
+    PointerEvent as ReactPointerEvent,
     TransitionEvent,
     useCallback,
     useEffect,
@@ -24,6 +27,7 @@ import { useSnackbar } from '@/components/ui/Snackbar';
 import TopFade from '@/components/ui/TopFade';
 import { HAIL_SIGNAL, morseDuration } from '@/hooks/morse';
 import { useChannel } from '@/hooks/useChannel';
+import { useLayout } from '@/hooks/useLayout';
 import { useSlide } from '@/hooks/useSlide';
 import { useSwipe } from '@/hooks/useSwipe';
 import { channelLink, useRoute } from '@/routing';
@@ -50,6 +54,14 @@ const HAIL_HOLD_MS = morseDuration(HAIL_SIGNAL) + 1200;
  * должно только тогда, когда события уже точно не будет.
  */
 const MOVE_GRACE_MS = 600;
+
+/**
+ * На сколько стрелка двигает кромку боковой панели, px, и на сколько — стрелка с Shift.
+ * Шаг мелкий нарочно: с клавиатуры ширину доводят, а не выбирают заново, — а для «заново»
+ * есть Home и End.
+ */
+const GRIP_STEP = 16;
+const GRIP_STEP_BIG = 64;
 
 /** С каким кораблём открывается форма у того, кто ещё не в строю. */
 const DEFAULT_SHIP_KIND: ShipKind = 'pr12412';
@@ -92,17 +104,13 @@ export default function App() {
     const [editing, setEditing] = useState(false);
     const notify = useSnackbar();
 
-    // Раскладка «больше сцены»: кадр забирает окно, блоку контента остаётся сжатая мерка.
-    // Одно состояние на всё приложение, а не на экран: развернул в разговоре — открыл форму
-    // корабля и выбираешь место на том же большом кадре.
-    const [expanded, setExpanded] = useState(false);
+    // Раскладка целиком: развёрнут ли кадр, стоит ли разговор сбоку и какой он ширины. Всё
+    // это выбирает человек, всё это помнит вкладка, и всё это сверено с нынешним окном — одним
+    // местом на все проверки, см. hooks/useLayout. Здесь остаётся только пользоваться готовым:
+    // `side` уже значит «стоит сбоку и в это окно это помещается».
+    const { layout, choose, resizeSide, keep } = useLayout();
+    const { expanded, side: atSide, sideWidth, sideFits } = layout;
 
-    // Где стоит блок контента: под кадром или сбоку от него. Второе положение бывает только
-    // в развёрнутой раскладке и только на широком окне — сузилось окно, и правила боковой
-    // раскладки просто перестают применяться (см. @side-min-width в App.module.less).
-    // Свёрнутая раскладка возвращает блок вниз: сбоку он стоит во всю высоту окна, а сжатому
-    // кадру рядом с ним не остаётся ничего.
-    const [side, setSide] = useState(false);
     // Переезд: 'out' — блок уходит с прежнего места, 'in' — приезжает на новое. Пока не
     // переезжает, его нет вовсе. Половинки идут по очереди, и место меняется между ними —
     // одно движение из угла в угол было бы полётом коробки через всю сцену.
@@ -111,27 +119,18 @@ export default function App() {
     // Раскладку переключает не только кнопка, но и свайп по кадру: сжатый раздаётся движением
     // вниз, раздутый сжимается движением вверх — палец ведёт кромку кадра туда, куда она поедет.
     // Обратные движения кадр не трогают, и потяг страницы к обновлению на них работает как был.
+    //
+    // Свернули кадр — разговор возвращается вниз сам: сбоку он стоит во всю высоту окна,
+    // а сжатому кадру рядом с ним не остаётся ничего, и раскладка это знает без напоминаний.
+    // Переезда при этом нет: кадр в этот миг и так едет, и второе движение поверх него
+    // читалось бы поломкой. Выбор «разговор сбоку» никуда не девается — развернут кадр
+    // обратно, и разговор вернётся туда, где его оставили.
     const sceneRef = useRef<HTMLDivElement>(null);
-    const switchLayout = useCallback(
-        () =>
-            setExpanded((was) => {
-                if (was) {
-                    // Свернули кадр — разговор возвращается вниз, и без переезда: кадр в этот
-                    // миг и так едет, и второе движение поверх него читалось бы поломкой.
-                    setSide(false);
-                    setMoving(null);
-                }
-                return !was;
-            }),
-        []
-    );
+    const switchLayout = useCallback(() => {
+        choose((was) => ({ expanded: !was.expanded }));
+        setMoving(null);
+    }, [choose]);
     useSwipe(sceneRef, expanded ? 'up' : 'down', switchLayout);
-
-    // Где блок стоит на самом деле. Боковое положение бывает только в развёрнутой раскладке,
-    // и держится это вычислением, а не порядком вызовов: раскладку переключают и кнопкой,
-    // и свайпом, и стоит одному пути забыть про сброс — свёрнутый кадр окажется рядом
-    // с панелью во всю высоту окна, то есть нигде.
-    const atSide = side && expanded;
 
     // Пустой список — тоже список, но новый на каждой отрисовке: без useMemo он менял бы
     // ссылку каждый раз и заставлял пересчитывать всё, что от него зависит.
@@ -401,7 +400,7 @@ export default function App() {
      */
     const handleContentTransitionEnd = (event: TransitionEvent<HTMLElement>) => {
         if (moving === 'out' && event.target === event.currentTarget && event.propertyName === 'transform') {
-            setSide((was) => !was);
+            choose((was) => ({ side: !was.side }));
             setMoving('in');
         }
     };
@@ -425,14 +424,77 @@ export default function App() {
         }
         const timer = window.setTimeout(() => {
             if (moving === 'out') {
-                setSide((was) => !was);
+                choose((was) => ({ side: !was.side }));
                 setMoving('in');
             } else {
                 setMoving(null);
             }
         }, MOVE_GRACE_MS);
         return () => window.clearTimeout(timer);
-    }, [moving]);
+    }, [moving, choose]);
+
+    /**
+     * Потяг за коридор вдоль кромки боковой панели.
+     *
+     * Слушаем окно, а не сам коридор: он шириной в шестнадцать пикселей, и первый же шаг
+     * указателя выносит палец за его кромку. Записываем начало потяга, а не считаем сдвиг
+     * от кадра к кадру: ширина по дороге упирается в пределы, и накопленный сдвиг разошёлся
+     * бы с указателем ровно на то, что срезали упоры.
+     *
+     * Панель стоит справа, поэтому влево — шире.
+     */
+    const dragFrom = useRef<{ x: number; width: number } | null>(null);
+    const [dragging, setDragging] = useState(false);
+
+    const handleGripDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+        dragFrom.current = { x: event.clientX, width: sideWidth };
+        setDragging(true);
+    };
+
+    useEffect(() => {
+        if (!dragging) {
+            return undefined;
+        }
+        const onMove = (event: PointerEvent) => {
+            const from = dragFrom.current;
+            if (from) {
+                resizeSide(from.width + (from.x - event.clientX));
+            }
+        };
+        const onUp = () => {
+            setDragging(false);
+            keep();
+        };
+        window.addEventListener('pointermove', onMove);
+        window.addEventListener('pointerup', onUp);
+        // Потяг обрывают и без отпускания — системным жестом, потерей окна. Ширина при этом
+        // остаётся той, до которой дотянули: отматывать её обратно человек не просил.
+        window.addEventListener('pointercancel', onUp);
+        return () => {
+            window.removeEventListener('pointermove', onMove);
+            window.removeEventListener('pointerup', onUp);
+            window.removeEventListener('pointercancel', onUp);
+        };
+    }, [dragging, resizeSide, keep]);
+
+    /**
+     * Тот же коридор с клавиатуры: стрелками по шагу, Home и End — до упора. Коридор объявлен
+     * разделителем (role="separator") и умеет то, что разделителю положено уметь; без этого
+     * ширину панели нельзя было бы поменять вовсе, не взяв в руки мышь.
+     */
+    const handleGripKey = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+        const step = event.shiftKey ? GRIP_STEP_BIG : GRIP_STEP;
+        const to = {
+            ArrowLeft: sideWidth + step,
+            ArrowRight: sideWidth - step,
+            Home: layout.maxWidth,
+            End: layout.minWidth,
+        }[event.key];
+        if (to !== undefined) {
+            event.preventDefault();
+            resizeSide(to, true);
+        }
+    };
 
     const contentLook = [
         styles.content,
@@ -445,9 +507,17 @@ export default function App() {
 
     return (
         <div
-            className={[styles.app, expanded ? styles.appExpanded : '', atSide ? styles.appSide : '']
+            className={[
+                styles.app,
+                expanded ? styles.appExpanded : '',
+                atSide ? styles.appSide : '',
+                dragging ? styles.appDragging : '',
+            ]
                 .filter(Boolean)
                 .join(' ')}
+            // Ширина боковой панели — одним числом на всё, что этой ширины: сама панель,
+            // шторка внутри неё и затемнение под шторкой (см. --side-width в стилях).
+            style={{ '--side-width': `${sideWidth}px` } as CSSProperties}
         >
             <header className={[styles.header, atSide ? styles.headerSide : ''].filter(Boolean).join(' ')}>
                 <div className={styles.scene} ref={sceneRef}>
@@ -534,39 +604,38 @@ export default function App() {
                         {/* Куда поставить разговор — вниз под кадр или сбоку от него.
                             Кнопка есть только в развёрнутой раскладке: в свёрнутой сбоку
                             стоять нечему, там сжат сам кадр. На узком окне её нет вовсе —
-                            прячет её то же правило, по которому не работает и сама боковая
-                            раскладка (см. .wideOnly).
+                            и решает это тот же ответ, по которому не работает и сама боковая
+                            раскладка (sideFits, см. hooks/useLayout): кнопка, которая ничего
+                            не меняет, не бесполезна, а лжива.
 
                             Значок — плашка с отделённой полосой: справа, когда разговор
                             встанет сбоку, и снизу, когда вернётся вниз. Рисунок один,
                             меняется только та сторона, к которой прижата полоса. */}
-                        {inChat && expanded && (
-                            <span className={styles.wideOnly}>
-                                <IconButton
-                                    onClick={() => setMoving('out')}
-                                    aria-label={side ? 'Разговор под кадром' : 'Разговор сбоку'}
-                                >
-                                    <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
-                                        <rect
-                                            x="3"
-                                            y="4"
-                                            width="18"
-                                            height="16"
-                                            rx="2"
-                                            stroke="currentColor"
-                                            strokeWidth="2"
-                                            fill="none"
-                                        />
-                                        <path
-                                            d={side ? 'M3 15h18' : 'M15 4v16'}
-                                            stroke="currentColor"
-                                            strokeWidth="2"
-                                            strokeLinecap="round"
-                                            fill="none"
-                                        />
-                                    </svg>
-                                </IconButton>
-                            </span>
+                        {inChat && expanded && sideFits && (
+                            <IconButton
+                                onClick={() => setMoving('out')}
+                                aria-label={atSide ? 'Разговор под кадром' : 'Разговор сбоку'}
+                            >
+                                <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+                                    <rect
+                                        x="3"
+                                        y="4"
+                                        width="18"
+                                        height="16"
+                                        rx="2"
+                                        stroke="currentColor"
+                                        strokeWidth="2"
+                                        fill="none"
+                                    />
+                                    <path
+                                        d={atSide ? 'M3 15h18' : 'M15 4v16'}
+                                        stroke="currentColor"
+                                        strokeWidth="2"
+                                        strokeLinecap="round"
+                                        fill="none"
+                                    />
+                                </svg>
+                            </IconButton>
                         )}
                         {/* Переключатель раскладки. Значок — стрелки по диагонали: в разные
                             стороны, когда разворачивать, и к середине, когда сворачивать.
@@ -620,6 +689,24 @@ export default function App() {
                             />
                         </TopFade>
                     </div>
+                )}
+                {/* Коридор вдоль кромки панели: за него меняют её ширину. Лежит он в самом
+                    блоке, а не рядом с ним, — и потому переезжает вместе с ним и не остаётся
+                    висеть посреди сцены, пока блок едет. Пока блок в пути, коридора нет вовсе:
+                    тянуть едущее не за что. */}
+                {atSide && !moving && (
+                    <div
+                        className={styles.grip}
+                        onPointerDown={handleGripDown}
+                        onKeyDown={handleGripKey}
+                        role="separator"
+                        aria-orientation="vertical"
+                        aria-label="Ширина разговора"
+                        aria-valuenow={Math.round(sideWidth)}
+                        aria-valuemin={layout.minWidth}
+                        aria-valuemax={layout.maxWidth}
+                        tabIndex={0}
+                    />
                 )}
             </main>
             {/* Список кораблей — шторкой поверх всего. Закрывается совсем, а не складывается:
