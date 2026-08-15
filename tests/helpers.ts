@@ -17,11 +17,42 @@ export const VYMPEL = 'm-vympel';
 const SCENE_READY_MS = 1500;
 
 /**
+ * Раскладка, с которой открывается вкладка в проверках: кадр сжат, разговор под ним.
+ *
+ * Приложение на широком окне открывается иначе — развёрнутым кадром и разговором сбоку
+ * (см. `defaultWish` в hooks/useLayout), — и это правильно для человека, но не для проверок:
+ * почти все они про разговор, про шторку и про кадр в колонке, и каждой пришлось бы начинаться
+ * с двух нажатий по шапке. Записываем выбор в хранилище до первой отрисовки — ровно так же,
+ * как его записала бы вкладка, в которой раскладку уже трогали руками.
+ *
+ * Проверки самой раскладки хранилище не трогают и открывают страницу сами: им как раз важно,
+ * с чем приложение открывается, когда вкладке нечего вспомнить.
+ */
+const startCollapsed = async (page: Page): Promise<void> => {
+    // Записывается это только в пустое хранилище: скрипт выполняется перед каждым переходом,
+    // и без проверки он затирал бы то, что вкладка выбрала по ходу проверки, — в том числе
+    // на перезагрузке, которой как раз и проверяют память о раскладке.
+    await page.addInitScript(() => {
+        // Хранилище тут дёргается напрямую в обход обёртки из utils/storage: этот кусок
+        // выполняется в браузере до приложения и своего кода не видит вовсе.
+        /* eslint-disable no-restricted-syntax */
+        if (!window.sessionStorage.getItem('navy:layout')) {
+            window.sessionStorage.setItem(
+                'navy:layout',
+                JSON.stringify({ expanded: false, side: false, sideShare: 1 / 3 })
+            );
+        }
+        /* eslint-enable no-restricted-syntax */
+    });
+};
+
+/**
  * Открыть канал. `memberId` в адресе перебивает сохранённую личность вкладки — так вторая
  * вкладка говорит за другой корабль, не трогая первую.
  */
 export const openChannel = async (page: Page, slug = DEMO, memberId?: string): Promise<void> => {
     const address = memberId ? `/?channel=${slug}&memberId=${memberId}` : `/?channel=${slug}`;
+    await startCollapsed(page);
     await page.goto(address, { waitUntil: 'networkidle' });
     await page.waitForTimeout(SCENE_READY_MS);
 };
@@ -31,6 +62,7 @@ export const openChannel = async (page: Page, slug = DEMO, memberId?: string): P
  * и он же — свой: в демо-канале на рейде уже стоит эскадра.
  */
 export const openNewChannel = async (page: Page, slug: string): Promise<void> => {
+    await startCollapsed(page);
     await page.goto('/', { waitUntil: 'networkidle' });
     await page.getByPlaceholder('Эскадра «Полночь»').fill(slug);
     await page.locator('input[placeholder="eskadra-polnoch"]').fill(slug);
@@ -130,7 +162,7 @@ export interface StoredState {
  * строчка появляется не мгновенно — сперва ответ бэкенда, потом отрисовка, — и проверять её
  * надо ожидающим `expect`, иначе гонка.
  */
-export const systemLines = (page: Page) => page.locator('[class*="systemChip"]');
+export const systemLines = (page: Page) => page.locator('[class*="systemNote"]');
 
 /** Пузыри с репликами. Системные строчки сюда не попадают: они не пузыри. */
 export const bubbles = (page: Page) => page.locator('[class*="bubble"]');

@@ -262,7 +262,10 @@
     margin-inline: 0;
     border-top: 0;
     border-left: 1px solid var(--color-border);
-    border-radius: 16px 0 0 16px;
+    // Сбоку панель не скругляется: она стоит во всю высоту окна и от кромки до кромки,
+    // и скруглять ей нечего — скругление отделяет блок от того, что вокруг, а вокруг тут
+    // только край экрана.
+    border-radius: 0;
 }
 
 .contentSide.contentGoing {

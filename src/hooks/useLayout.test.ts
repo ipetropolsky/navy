@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { SCENE_MIN_WIDTH, SIDE_MIN_WIDTH, SIDE_MIN_WINDOW, SIDE_WIDTH } from '@/config/layout';
-import { LayoutWish, allowedLayout } from '@/hooks/useLayout';
+import { SCENE_MIN_WIDTH, SIDE_MIN_WIDTH, SIDE_MIN_WINDOW, SIDE_SHARE } from '@/config/layout';
+import { LayoutWish, allowedLayout, defaultWish } from '@/hooks/useLayout';
 
 /**
  * Сверка выбранной раскладки с окном. Здесь только сама проверка — без окна, без хранилища
@@ -12,7 +12,7 @@ import { LayoutWish, allowedLayout } from '@/hooks/useLayout';
 const wish = (patch: Partial<LayoutWish> = {}): LayoutWish => ({
     expanded: true,
     side: true,
-    sideWidth: SIDE_WIDTH,
+    sideShare: SIDE_SHARE,
     ...patch,
 });
 
@@ -20,7 +20,7 @@ describe('allowedLayout', () => {
     it('в просторном окне отдаёт выбранное как есть', () => {
         const layout = allowedLayout(wish(), 1400);
         expect(layout.side).toBe(true);
-        expect(layout.sideWidth).toBe(SIDE_WIDTH);
+        expect(layout.sideWidth).toBe(Math.round(1400 * SIDE_SHARE));
         expect(layout.sideFits).toBe(true);
     });
 
@@ -42,12 +42,18 @@ describe('allowedLayout', () => {
         expect(allowedLayout(wish(), SIDE_MIN_WINDOW).sideWidth).toBe(SIDE_MIN_WIDTH);
     });
 
+    it('доля переводится в пиксели по нынешнему окну', () => {
+        // Одна и та же треть на разных окнах даёт разную панель — в этом весь смысл доли.
+        expect(allowedLayout(wish({ sideShare: 1 / 3 }), 1200).sideWidth).toBe(400);
+        expect(allowedLayout(wish({ sideShare: 1 / 3 }), 1800).sideWidth).toBe(600);
+    });
+
     it('ширина не уходит ниже своего минимума', () => {
-        expect(allowedLayout(wish({ sideWidth: 40 }), 1400).sideWidth).toBe(SIDE_MIN_WIDTH);
+        expect(allowedLayout(wish({ sideShare: 0.05 }), 1400).sideWidth).toBe(SIDE_MIN_WIDTH);
     });
 
     it('ширина не отнимает у кадра его минимум', () => {
-        const layout = allowedLayout(wish({ sideWidth: 1200 }), 1400);
+        const layout = allowedLayout(wish({ sideShare: 0.9 }), 1400);
         expect(layout.sideWidth).toBe(1400 - SCENE_MIN_WIDTH);
         expect(layout.maxWidth).toBe(1400 - SCENE_MIN_WIDTH);
     });
@@ -56,7 +62,7 @@ describe('allowedLayout', () => {
         // Кадру тут не хватает и своего минимума, и потолок вышел бы отрицательным. Панель
         // в таком окне не показывают вовсе, но пределы обязаны остаться пригодными к счёту:
         // на них считается и потяг, и подписи у коридора.
-        const layout = allowedLayout(wish({ sideWidth: SIDE_WIDTH }), 400);
+        const layout = allowedLayout(wish(), 400);
         expect(layout.maxWidth).toBe(SIDE_MIN_WIDTH);
         expect(layout.sideWidth).toBe(SIDE_MIN_WIDTH);
         expect(layout.side).toBe(false);
@@ -65,5 +71,20 @@ describe('allowedLayout', () => {
     it('раскладку «больше сцены» окно не отменяет', () => {
         // Разворот кадра — про высоту, а не про ширину: на телефоне он такой же законный.
         expect(allowedLayout(wish({ expanded: true, side: false }), 320).expanded).toBe(true);
+    });
+});
+
+describe('defaultWish', () => {
+    it('в окне под боковую раскладку открывает кадр во всё окно и разговор сбоку', () => {
+        const layout = allowedLayout(defaultWish(1400), 1400);
+        expect(layout.expanded).toBe(true);
+        expect(layout.side).toBe(true);
+        expect(layout.sideWidth).toBe(Math.round(1400 * SIDE_SHARE));
+    });
+
+    it('в узком окне открывает как раньше: кадр сжат, разговор под ним', () => {
+        const layout = allowedLayout(defaultWish(700), 700);
+        expect(layout.expanded).toBe(false);
+        expect(layout.side).toBe(false);
     });
 });

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 
-import { SCENE_MIN_WIDTH, SIDE_MIN_WIDTH, SIDE_MIN_WINDOW, SIDE_WIDTH } from '@/config/layout';
+import { SCENE_MIN_WIDTH, SIDE_MIN_WIDTH, SIDE_MIN_WINDOW, SIDE_SHARE } from '@/config/layout';
 import { sessionStore } from '@/utils/storage';
 
 /**
@@ -27,14 +27,22 @@ export interface LayoutWish {
     expanded: boolean;
     /** Разговор сбоку от кадра, а не под ним. */
     side: boolean;
-    /** Ширина боковой панели, px. */
-    sideWidth: number;
+    /**
+     * Какую долю окна занимает боковая панель, 0..1.
+     *
+     * Долей, а не пикселями: окно у одного человека меняется от монитора к ноутбуку и обратно,
+     * и панель в 400px на этих окнах — то треть экрана, то узкая щель. Доля переносится между
+     * окнами сама, а пиксели пришлось бы каждый раз доводить руками.
+     */
+    sideShare: number;
 }
 
 /** Раскладка вместе с пределами, в которых её можно менять прямо сейчас. */
 export interface Layout extends LayoutWish {
     /** Возможна ли боковая раскладка в этом окне вообще: кнопку переезда показывать по нему. */
     sideFits: boolean;
+    /** Ширина панели в этом окне, px: доля, приведённая к пределам. */
+    sideWidth: number;
     /** Куда упирается потяг за коридор, px. */
     minWidth: number;
     maxWidth: number;
@@ -42,8 +50,6 @@ export interface Layout extends LayoutWish {
 
 /** Ключ в sessionStorage. Именно session: раскладка — про эту вкладку, а не про человека. */
 const STORAGE_KEY = 'navy:layout';
-
-const DEFAULT_WISH: LayoutWish = { expanded: false, side: false, sideWidth: SIDE_WIDTH };
 
 /** Самая широкая панель, при которой кадру рядом остаётся его минимум, px. */
 export const maxSideWidth = (windowWidth: number): number => windowWidth - SCENE_MIN_WIDTH;
@@ -54,6 +60,20 @@ export const maxSideWidth = (windowWidth: number): number => windowWidth - SCENE
  */
 export const sideFits = (windowWidth: number): boolean => windowWidth >= SIDE_MIN_WINDOW;
 
+/**
+ * С чем приложение открывается, когда вкладке нечего вспомнить.
+ *
+ * Окно, в которое помещается боковая раскладка, — это десктоп, и там разговор сразу стоит
+ * сбоку от развёрнутого кадра: рейд — то, ради чего сюда пришли, и показывать его в четверти
+ * экрана, пока остальное занято пустым столом, незачем. На узком окне ни того, ни другого нет,
+ * и умолчание остаётся прежним — кадр сжат, разговор под ним.
+ */
+export const defaultWish = (windowWidth: number): LayoutWish => ({
+    expanded: sideFits(windowWidth),
+    side: true,
+    sideShare: SIDE_SHARE,
+});
+
 const clamp = (value: number, min: number, max: number): number => Math.min(Math.max(value, min), max);
 
 /**
@@ -63,7 +83,8 @@ const clamp = (value: number, min: number, max: number): number => Math.min(Math
  *   1. сбоку блок стоит только в развёрнутой раскладке: сбоку он во всю высоту окна,
  *      и сжатому кадру рядом с ним не остаётся ничего;
  *   2. сбоку он стоит только там, где помещается вместе с кадром;
- *   3. ширина зажата между своим минимумом и тем, что оставляет кадру его минимум.
+ *   3. доля, переведённая в пиксели, зажимается между минимумом панели и тем, что оставляет
+ *      кадру его минимум.
  *
  * Функция чистая: ни окна, ни хранилища она не знает — их знает хук ниже. Так её и проверяют.
  */
@@ -75,7 +96,10 @@ export const allowedLayout = (wish: LayoutWish, windowWidth: number): Layout => 
     return {
         expanded: wish.expanded,
         side: wish.side && wish.expanded && sideFits(windowWidth),
-        sideWidth: clamp(wish.sideWidth, min, max),
+        sideShare: wish.sideShare,
+        // Округляем до пикселя: дробная ширина панели даёт дробную ширину кадра, а кадр
+        // на ней рисует корабли и подписи — половина пикселя там видна размытой кромкой.
+        sideWidth: clamp(Math.round(wish.sideShare * windowWidth), min, max),
         sideFits: sideFits(windowWidth),
         minWidth: min,
         maxWidth: max,
@@ -87,20 +111,24 @@ export const allowedLayout = (wish: LayoutWish, windowWidth: number): Layout => 
  * данные, ради которых стоит показывать человеку ошибку, а чужая вкладка могла записать сюда
  * что угодно и в прошлой версии приложения.
  */
-const readWish = (): LayoutWish => {
+const readWish = (windowWidth: number): LayoutWish => {
+    const fallback = defaultWish(windowWidth);
     try {
         const saved: unknown = JSON.parse(sessionStore.read(STORAGE_KEY) ?? 'null');
         if (!saved || typeof saved !== 'object') {
-            return DEFAULT_WISH;
+            return fallback;
         }
-        const { expanded, side, sideWidth } = saved as Partial<LayoutWish>;
+        const { expanded, side, sideShare } = saved as Partial<LayoutWish>;
         return {
-            expanded: typeof expanded === 'boolean' ? expanded : DEFAULT_WISH.expanded,
-            side: typeof side === 'boolean' ? side : DEFAULT_WISH.side,
-            sideWidth: typeof sideWidth === 'number' && Number.isFinite(sideWidth) ? sideWidth : DEFAULT_WISH.sideWidth,
+            expanded: typeof expanded === 'boolean' ? expanded : fallback.expanded,
+            side: typeof side === 'boolean' ? side : fallback.side,
+            // Доля вне единицы — не наша запись: либо чужая, либо прошлой версии, где здесь
+            // лежали пиксели. Своё умолчание вернее чужого числа.
+            sideShare:
+                typeof sideShare === 'number' && sideShare > 0 && sideShare <= 1 ? sideShare : fallback.sideShare,
         };
     } catch {
-        return DEFAULT_WISH;
+        return fallback;
     }
 };
 
@@ -137,8 +165,11 @@ export interface LayoutControls {
 }
 
 export function useLayout(): LayoutControls {
-    const [wish, setWish] = useState(readWish);
     const windowWidth = useWindowWidth();
+    // Умолчание зависит от окна, поэтому и читается оно один раз — с тем окном, в котором
+    // вкладку открыли. Дальше окно меняется, но выбор от этого не переписывается: за то,
+    // что из выбора помещается, отвечает allowedLayout.
+    const [wish, setWish] = useState(() => readWish(window.innerWidth));
 
     const apply = useCallback(
         (patch: Partial<LayoutWish> | ((was: LayoutWish) => Partial<LayoutWish>), remember: boolean) =>
@@ -154,15 +185,17 @@ export function useLayout(): LayoutControls {
 
     const choose = useCallback<LayoutControls['choose']>((patch) => apply(patch, true), [apply]);
 
+    // Тянут панель в пикселях — за кромку, — а запоминается она долей: указатель говорит
+    // «вот сюда», и это «сюда» переводится в долю нынешнего окна.
+    //
     // Зажимается ширина прямо здесь, а не только при отрисовке: потяг за кромку иначе копил бы
     // ход за пределом — увёл указатель на две сотни дальше упора, и обратно панель тронулась бы
     // только через те же две сотни.
     const resizeSide = useCallback<LayoutControls['resizeSide']>(
-        (width, remember = false) =>
-            apply(
-                { sideWidth: clamp(width, SIDE_MIN_WIDTH, Math.max(SIDE_MIN_WIDTH, maxSideWidth(windowWidth))) },
-                remember
-            ),
+        (width, remember = false) => {
+            const allowed = clamp(width, SIDE_MIN_WIDTH, Math.max(SIDE_MIN_WIDTH, maxSideWidth(windowWidth)));
+            apply({ sideShare: allowed / windowWidth }, remember);
+        },
         [apply, windowWidth]
     );
 

@@ -16,9 +16,10 @@ const formatDate = (at: number): string => new Date(at).toLocaleDateString('ru-R
 
 /**
  * Выделение в системной строчке. Бэкенд помечает изменившееся двумя звёздочками — тем же
- * знаком, что и markdown, — а лента превращает пометку в жирное. Разметка нарочно сведена
- * к одному приёму: полноценный markdown в служебной строке не нужен, а текст без разбора
- * всё равно читается.
+ * знаком, что и markdown, — а лента превращает пометку в `strong`, который в служебной строчке
+ * набран не жирным, а плотным (см. .systemNote в стилях). Разметка нарочно сведена к одному
+ * приёму: полноценный markdown в служебной строке не нужен, а текст без разбора всё равно
+ * читается.
  */
 const emphasise = (text: string): ReactNode[] =>
     text.split('**').map((part, index) =>
@@ -117,23 +118,16 @@ export default function MessageList({ messages, members, myId, onReply, onHail }
     }, []);
 
     const byId = new Map(members.map((member) => [member.memberId, member]));
-    // По кому группировать подряд идущие сообщения. Системная запись не группируется ни с чем:
-    // иначе реплика вошедшего прилипла бы к строчке о его входе и осталась без подписи.
-    const groupKey = (message: Message): string =>
-        message.kind === 'system' ? message.messageId : message.author.memberId;
+    // По кому группировать подряд идущие сообщения — по автору, и системная запись тут ничем
+    // не выделена: она тоже про конкретный корабль и встаёт в его же цепочку, с его аватаркой.
+    // Подписи она у соседей не отнимает: корабль в ней назван целиком, типом и номером.
+    const groupKey = (message: Message): string => message.author.memberId;
 
     return (
         <div ref={listRef} className={styles.list} onScroll={handleScroll}>
             {messages.length > 0 && <div className={styles.dateChip}>{formatDate(messages[0].sentAt)}</div>}
             {messages.map((message, index) => {
-                if (message.kind === 'system') {
-                    return (
-                        <div key={message.messageId} className={styles.systemChip}>
-                            {emphasise(message.text)}
-                        </div>
-                    );
-                }
-
+                const system = message.kind === 'system';
                 const own = message.author.memberId === myId;
                 const author = byId.get(message.author.memberId);
                 const prev = messages[index - 1];
@@ -158,23 +152,35 @@ export default function MessageList({ messages, members, myId, onReply, onHail }
                                 )}
                             </div>
                         )}
-                        <button
-                            type="button"
-                            className={own ? styles.bubbleOwn : styles.bubble}
-                            onClick={() => onReply(message)}
-                            title="Ответить"
-                        >
-                            {!own && firstOfGroup && author && <MemberName name={author.name} color={author.color} />}
-                            {replyTo && (
-                                <span className={styles.replyCell}>
-                                    <ReplyQuote author={byId.get(replyTo.author.memberId)} text={replyTo.text} />
+                        {/*
+                         * Системная запись стоит на месте пузыря и в той же строке — с аватаркой
+                         * автора и по его сторону ленты, — но пузырём не притворяется: она мельче,
+                         * приглушена и помечена косой полоской. Отвечать на неё не на что, поэтому
+                         * это блок, а не кнопка: канал сообщает о корабле, а не говорит за него.
+                         */}
+                        {system ? (
+                            <div className={styles.systemNote}>{emphasise(message.text)}</div>
+                        ) : (
+                            <button
+                                type="button"
+                                className={own ? styles.bubbleOwn : styles.bubble}
+                                onClick={() => onReply(message)}
+                                title="Ответить"
+                            >
+                                {!own && firstOfGroup && author && (
+                                    <MemberName name={author.name} color={author.color} />
+                                )}
+                                {replyTo && (
+                                    <span className={styles.replyCell}>
+                                        <ReplyQuote author={byId.get(replyTo.author.memberId)} text={replyTo.text} />
+                                    </span>
+                                )}
+                                <span className={styles.text}>
+                                    {message.text}
+                                    <span className={styles.time}>{formatTime(message.sentAt)}</span>
                                 </span>
-                            )}
-                            <span className={styles.text}>
-                                {message.text}
-                                <span className={styles.time}>{formatTime(message.sentAt)}</span>
-                            </span>
-                        </button>
+                            </button>
+                        )}
                     </div>
                 );
             })}

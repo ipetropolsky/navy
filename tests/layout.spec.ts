@@ -8,12 +8,13 @@ import {
     FADE_HEIGHT,
     MOBILE_MAX_WIDTH,
     SCENE_MIN_WIDTH,
+    SHEET_INSET,
     SHEET_TOP_GAP,
     SHEET_WIDTH,
     SIDE_GRIP,
     SIDE_MIN_WIDTH,
     SIDE_MIN_WINDOW,
-    SIDE_WIDTH,
+    SIDE_SHARE,
 } from '@/config/layout';
 import { SLOT_COUNT, slotDepth, slotShare } from '@/types/channel';
 
@@ -1292,8 +1293,10 @@ test('шторка на десктопе уже блока контента и �
     const phone = { width: MOBILE_MAX_WIDTH - 90, height: 844 };
     await page.setViewportSize(phone);
     await expect
-        .poll(async () => (await shadeBox(page)).width, { message: 'на телефоне шторка не во всю ширину' })
-        .toBe(phone.width);
+        .poll(async () => (await shadeBox(page)).width, {
+            message: 'на телефоне шторка не в ширину окна за вычетом полоски по краям',
+        })
+        .toBe(phone.width - SHEET_INSET);
 });
 
 /**
@@ -2135,16 +2138,22 @@ test('длинная форма мотается сама, а кнопки де�
             actionsBottom: Math.round(node.querySelector('[class*="actions"]')!.getBoundingClientRect().bottom),
         }));
 
+    // Кромка меряется с допуском в пиксель: и форма, и полоса кнопок встают на дробные
+    // координаты, и на домотанной до конца прокрутке они округляются в разные стороны.
+    // Ловим мы тут не пиксель, а полоску фона в нижнее поле формы — она была бы в десяток.
+    const onEdge = (measured: { actionsBottom: number; cardBottom: number }): number =>
+        Math.abs(measured.actionsBottom - measured.cardBottom);
+
     const before = await measure();
     expect(before.scrollable, 'форме нечего мотать — прокрутки у неё нет').toBeGreaterThan(0);
-    expect(before.actionsBottom, 'кнопки встали не на кромку формы').toBe(before.cardBottom);
+    expect(onEdge(before), 'кнопки встали не на кромку формы').toBeLessThanOrEqual(1);
 
     await card.evaluate((node) => {
         node.scrollTop = node.scrollHeight;
     });
     const after = await measure();
     expect(after.top, 'форма не домоталась до конца').toBe(before.scrollable);
-    expect(after.actionsBottom, 'кнопки уехали с кромки вместе с формой').toBe(after.cardBottom);
+    expect(onEdge(after), 'кнопки уехали с кромки вместе с формой').toBeLessThanOrEqual(1);
 });
 
 /**
@@ -2258,6 +2267,12 @@ const WIDE = SIDE_MIN_WINDOW + 200;
 /** Ширина окна, на которой её заведомо нет. */
 const NARROW = SIDE_MIN_WINDOW - 100;
 
+/**
+ * Какой панель открывается в окне WIDE, px. Ширина хранится долей окна, а меряется в браузере
+ * пикселями — перевод один и тот же и здесь, и в hooks/useLayout.
+ */
+const SIDE_AT_WIDE = Math.round(WIDE * SIDE_SHARE);
+
 /** Коробка блока в координатах окна. */
 const boxOf = (page: Page, selector: string) =>
     page.locator(selector).evaluate((node) => {
@@ -2295,10 +2310,10 @@ test('на широком окне разговор встаёт сбоку во
 
     const content = await boxOf(page, 'main');
     const frame = await boxOf(page, 'header');
-    expect(content.width, 'блок не встал в ширину боковой панели').toBe(SIDE_WIDTH);
+    expect(content.width, 'блок не встал в ширину боковой панели').toBe(SIDE_AT_WIDE);
     expect(content.right, 'блок не прижат к правой кромке окна').toBe(WIDE);
     expect(content.height, 'блок не во всю высоту окна').toBe(900);
-    expect(frame.width, 'кадру достался не весь остаток ширины').toBe(WIDE - SIDE_WIDTH);
+    expect(frame.width, 'кадру достался не весь остаток ширины').toBe(WIDE - SIDE_AT_WIDE);
     expect(frame.height, 'кадр не во всю высоту окна').toBe(900);
 });
 
@@ -2312,12 +2327,12 @@ test('шторка, затемнение и форма остаются внут
     await openSheet(page);
 
     const shade = await boxOf(page, 'section[aria-label="Корабли на связи"]');
-    expect(shade.width, 'шторка шире панели').toBe(SIDE_WIDTH);
-    expect(shade.left, 'шторка вылезла на кадр').toBe(WIDE - SIDE_WIDTH);
+    expect(shade.width, 'шторка шире панели').toBe(SIDE_AT_WIDE - SHEET_INSET);
+    expect(shade.left, 'шторка вылезла на кадр').toBe(WIDE - SIDE_AT_WIDE + SHEET_INSET / 2);
 
     const backdrop = await boxOf(page, 'button[aria-label="Закрыть шторку"]');
-    expect(backdrop.width, 'затемнение погасило рейд, а не панель').toBe(SIDE_WIDTH);
-    expect(backdrop.left, 'затемнение легло на кадр').toBe(WIDE - SIDE_WIDTH);
+    expect(backdrop.width, 'затемнение погасило рейд, а не панель').toBe(SIDE_AT_WIDE);
+    expect(backdrop.left, 'затемнение легло на кадр').toBe(WIDE - SIDE_AT_WIDE);
 
     await page.getByRole('button', { name: 'Настроить корабль' }).click();
     await page.waitForTimeout(500);
@@ -2369,8 +2384,8 @@ test('разговор переезжает двумя половинами, а 
         return taken;
     });
 
-    const under = frames.filter((frame) => frame.width !== SIDE_WIDTH);
-    const beside = frames.filter((frame) => frame.width === SIDE_WIDTH);
+    const under = frames.filter((frame) => frame.width !== SIDE_AT_WIDE);
+    const beside = frames.filter((frame) => frame.width === SIDE_AT_WIDE);
     expect(under.length, 'блок не побыл под кадром').toBeGreaterThan(2);
     expect(beside.length, 'блок так и не встал сбоку').toBeGreaterThan(2);
 
@@ -2385,14 +2400,14 @@ test('разговор переезжает двумя половинами, а 
     // внутрь окна, то на десяток. Скачок от этого не спрячется: он выглядит как готовая полоса
     // с первого же кадра, то есть промах на всю ширину панели, а не на её край.
     expect(
-        beside[0].left - (WIDE - SIDE_WIDTH),
+        beside[0].left - (WIDE - SIDE_AT_WIDE),
         'блок появился сбоку уже на своём месте — переезда не видно'
-    ).toBeGreaterThan(SIDE_WIDTH / 2);
+    ).toBeGreaterThan(SIDE_AT_WIDE / 2);
 
     // Доезжает он до своей полосы — но проверяем это после переезда, а не последним снятым
     // кадром: под нагрузкой окно съёмки кончается раньше, чем движение.
     await page.waitForTimeout(500);
-    expect((await boxOf(page, 'main')).left, 'блок не доехал до своей полосы').toBe(WIDE - SIDE_WIDTH);
+    expect((await boxOf(page, 'main')).left, 'блок не доехал до своей полосы').toBe(WIDE - SIDE_AT_WIDE);
 });
 
 /**
@@ -2431,7 +2446,7 @@ test('свёрнутая раскладка возвращает разгово�
 
     await page.getByRole('button', { name: 'Развернуть сцену' }).click();
     await page.waitForTimeout(600);
-    expect((await boxOf(page, 'main')).width, 'разговор не вернулся в панель').toBe(SIDE_WIDTH);
+    expect((await boxOf(page, 'main')).width, 'разговор не вернулся в панель').toBe(SIDE_AT_WIDE);
 });
 
 /** Ширина боковой панели по её левой кромке: справа она всегда упирается в кромку окна. */
@@ -2456,17 +2471,17 @@ const dragGrip = async (page: Page, by: number): Promise<void> => {
  */
 test('панель тянут за коридор вдоль кромки, и упирается она в свои пределы', async ({ page }) => {
     await openSide(page);
-    expect(await sideWidth(page), 'панель открылась не в свою ширину').toBe(SIDE_WIDTH);
+    expect(await sideWidth(page), 'панель открылась не в свою ширину').toBe(SIDE_AT_WIDE);
 
     const grip = await boxOf(page, '[role="separator"]');
     expect(grip.width, 'коридор не в свою ширину').toBe(SIDE_GRIP);
     expect(grip.height, 'коридор не во всю высоту панели').toBe(900);
-    expect(grip.left, 'коридор встал не у кромки панели').toBeLessThan(WIDE - SIDE_WIDTH + SIDE_GRIP);
+    expect(grip.left, 'коридор встал не у кромки панели').toBeLessThan(WIDE - SIDE_AT_WIDE + SIDE_GRIP);
 
     // Панель справа: влево — шире. Тянем на столько, чтобы до упоров было далеко: здесь
     // проверяется, что панель идёт за указателем ровно, а упоры проверяются ниже.
     await dragGrip(page, -60);
-    expect(await sideWidth(page), 'панель не пошла за указателем').toBe(SIDE_WIDTH + 60);
+    expect(await sideWidth(page), 'панель не пошла за указателем').toBe(SIDE_AT_WIDE + 60);
 
     await dragGrip(page, 900);
     expect(await sideWidth(page), 'панель ужалась ниже своего минимума').toBe(SIDE_MIN_WIDTH);
@@ -2523,4 +2538,57 @@ test('раскладка и ширина панели переживают пе�
     await page.waitForTimeout(1200);
     expect(await sideWidth(page), 'панель забыла свою ширину').toBe(chosen);
     expect((await boxOf(page, 'main')).height, 'разговор вернулся под кадр').toBe(900);
+});
+
+/**
+ * С чем приложение открывается, когда вкладке нечего вспомнить.
+ *
+ * На широком окне — сразу развёрнутым кадром и разговором сбоку: рейд тут главное, и показывать
+ * его в четверти экрана, пока рядом пустует стол, незачем. Ширина панели при этом не число,
+ * а доля окна: на любом мониторе это одна и та же треть.
+ *
+ * Хранилище эта проверка не трогает нарочно (обычные проверки открывают канал со сжатой
+ * раскладкой, см. `startCollapsed` в helpers) — весь её смысл в том, что вкладка ничего
+ * не помнит.
+ */
+test('пустая вкладка открывается на десктопе сбоку и в треть окна, а на телефоне — как была', async ({ page }) => {
+    await page.setViewportSize({ width: WIDE, height: 900 });
+    await page.goto(`/?channel=${DEMO}&memberId=${ALBATROS}`, { waitUntil: 'networkidle' });
+    await page.waitForTimeout(1500);
+
+    await expect(page.getByRole('button', { name: 'Свернуть сцену' })).toBeVisible();
+    const content = await boxOf(page, 'main');
+    expect(content.width, 'панель открылась не в треть окна').toBe(SIDE_AT_WIDE);
+    expect(content.height, 'разговор открылся не во всю высоту окна').toBe(900);
+
+    // Другое окно — та же треть, но других пикселей: в этом и смысл доли.
+    const wider = 1800;
+    await page.setViewportSize({ width: wider, height: 900 });
+    await page.waitForTimeout(300);
+    expect(await sideWidth(page), 'панель не потянулась за окном').toBe(Math.round(wider * SIDE_SHARE));
+
+    // Телефон: боковой раскладки там нет, и разворачивать кадр за человека тоже незачем.
+    const phone = await page.context().newPage();
+    await phone.setViewportSize({ width: MOBILE_MAX_WIDTH - 90, height: 844 });
+    await phone.goto(`/?channel=${DEMO}&memberId=${ALBATROS}`, { waitUntil: 'networkidle' });
+    await phone.waitForTimeout(1500);
+    await expect(phone.getByRole('button', { name: 'Развернуть сцену' })).toBeVisible();
+    await phone.close();
+});
+
+/**
+ * Раскладка — про кадр и блок контента, а не про канал: на главной, где в блоке стоит форма
+ * создания канала, кадр такой же настоящий, и разговор там тоже переезжает вбок.
+ */
+test('разговор переезжает вбок и на главной, где канала ещё нет', async ({ page }) => {
+    await page.setViewportSize({ width: WIDE, height: 900 });
+    await page.goto('/', { waitUntil: 'networkidle' });
+    await page.waitForTimeout(1500);
+
+    const content = await boxOf(page, 'main');
+    expect(content.width, 'форма создания канала открылась не в панели').toBe(SIDE_AT_WIDE);
+
+    await page.getByRole('button', { name: 'Разговор под кадром' }).click();
+    await page.waitForTimeout(600);
+    expect((await boxOf(page, 'main')).width, 'форма не вернулась под кадр').toBe(COLUMN_WIDTH);
 });

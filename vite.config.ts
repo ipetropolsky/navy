@@ -11,10 +11,11 @@ import {
     CONTENT_DESKTOP_HEIGHT,
     FADE_HEIGHT,
     MOBILE_MAX_WIDTH,
+    SHEET_INSET,
     SHEET_TOP_GAP,
     SHEET_WIDTH,
     SIDE_GRIP,
-    SIDE_WIDTH,
+    SIDE_SHARE,
 } from './src/config/layout';
 
 export default defineConfig({
@@ -30,9 +31,13 @@ export default defineConfig({
                     `@compact-height: ${COMPACT_HEIGHT}px;\n` +
                     `@content-desktop-height: ${CONTENT_DESKTOP_HEIGHT}px;\n` +
                     `@sheet-width: ${SHEET_WIDTH}px;\n` +
+                    `@sheet-inset: ${SHEET_INSET}px;\n` +
                     `@sheet-top-gap: ${SHEET_TOP_GAP}px;\n` +
                     `@fade-height: ${FADE_HEIGHT}px;\n` +
-                    `@side-width: ${SIDE_WIDTH}px;\n` +
+                    // Умолчание для --side-width: ту же долю, но от окна, а не от родителя —
+                    // проценты в разных местах считались бы от разного. Живёт оно ровно
+                    // до первой отрисовки, дальше ширину задаёт приложение.
+                    `@side-width: ${(SIDE_SHARE * 100).toFixed(4)}vw;\n` +
                     `@side-grip: ${SIDE_GRIP}px;\n`,
             },
         },

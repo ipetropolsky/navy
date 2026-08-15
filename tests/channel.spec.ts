@@ -1,4 +1,4 @@
-import { Page, expect, test } from '@playwright/test';
+import { Locator, Page, expect, test } from '@playwright/test';
 
 import {
     ALBATROS,
@@ -113,6 +113,37 @@ test('переоснащение пишет в ленту, что было и ч
     await expect(systemLines(page).last()).toHaveText(
         'Пограничный сторожевой катер «Альбатрос» 317 теперь рейдовый тральщик «Буран» 512'
     );
+});
+
+test('строчка о корабле называет его целиком и стоит по его сторону ленты', async ({ page }) => {
+    await openChannel(page, DEMO, ALBATROS);
+    await send(page, 'Курс норд');
+    await expect(bubbles(page).last()).toContainText('Курс норд');
+
+    // Меняем один бортовой номер: тип и позывной остаются прежними.
+    await page.getByLabel('Корабли на связи').click();
+    await page.getByRole('button', { name: 'Настроить корабль' }).click();
+    await join(page, 'Альбатрос', '512');
+
+    const note = systemLines(page).last();
+    // Корабль назван целиком в обеих половинах, хотя изменилось в нём одно число.
+    await expect(note).toHaveText(
+        'Пограничный сторожевой катер «Альбатрос» 317 теперь пограничный сторожевой катер «Альбатрос» 512'
+    );
+    // Помечено ровно изменившееся, и кавычки в пометку не входят.
+    await expect(note.locator('strong')).toHaveText(['512']);
+
+    // Стоит строчка там же, где реплики своего корабля: правым краем по правому краю пузыря.
+    // Раньше она шла плашкой по центру, и в разговоре нескольких кораблей было не разобрать,
+    // о ком речь.
+    const bubble = (await bubbles(page).last().boundingBox())!;
+    const line = (await note.boundingBox())!;
+    expect(Math.abs(line.x + line.width - (bubble.x + bubble.width))).toBeLessThanOrEqual(1);
+
+    // И набрана на ступеньку мельче реплики: служебное не спорит с разговором.
+    const fontSize = (locator: Locator): Promise<number> =>
+        locator.evaluate((node) => parseFloat(getComputedStyle(node).fontSize));
+    expect(await fontSize(note)).toBe((await fontSize(bubbles(page).last())) - 2);
 });
 
 test('набранный номер стоит на выбранном корабле, и только на нём', async ({ page }) => {

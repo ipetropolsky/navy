@@ -116,25 +116,38 @@ const shipTitle = (member: Member): string =>
     `${SHIP_KIND_LABELS[member.shipKind]} «${member.name}» ${member.hullNumber}`;
 
 /**
- * Строчка о переоснащении: кем корабль был и что в нём поменялось. Перечисляем только
- * изменившееся — «„Буран“ 042 теперь „Буран“ 517» читается как оговорка, а не как новость.
- * Новые значения выделены жирным: глазу нужно за что-то зацепиться, а искать отличие
- * между двумя почти одинаковыми строчками он не должен.
+ * Пометить изменившееся. Двумя звёздочками, как в markdown; лента превращает пометку
+ * в жирное (см. `emphasise` в components/chat/MessageList).
+ */
+const marked = (text: string, changed: boolean): string => (changed ? `**${text}**` : text);
+
+/**
+ * Строчка о переоснащении: кем корабль был и кем стал.
+ *
+ * Называем корабль целиком в обеих половинах, даже если поменялся один бортовой номер.
+ * Перечислять только изменившееся («теперь 517») короче, но читается это обрывком: строчка
+ * о корабле должна называть корабль, а не разницу между двумя его состояниями.
+ *
+ * Изменившееся при этом помечено: глазу нужно за что-то зацепиться, а искать отличие между
+ * двумя почти одинаковыми строчками он не должен. Кавычки в пометку не входят — жирными они
+ * выглядят кляксами по краям позывного.
  *
  * Цвет позывного не отмечаем: он не меняет ни имени, ни облика.
  */
 const refitNotice = (before: Member, after: Member): string | null => {
-    const changes: string[] = [];
-    if (before.shipKind !== after.shipKind) {
-        changes.push(kindLabel(after.shipKind));
+    const kindChanged = before.shipKind !== after.shipKind;
+    const nameChanged = before.name !== after.name;
+    const hullChanged = before.hullNumber !== after.hullNumber;
+    if (!kindChanged && !nameChanged && !hullChanged) {
+        return null;
     }
-    if (before.name !== after.name) {
-        changes.push(`«${after.name}»`);
-    }
-    if (before.hullNumber !== after.hullNumber) {
-        changes.push(after.hullNumber);
-    }
-    return changes.length ? `${shipTitle(before)} теперь **${changes.join(' ')}**` : null;
+    // Тип с маленькой буквы: он стоит в середине фразы, а не в её начале.
+    const title = [
+        marked(kindLabel(after.shipKind), kindChanged),
+        `«${marked(after.name, nameChanged)}»`,
+        marked(after.hullNumber, hullChanged),
+    ].join(' ');
+    return `${shipTitle(before)} теперь ${title}`;
 };
 
 /** Адрес свободен, если его не занял другой канал. Сам себя канал не блокирует. */
