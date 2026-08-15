@@ -1,4 +1,4 @@
-import { UIEvent, useLayoutEffect, useRef } from 'react';
+import { KeyboardEvent, MouseEvent, PointerEvent, UIEvent, useLayoutEffect, useRef } from 'react';
 
 import Avatar from '@/components/ships/Avatar';
 import MemberName from '@/components/ships/MemberName';
@@ -32,6 +32,16 @@ interface MessageListProps {
  * случаться от настоящего движения вверх, а не от округления.
  */
 const STICK_SLOP = 24;
+
+/**
+ * Насколько далеко можно увести курсор или палец между нажатием и отпусканием, чтобы это
+ * всё ещё считалось тычком, px. Дальше — уже протяжка: человек выделяет текст, а не отвечает.
+ *
+ * Порог нужен, потому что одним выделением не обойтись: протянуть можно и по пустому месту
+ * плашки, и тогда выделять окажется нечего, а ответ бы сработал. Восемь пикселей — обычный
+ * запас на дрожь: палец на телефоне уезжает на два-три даже при честном тычке.
+ */
+const TAP_SLOP = 8;
 
 /** Лента сообщений в стиле Telegram: группировка по автору, ответы, тап по сообщению — ответить. */
 export default function MessageList({ messages, members, myId, onReply, onHail }: MessageListProps) {
@@ -105,6 +115,55 @@ export default function MessageList({ messages, members, myId, onReply, onHail }
         return () => observer.disconnect();
     }, []);
 
+    /** Что выделено в окне прямо сейчас. Пусто — не выделено ничего. */
+    const selectedText = (): string => window.getSelection()?.toString().trim() ?? '';
+
+    /**
+     * С чего началось нажатие: откуда и при каком выделении. У самого `click` этого не спросишь —
+     * он приходит уже по отпусканию и про дорогу между ними молчит.
+     */
+    const pressRef = useRef<{ x: number; y: number; selected: string } | null>(null);
+
+    const handlePress = (event: PointerEvent<HTMLDivElement>): void => {
+        pressRef.current = { x: event.clientX, y: event.clientY, selected: selectedText() };
+    };
+
+    /**
+     * Тычок по плашке — ответить. Но не всякое нажатие тычок: текст в ленте можно и нужно
+     * выделять — протяжкой на десктопе, долгим нажатием на телефоне, — и ответ на выделение
+     * срабатывать не должен. Человек тянул курсор через реплику, чтобы её скопировать,
+     * а получал панель ответа и сбитое выделение.
+     *
+     * Отличаем по двум приметам разом. Первая — дорога: увели дальше `TAP_SLOP` — это протяжка,
+     * даже если выделять на этом месте было нечего. Вторая — выделение, которого до нажатия
+     * не было: долгое нажатие на телефоне никуда курсор не ведёт, а выделение оставляет.
+     *
+     * Сравниваем именно с тем, что было выделено в начале нажатия, а не просто смотрим, есть ли
+     * выделение вообще. Нажатие внутрь уже выделенного браузер схлопывает не сразу, и правило
+     * «есть выделение — не отвечать» отняло бы ответ у следующего же тычка по той самой реплике,
+     * которую человек только что выделял.
+     */
+    const handleTap = (event: MouseEvent<HTMLDivElement>, message: Message): void => {
+        const press = pressRef.current;
+        pressRef.current = null;
+        const moved = press !== null && Math.hypot(event.clientX - press.x, event.clientY - press.y) > TAP_SLOP;
+        const selected = selectedText();
+        if (moved || (selected !== '' && selected !== press?.selected)) {
+            return;
+        }
+        onReply(message);
+    };
+
+    // Плашка — не `button`, а `div` с ролью кнопки: из настоящей кнопки браузер не даёт
+    // выделить текст вовсе, даже при `user-select: text`. Значит, клавиатуру плашка должна
+    // отработать сама — пробелом и вводом, как отработала бы кнопка.
+    const handleKey = (event: KeyboardEvent<HTMLDivElement>, message: Message): void => {
+        if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            onReply(message);
+        }
+    };
+
     const byId = new Map(members.map((member) => [member.memberId, member]));
 
     /**
@@ -157,7 +216,7 @@ export default function MessageList({ messages, members, myId, onReply, onHail }
                 /*
                  * Системная запись стоит на месте пузыря и живёт по тем же правилам: своя
                  * плашка, время в углу, ответ по нажатию. Отличается она видом — мельче,
-                 * приглушена и помечена косой полоской, — но не устройством: это такое же
+                 * приглушена и помечена полоской, — но не устройством: это такое же
                  * сообщение канала, и отвечать на «042 теперь 782» человек должен уметь
                  * ровно так же, как на любую реплику.
                  */
@@ -174,10 +233,13 @@ export default function MessageList({ messages, members, myId, onReply, onHail }
                 return (
                     <div key={message.messageId} className={own ? styles.rowOwn : styles.row}>
                         {avatar}
-                        <button
-                            type="button"
+                        <div
+                            role="button"
+                            tabIndex={0}
                             className={own ? plaque.own : plaque.other}
-                            onClick={() => onReply(message)}
+                            onPointerDown={handlePress}
+                            onClick={(event) => handleTap(event, message)}
+                            onKeyDown={(event) => handleKey(event, message)}
                             title="Ответить"
                         >
                             {!own && firstOfGroup && author && <MemberName name={author.name} color={author.color} />}
@@ -198,7 +260,7 @@ export default function MessageList({ messages, members, myId, onReply, onHail }
                                 <MessageBody message={message} />
                                 <span className={styles.time}>{formatTime(message.sentAt)}</span>
                             </span>
-                        </button>
+                        </div>
                     </div>
                 );
             })}

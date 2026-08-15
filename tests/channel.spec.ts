@@ -76,6 +76,32 @@ test('реплика уходит и привязывается ответом',
     expect(reply.author.memberId).toBe(ALBATROS);
 });
 
+/**
+ * Выделение и ответ — разные дела, и одно нажатие не должно делать оба. Тычок по плашке
+ * отвечает, протяжка по ней выделяет; ответ на выделении не срабатывает, иначе скопировать
+ * чужую реплику было бы нельзя — панель ответа перехватывала бы каждую попытку.
+ */
+test('протяжка по реплике выделяет текст, а не отвечает', async ({ page }) => {
+    await openChannel(page, DEMO, ALBATROS);
+    const bubble = bubbles(page).last();
+    const box = (await bubble.boundingBox())!;
+    const middle = box.y + box.height / 2;
+
+    // Тянем по самой строке, изнутри полей плашки: снаружи выделять было бы нечего.
+    await page.mouse.move(box.x + 14, middle);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width - 14, middle, { steps: 12 });
+    await page.mouse.up();
+
+    expect(await page.evaluate(() => window.getSelection()?.toString() ?? ''), 'текст не выделился').not.toBe('');
+    await expect(page.locator('[class*="replyBar"]'), 'протяжка обернулась ответом').toHaveCount(0);
+
+    // Обычный тычок по той же плашке — по-прежнему ответ, и курсор сразу в поле.
+    await bubble.click();
+    await expect(page.locator('[class*="replyBar"]')).toHaveCount(1);
+    await expect(page.getByPlaceholder('Сообщение')).toBeFocused();
+});
+
 test('сообщение из соседней вкладки доезжает', async ({ context }) => {
     const mine = await context.newPage();
     const theirs = await context.newPage();

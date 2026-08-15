@@ -1,4 +1,4 @@
-import { SyntheticEvent, useRef, useState } from 'react';
+import { SyntheticEvent, useEffect, useRef, useState } from 'react';
 
 import IconButton from '@/components/ui/IconButton';
 import Input from '@/components/ui/Input';
@@ -56,6 +56,21 @@ export default function Composer({ replyTo, replyToAuthor, onCancelReply, onSend
     const [value, setValue] = useState('');
     const prevValueRef = useRef('');
     const inputRef = useRef<HTMLInputElement>(null);
+
+    /**
+     * Ответили на сообщение — курсор сразу в поле. Ответ и есть намерение писать, и второй
+     * тычок по полю тут лишний; на телефоне вместе с фокусом поднимается клавиатура.
+     *
+     * Смотрим на номер сообщения, а не на сам объект: ответить можно и не закрывая панель,
+     * перескочив на соседнюю реплику, — тогда фокус нужен снова. А вот перерисовка ленты
+     * с тем же ответом фокус не трогает, иначе поле дёргало бы курсор посреди набора.
+     */
+    const replyId = replyTo?.messageId ?? null;
+    useEffect(() => {
+        if (replyId) {
+            inputRef.current?.focus();
+        }
+    }, [replyId]);
 
     const handleChange = (nextValue: string) => {
         const prevValue = prevValueRef.current;
