@@ -31,16 +31,7 @@ import { useLayout } from '@/hooks/useLayout';
 import { useSlide } from '@/hooks/useSlide';
 import { useSwipe } from '@/hooks/useSwipe';
 import { channelLink, useRoute } from '@/routing';
-import {
-    Berth,
-    ChatMessage,
-    MAX_MESSAGE_LENGTH,
-    MorseFeed,
-    ShipKind,
-    Side,
-    isSameBerth,
-    otherSide,
-} from '@/types/channel';
+import { Berth, MAX_MESSAGE_LENGTH, Message, MorseFeed, ShipKind, Side, isSameBerth, otherSide } from '@/types/channel';
 import { copyText } from '@/utils/clipboard';
 
 import styles from './App.module.less';
@@ -103,7 +94,7 @@ export default function App() {
     const route = useRoute();
     const channelState = useChannel(route.channel, route.memberId);
     const { channel, myId, typing, loading } = channelState;
-    const [replyTo, setReplyTo] = useState<ChatMessage | null>(null);
+    const [replyTo, setReplyTo] = useState<Message | null>(null);
     // Открыт ли список кораблей. Он приезжает шторкой поверх всего остального, а не подменяет
     // собой содержимое: подмена уносила вместе с разговором и место прокрутки, и набранное
     // в поле, и выделение.

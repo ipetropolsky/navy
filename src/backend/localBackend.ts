@@ -2,7 +2,7 @@ import { Channel, MAX_MESSAGE_LENGTH, Member, Message, ShipNotice, isSameBerth }
 import { isValidSlug } from '@/utils/slug';
 import { localStore } from '@/utils/storage';
 
-import { refitNotice, shipTitle } from '@/backend/notice';
+import { refitNotices, shipTitle } from '@/backend/notice';
 import { isBerthFree, placeShip } from '@/backend/placement';
 import { DEMO_CHANNEL_ID, createDemoChannel } from '@/backend/seed';
 import {
@@ -44,7 +44,7 @@ const BROADCAST_NAME = 'kilvater';
  * Здесь должна появиться миграция раньше, чем в канале заведётся первый неигрушечный разговор.
  * Подробно — в docs/BACKEND-API.md, раздел «К чужим данным — бережно».
  */
-const STORAGE_VERSION = 13;
+const STORAGE_VERSION = 14;
 
 /** Ключ, под которым состояние лежало до появления версии. Чистим, чтобы не мусорить. */
 const LEGACY_STORAGE_KEY = 'kilvater.v1';
@@ -381,8 +381,12 @@ export function createLocalBackend(): ChannelBackend {
                 return { ...member };
             });
             emit(channelId, { type: 'member-updated', member: updated });
-            const notice = before && refitNotice(before, updated);
-            if (notice) {
+            // По записи на каждую перемену, одна за другой: у каждой свой номер, своё время
+            // и свой ответ — в ленте они встают отдельными сообщениями. Подряд, а не разом:
+            // запись идёт через общую очередь, и каждая должна лечь в состояние целиком,
+            // прежде чем возьмётся следующая.
+            for (const notice of before ? refitNotices(before, updated) : []) {
+                // eslint-disable-next-line no-await-in-loop -- очередь тут и нужна: записи ложатся в ленту по одной и по порядку
                 await postNotice(channelId, updated.memberId, notice, Date.now());
             }
             return delay({ member: updated });

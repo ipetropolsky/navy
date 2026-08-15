@@ -2,14 +2,15 @@ import { SyntheticEvent, useRef, useState } from 'react';
 
 import IconButton from '@/components/ui/IconButton';
 import Input from '@/components/ui/Input';
-import { ChatMessage, MAX_MESSAGE_LENGTH, Member } from '@/types/channel';
+import { MAX_MESSAGE_LENGTH, Member, Message } from '@/types/channel';
 
+import MessageBody from '@/components/chat/MessageBody';
 import ReplyQuote from '@/components/chat/ReplyQuote';
 
 import styles from './Composer.module.less';
 
 interface ComposerProps {
-    replyTo: ChatMessage | null;
+    replyTo: Message | null;
     replyToAuthor: Member | null;
     onCancelReply: () => void;
     onSend: (text: string) => void;
@@ -90,7 +91,7 @@ export default function Composer({ replyTo, replyToAuthor, onCancelReply, onSend
         <form className={styles.composer} onSubmit={handleSubmit}>
             {replyTo && (
                 <div className={styles.replyBar}>
-                    <ReplyQuote author={replyToAuthor ?? undefined} text={replyTo.text} />
+                    <ReplyQuote author={replyToAuthor ?? undefined} text={<MessageBody message={replyTo} />} />
                     <IconButton variant="muted" onClick={onCancelReply} aria-label="Отменить ответ">
                         <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
                             <path

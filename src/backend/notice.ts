@@ -25,16 +25,29 @@ export const shipTitle = (member: Member): ShipTitle => ({
 const SHIP_FIELDS: ShipField[] = ['shipKind', 'name', 'hullNumber'];
 
 /**
- * Запись о переоснащении: каким корабль был, каким стал и что в нём поменялось.
+ * Записи о переоснащении: по одной на каждую перемену. Сменил корабль разом позывной, номер
+ * и силуэт — получится три записи, и в ленте они встанут тремя сообщениями.
+ *
+ * Отдельными записями, а не одной с перечислением, потому что каждая из них — полноценное
+ * сообщение канала: со своим временем, своим номером и своим ответом. Одна запись на три
+ * перемены была бы строчкой, на которую отвечают целиком, хотя речь в ней о разном.
+ *
+ * Порядок — тот же, что и в `SHIP_FIELDS`: сперва силуэт, потом позывной, потом номер.
+ * Порядок не случайный, а от крупного к мелкому: сменившийся силуэт — новость крупнее
+ * сменившегося номера, и читаться она должна первой.
  *
  * Текста здесь нет и быть не должно: бэкенд знает, что случилось, а как об этом сказать —
  * дело интерфейса (см. `components/chat/ShipNoticeLine`). Сравнение всё же остаётся тут:
  * оба состояния на руках только у бэкенда, и второй раз выводить одно из другого интерфейсу
- * незачем. Ничего не поменялось — записи нет вовсе.
+ * незачем. Ничего не поменялось — записей нет вовсе.
  */
-export const refitNotice = (before: Member, after: Member): ShipNotice | null => {
+export const refitNotices = (before: Member, after: Member): ShipNotice[] => {
     const from = shipTitle(before);
     const to = shipTitle(after);
-    const changed = SHIP_FIELDS.filter((field) => from[field] !== to[field]);
-    return changed.length ? { event: 'refit', before: from, after: to, changed } : null;
+    return SHIP_FIELDS.filter((field) => from[field] !== to[field]).map((changed) => ({
+        event: 'refit',
+        before: from,
+        after: to,
+        changed,
+    }));
 };

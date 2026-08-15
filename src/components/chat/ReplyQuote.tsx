@@ -1,3 +1,5 @@
+import { ReactNode } from 'react';
+
 import MemberName from '@/components/ships/MemberName';
 import { Member } from '@/types/channel';
 
@@ -11,7 +13,8 @@ import styles from './ReplyQuote.module.less';
 
 interface ReplyQuoteProps {
     author?: Member;
-    text: string;
+    /** Что процитировано. Узлом, а не строкой: у системной записи текста нет — есть фраза. */
+    text: ReactNode;
 }
 
 export default function ReplyQuote({ author, text }: ReplyQuoteProps) {

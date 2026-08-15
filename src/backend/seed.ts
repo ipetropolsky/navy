@@ -9,9 +9,9 @@ import { ChannelSnapshot } from '@/backend/types';
  * до того, как в него кто-то войдёт, — пустая лента ничего не показывает ни про группировку
  * сообщений, ни про ответы, ни про цвета позывных, ни про строчки самого канала.
  *
- * Строчки канала здесь тоже настоящие: три о входе и одна о переоснащении. Вымпел вошёл
- * с бортовым 555 и сменил его на 561 — так в демо видно оба вида строчки, ровный и с пометкой
- * на изменившемся.
+ * Строчки канала здесь тоже настоящие: три о входе и две о переоснащении. Вымпел вошёл
+ * с бортовым 555 и сменил его на 561, а Резвый пришёл противолодочным катером и стал ракетным —
+ * так в демо видны обе фразы о перемене, «042 теперь 782» и «Теперь ракетный катер».
  *
  * Записывается в хранилище один раз, при первом запуске. Если состояние там уже есть,
  * демо не трогает его: разговор, который вы вели вчера, не должен пропадать из-за того,
@@ -144,7 +144,7 @@ export const createDemoChannel = (): ChannelSnapshot => ({
             messageId: 'msg-join-3',
             author: { memberId: 'm-rezvy' },
             kind: 'system',
-            notice: { event: 'joined', before: { shipKind: 'pr205', name: 'Резвый', hullNumber: '208' } },
+            notice: { event: 'joined', before: { shipKind: 'pr201', name: 'Резвый', hullNumber: '208' } },
             sentAt: minutesAfterMidnight(21, 34),
         },
         {
@@ -164,6 +164,20 @@ export const createDemoChannel = (): ChannelSnapshot => ({
             author: { memberId: 'm-rezvy' },
             text: 'Резвый на связи. Швартовы отданы, выходим из бухты.',
             sentAt: minutesAfterMidnight(21, 41),
+        },
+        {
+            // Вторая фраза о перемене: у силуэта и позывного старое значение не показывают —
+            // оно стоит строчкой выше в той же ленте.
+            messageId: 'msg-refit-kind',
+            author: { memberId: 'm-rezvy' },
+            kind: 'system',
+            notice: {
+                event: 'refit',
+                before: { shipKind: 'pr201', name: 'Резвый', hullNumber: '208' },
+                after: { shipKind: 'pr205', name: 'Резвый', hullNumber: '208' },
+                changed: 'shipKind',
+            },
+            sentAt: minutesAfterMidnight(21, 42),
         },
         {
             messageId: 'msg-4',
@@ -186,7 +200,7 @@ export const createDemoChannel = (): ChannelSnapshot => ({
                 event: 'refit',
                 before: { shipKind: 'pr1234', name: 'Вымпел', hullNumber: '555' },
                 after: { shipKind: 'pr1234', name: 'Вымпел', hullNumber: '561' },
-                changed: ['hullNumber'],
+                changed: 'hullNumber',
             },
             sentAt: minutesAfterMidnight(21, 45),
         },

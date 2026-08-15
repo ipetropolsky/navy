@@ -35,7 +35,7 @@ test('канал заводится с главной, и в него можно
     await expect(ships(page)).toHaveCount(1);
     await expect(page.locator('[class*="chatStatus"]')).toHaveText('1 на связи');
     // Номера в строчке нет: он стоит на аватарке рядом и на борту в кадре.
-    await expect(systemLines(page)).toHaveText(['Малый противолодочный корабль «Буря» встал на рейд']);
+    await expect(systemLines(page)).toContainText(['Малый противолодочный корабль «Буря» встал на рейд']);
 });
 
 test('реплика уходит и привязывается ответом', async ({ page }) => {
@@ -109,19 +109,31 @@ test('уход с рейда отмечается в ленте и возвра�
     });
 });
 
-test('переоснащение пишет в ленту, каким корабль стал', async ({ page }) => {
+test('каждая перемена при переоснащении — своё сообщение', async ({ page }) => {
     await openChannel(page, DEMO, ALBATROS);
+    const before = await systemLines(page).count();
 
+    // Меняем разом всё: силуэт, позывной и бортовой номер.
     await page.getByLabel('Корабли на связи').click();
     await page.getByRole('button', { name: 'Настроить корабль' }).click();
     await join(page, 'Буран', '512', 'Рейдовый тральщик');
 
-    // Стрелка вместо выброшенного «теперь»: без неё строчка читается не переменой,
-    // а ещё одним кораблём, вставшим на рейд.
-    await expect(systemLines(page).last()).toHaveText('→ Рейдовый тральщик «Буран» 512');
+    // Три перемены — три строчки, от крупного к мелкому. Корабль в них не назван: они стоят
+    // в его же цепочке, а полный титул в каждой сделал бы из них три почти одинаковых абзаца.
+    await expect(systemLines(page)).toHaveCount(before + 3);
+    const added = systemLines(page);
+    await expect(added.nth(before)).toContainText('Теперь рейдовый тральщик');
+    await expect(added.nth(before + 1)).toContainText('Теперь «Буран»');
+    await expect(added.nth(before + 2)).toContainText('317 теперь 512');
+
+    // Бэкенд пишет их отдельными сообщениями, а не одной записью с перечислением: у каждой
+    // свой номер и своё время, и потому на каждую можно ответить.
+    const messages = (await readState(page)).channels['ch-demo'].messages.slice(-3);
+    expect(messages.map((message) => message.notice?.changed)).toEqual(['shipKind', 'name', 'hullNumber']);
+    expect(new Set(messages.map((message) => message.messageId)).size).toBe(3);
 });
 
-test('строчка о корабле называет его целиком и стоит по его сторону ленты', async ({ page }) => {
+test('строчка о корабле стоит по его сторону ленты, со временем и ответом', async ({ page }) => {
     await openChannel(page, DEMO, ALBATROS);
     await send(page, 'Курс норд');
     await expect(bubbles(page).last()).toContainText('Курс норд');
@@ -132,10 +144,13 @@ test('строчка о корабле называет его целиком и
     await join(page, 'Альбатрос', '512');
 
     const note = systemLines(page).last();
-    // Корабль назван целиком, хотя изменилось в нём одно число.
-    await expect(note).toHaveText('→ Пограничный сторожевой катер «Альбатрос» 512');
-    // Помечено ровно изменившееся, и кавычки в пометку не входят.
-    await expect(note.locator('strong')).toHaveText(['512']);
+    // Оба номера: три цифры сами по себе ничего не значат, и «теперь 512» осталось бы
+    // новостью без предмета. Помечены тоже оба — в паре похожих чисел глазу нужна зацепка.
+    await expect(note).toContainText('317 теперь 512');
+    await expect(note.locator('strong')).toHaveText(['317', '512']);
+
+    // Время у неё есть, как у всякого сообщения: строчка канала — такое же сообщение.
+    await expect(note.locator('[class*="time"]')).toHaveText(/^\d{2}:\d{2}$/);
 
     // Стоит строчка там же, где реплики своего корабля: правым краем по правому краю пузыря.
     // Раньше она шла плашкой по центру, и в разговоре нескольких кораблей было не разобрать,
@@ -148,6 +163,26 @@ test('строчка о корабле называет его целиком и
     const fontSize = (locator: Locator): Promise<number> =>
         locator.evaluate((node) => parseFloat(getComputedStyle(node).fontSize));
     expect(await fontSize(note)).toBe((await fontSize(bubbles(page).last())) - 2);
+
+    // И на неё отвечают, как на реплику: нажали — и цитата встала над строкой ввода.
+    await expect(async () => {
+        await note.click();
+        await expect(page.locator('[class*="replyBar"]')).toContainText('317 теперь 512', { timeout: 2000 });
+    }, 'лента так и не показала, что отвечает на строчку канала').toPass({ timeout: 20_000 });
+    await send(page, 'Принял новый номер');
+    await expect
+        .poll(
+            async () => {
+                const messages = (await readState(page)).channels['ch-demo'].messages;
+                const reply = messages.at(-1)!;
+                // Последняя такая, а не первая: смена номера есть и в демо-переписке,
+                // а отвечали мы на свою, только что записанную.
+                const target = messages.filter((message) => message.notice?.changed === 'hullNumber').at(-1);
+                return reply.thread?.messageId === target?.messageId;
+            },
+            { message: 'ответ не привязался к строчке канала' }
+        )
+        .toBe(true);
 });
 
 test('набранный номер стоит на выбранном корабле, и только на нём', async ({ page }) => {
@@ -199,7 +234,7 @@ test('старший на рейде отмечен бэджем и высажи
 
     // Считаем не корабли в кадре, а канал: высаженный ещё уходит за кромку и висит в сцене
     // столько же, сколько ушедший сам.
-    await expect(systemLines(page).last()).toHaveText('Малый ракетный корабль «Вымпел» выдворен с рейда');
+    await expect(systemLines(page).last()).toContainText('Малый ракетный корабль «Вымпел» выдворен с рейда');
     const crew = await readState(page);
     expect(crew.channels['ch-demo'].members.map((member) => member.memberId)).not.toContain(VYMPEL);
 });

@@ -153,7 +153,7 @@ interface StoredMessage {
         event: string;
         before: StoredShipTitle;
         after?: StoredShipTitle;
-        changed?: string[];
+        changed?: string;
     };
     thread?: { messageId: string };
 }

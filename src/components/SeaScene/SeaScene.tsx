@@ -961,6 +961,11 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
                         >
                             <div
                                 className={[styles.shipSlot, canEdit ? styles.shipMine : ''].filter(Boolean).join(' ')}
+                                // На каком месте стоит этот корпус. Нужно проверке: подпись знает
+                                // своё место (data-berth-name), и только по общему ключу их можно
+                                // свести в пару — по порядку в кадре нельзя, корабль бывает отведён
+                                // от края кадра и обгоняет соседа по оси.
+                                data-berth-ship={berthKey(member.place)}
                                 // Чужие корабли не трогаем: рейд общий, но распоряжаться там можно
                                 // только собой.
                                 onClick={canEdit ? onEditShip : undefined}

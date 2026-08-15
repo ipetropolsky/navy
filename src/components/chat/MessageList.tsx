@@ -2,10 +2,10 @@ import { UIEvent, useLayoutEffect, useRef } from 'react';
 
 import Avatar from '@/components/ships/Avatar';
 import MemberName from '@/components/ships/MemberName';
-import { ChatMessage, Member, Message } from '@/types/channel';
+import { Member, Message } from '@/types/channel';
 
+import MessageBody from '@/components/chat/MessageBody';
 import ReplyQuote from '@/components/chat/ReplyQuote';
-import ShipNoticeLine from '@/components/chat/ShipNoticeLine';
 
 import styles from './MessageList.module.less';
 
@@ -20,7 +20,7 @@ interface MessageListProps {
     members: Member[];
     /** Чьи сообщения показывать своими — справа и без подписи. */
     myId: string;
-    onReply: (message: ChatMessage) => void;
+    onReply: (message: Message) => void;
     /** Окликнуть корабль автора: тычок в аватарку — и тот отвечает лампой. */
     onHail: (memberId: string) => void;
 }
@@ -124,8 +124,8 @@ export default function MessageList({ messages, members, myId, onReply, onHail }
         if (message.kind === 'system' && message.notice.event === 'refit') {
             // Смена силуэта цепочку не рвёт: в ленте от неё ничего не меняется — ни позывной,
             // ни номер на аватарке, — а корабль в кадре человек и так видит.
-            const renamed = message.notice.changed?.some((field) => field === 'name' || field === 'hullNumber');
-            if (renamed) {
+            const { changed } = message.notice;
+            if (changed === 'name' || changed === 'hullNumber') {
                 eras.set(memberId, era + 1);
             }
         }
@@ -155,33 +155,18 @@ export default function MessageList({ messages, members, myId, onReply, onHail }
                 );
 
                 /*
-                 * Системная запись стоит на месте пузыря и в той же строке — с аватаркой автора
-                 * и по его сторону ленты, — но пузырём не притворяется: она мельче, приглушена
-                 * и помечена косой полоской. Отвечать на неё не на что, поэтому это блок,
-                 * а не кнопка: канал сообщает о корабле, а не говорит за него.
+                 * Системная запись стоит на месте пузыря и живёт по тем же правилам: своя
+                 * плашка, время в углу, ответ по нажатию. Отличается она видом — мельче,
+                 * приглушена и помечена косой полоской, — но не устройством: это такое же
+                 * сообщение канала, и отвечать на «042 теперь 782» человек должен уметь
+                 * ровно так же, как на любую реплику.
                  */
-                if (message.kind === 'system') {
-                    return (
-                        <div key={message.messageId} className={own ? styles.rowOwn : styles.row}>
-                            {avatar}
-                            <div className={own ? styles.systemNoteOwn : styles.systemNote}>
-                                {!own && firstOfGroup && author && (
-                                    <MemberName name={author.name} color={author.color} />
-                                )}
-                                {/*
-                                 * Фраза обёрнута в один блок нарочно: плашка выкладывает
-                                 * содержимое колонкой, и без обёртки каждый кусок строчки —
-                                 * текст, помеченное слово — вставал бы на свою строку.
-                                 */}
-                                <span className={styles.text}>
-                                    <ShipNoticeLine notice={message.notice} />
-                                </span>
-                            </div>
-                        </div>
-                    );
-                }
+                const plaque =
+                    message.kind === 'system'
+                        ? { own: styles.systemNoteOwn, other: styles.systemNote }
+                        : { own: styles.bubbleOwn, other: styles.bubble };
 
-                const thread = message.thread;
+                const thread = message.kind === 'system' ? undefined : message.thread;
                 const replyTo = thread
                     ? messages.find((candidate) => candidate.messageId === thread.messageId)
                     : undefined;
@@ -191,18 +176,26 @@ export default function MessageList({ messages, members, myId, onReply, onHail }
                         {avatar}
                         <button
                             type="button"
-                            className={own ? styles.bubbleOwn : styles.bubble}
+                            className={own ? plaque.own : plaque.other}
                             onClick={() => onReply(message)}
                             title="Ответить"
                         >
                             {!own && firstOfGroup && author && <MemberName name={author.name} color={author.color} />}
-                            {replyTo && replyTo.kind !== 'system' && (
+                            {replyTo && (
                                 <span className={styles.replyCell}>
-                                    <ReplyQuote author={byId.get(replyTo.author.memberId)} text={replyTo.text} />
+                                    <ReplyQuote
+                                        author={byId.get(replyTo.author.memberId)}
+                                        text={<MessageBody message={replyTo} />}
+                                    />
                                 </span>
                             )}
+                            {/*
+                             * Фраза обёрнута в один блок нарочно: плашка выкладывает содержимое
+                             * колонкой, и без обёртки каждый кусок строчки — текст, помеченное
+                             * слово — вставал бы на свою строку.
+                             */}
                             <span className={styles.text}>
-                                {message.text}
+                                <MessageBody message={message} />
                                 <span className={styles.time}>{formatTime(message.sentAt)}</span>
                             </span>
                         </button>

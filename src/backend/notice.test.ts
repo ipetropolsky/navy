@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { Member } from '@/types/channel';
 
-import { refitNotice, shipTitle } from '@/backend/notice';
+import { refitNotices, shipTitle } from '@/backend/notice';
 
 /**
  * Записи канала о корабле. Проверяем ровно то, за что здесь отвечает бэкенд: что случилось
@@ -29,26 +29,29 @@ describe('shipTitle', () => {
     });
 });
 
-describe('refitNotice', () => {
+describe('refitNotices', () => {
     it('называет изменившееся поле и оба состояния целиком', () => {
-        const notice = refitNotice(ALBATROS, changedTo({ hullNumber: '512' }));
-
-        expect(notice).toEqual({
-            event: 'refit',
-            before: { shipKind: 'pr1400', name: 'Альбатрос', hullNumber: '317' },
-            after: { shipKind: 'pr1400', name: 'Альбатрос', hullNumber: '512' },
-            changed: ['hullNumber'],
-        });
+        expect(refitNotices(ALBATROS, changedTo({ hullNumber: '512' }))).toEqual([
+            {
+                event: 'refit',
+                before: { shipKind: 'pr1400', name: 'Альбатрос', hullNumber: '317' },
+                after: { shipKind: 'pr1400', name: 'Альбатрос', hullNumber: '512' },
+                changed: 'hullNumber',
+            },
+        ]);
     });
 
-    it('перечисляет изменившееся в порядке титула, а не в порядке правки', () => {
-        const notice = refitNotice(ALBATROS, changedTo({ hullNumber: '512', shipKind: 'pr1258', name: 'Буран' }));
+    it('на каждую перемену пишет свою запись, а не одну на всё', () => {
+        const notices = refitNotices(ALBATROS, changedTo({ hullNumber: '512', shipKind: 'pr1258', name: 'Буран' }));
 
-        expect(notice?.changed).toEqual(['shipKind', 'name', 'hullNumber']);
+        // Порядок титульный, от крупного к мелкому: силуэт, позывной, номер.
+        expect(notices.map((notice) => notice.changed)).toEqual(['shipKind', 'name', 'hullNumber']);
+        // Оба состояния у всех трёх одни и те же: перемена одна, а рассказана по частям.
+        expect(notices.every((notice) => notice.after?.name === 'Буран')).toBe(true);
     });
 
     it('молчит, когда ничего не поменялось: пустой записи в ленте не место', () => {
-        expect(refitNotice(ALBATROS, changedTo({}))).toBeNull();
+        expect(refitNotices(ALBATROS, changedTo({}))).toEqual([]);
     });
 
     it('молчит и на смене цвета с местом: корабль от них не становится другим', () => {
@@ -57,6 +60,6 @@ describe('refitNotice', () => {
             place: { slot: 7, corridor: 'left', left: 20, facing: 'right', enterFrom: 'left' },
         });
 
-        expect(refitNotice(ALBATROS, moved)).toBeNull();
+        expect(refitNotices(ALBATROS, moved)).toEqual([]);
     });
 });
