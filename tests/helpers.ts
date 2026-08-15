@@ -1,4 +1,4 @@
-import { Page, expect } from '@playwright/test';
+import { Locator, Page, expect } from '@playwright/test';
 
 /**
  * Общее для всех проверок: как открыть канал, как встать в строй, как заглянуть в хранилище.
@@ -185,6 +185,22 @@ export const ships = (page: Page) => page.locator('[class*="shipSlot"]');
 
 /** Свободные места на рейде: огоньки на воде, пока открыта форма корабля. */
 export const berths = (page: Page) => page.locator('[data-berth]');
+
+/**
+ * Ткнуть в корабль в кадре.
+ *
+ * Целимся в середину корпуса, а ловит нажатие вода поверх флота и отдаёт его ближайшей
+ * стоянке (см. shipWater и shipNearest в SeaScene). Отсюда и `page.mouse` вместо
+ * `locator.click()`: тот сперва проверяет, что в точке нажатия лежит сам корпус, — а лежит
+ * там вода, и попадать в корпус больше не нужно ни человеку, ни проверке.
+ */
+export const clickShip = async (page: Page, ship: Locator): Promise<void> => {
+    const box = await ship.boundingBox();
+    if (!box) {
+        throw new Error('корабля нет в кадре');
+    }
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+};
 
 /**
  * Открыть форму своего корабля — ту, в которой выбирают место на рейде.

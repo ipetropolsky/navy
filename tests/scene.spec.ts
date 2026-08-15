@@ -7,6 +7,7 @@ import {
     ALBATROS,
     DEMO,
     berths,
+    clickShip,
     join,
     openChannel,
     openNewChannel,
@@ -906,10 +907,9 @@ test('подпись стоит на точке своего места, даж�
     // свободным, и точка на нём загорается — с ней и сверяем подпись. Сам корабль никуда
     // не идёт, место меняется только отправкой.
     //
-    // Открываем её щелчком по своему кораблю — и это здесь единственное место, где так можно:
-    // на рейде он один, накрыть его некому. В демо-канале корабли стоят каждый раз по-новому,
-    // и ближний закрывает собой дальнего (см. openShipForm в helpers).
-    await page.locator('[class*="shipMine"]').click();
+    // Открываем её щелчком по своему кораблю: на рейде он один, и ближайшая стоянка тут
+    // всегда его.
+    await clickShip(page, page.locator('[class*="shipMine"]'));
     await expect(berths(page).first()).toBeVisible();
     await page.locator('[data-berth][aria-pressed="false"]').last().click();
 
@@ -1108,7 +1108,7 @@ test('карточка чужого корабля открывается и и�
 
     // Из кадра: тычок по чужому корпусу. В карточке — тот самый корабль, а не первый попавшийся:
     // сверяем по бортовому номеру, он на рейде у каждого свой.
-    await page.locator(`[data-berth-ship="${other.place.slot}-${other.place.corridor}"]`).click();
+    await clickShip(page, page.locator(`[data-berth-ship="${other.place.slot}-${other.place.corridor}"]`));
     const card = page.getByRole('region', { name: 'Корабль' });
     await expect(card).toContainText(`Бортовой номер ${other.hullNumber}`);
     await expect(card).toContainText(other.name);
@@ -1121,6 +1121,40 @@ test('карточка чужого корабля открывается и и�
     await expect(card).toBeHidden();
     await page.locator(`button[title="Корабль «${other.name}»"]`).first().click();
     await expect(page.getByRole('region', { name: 'Корабль' })).toContainText(`Бортовой номер ${other.hullNumber}`);
+});
+
+/**
+ * Целиться в корпус не надо: нажатие ловит вода поверх всего флота, а достаётся оно ближайшей
+ * занятой стоянке.
+ *
+ * Так это сделано не для удобства, а потому что иначе до половины рейда не дотянуться вовсе.
+ * Дорожка корабля — прямоугольник во всю его ширину и высоту; ближний корабль накрывает им
+ * дальнего целиком, и щелчок по видимому в кадре дальнему корпусу доставался бы ближнему.
+ *
+ * Жмём по открытой воде под самым килем дальнего корабля — в корпус такое нажатие не попадает
+ * вовсе, а карточка обязана открыться его: ближе его стоянки к этой точке ничего нет.
+ */
+test('нажатие по воде достаётся ближайшему кораблю, а не тому, в чей корпус попали', async ({ page }) => {
+    await openChannel(page, DEMO, ALBATROS);
+    const fleet = Object.values((await readState(page)).channels)[0].members;
+    // Самый дальний из чужих: под ним больше всего свободной воды, а до соседней линии оттуда
+    // всё равно дальше, чем до него самого.
+    const other = fleet
+        .filter((member) => member.memberId !== ALBATROS)
+        .sort((one, two) => one.place.slot - two.place.slot)[0];
+    const hull = (await page.locator(`[data-berth-ship="${other.place.slot}-${other.place.corridor}"]`).boundingBox())!;
+
+    await page.mouse.click(hull.x + hull.width / 2, hull.y + hull.height + 10);
+    await expect(
+        page.getByRole('region', { name: 'Корабль' }),
+        'нажатие по воде под килем не открыло карточку этого корабля'
+    ).toContainText(`Бортовой номер ${other.hullNumber}`);
+
+    // А над горизонтом воды нет, и нажимать там не на что: небо кораблей не открывает.
+    await page.getByRole('button', { name: 'Закрыть', exact: true }).click();
+    const scene = (await page.locator('header').boundingBox())!;
+    await page.mouse.click(scene.x + scene.width / 2, scene.y + 12);
+    await expect(page.getByRole('region', { name: 'Корабль' }), 'нажатие по небу открыло карточку').toBeHidden();
 });
 
 test('оклик из карточки корабля — и он отвечает лампой', async ({ page }) => {
