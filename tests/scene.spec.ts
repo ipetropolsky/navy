@@ -3,7 +3,17 @@ import { Page, expect, test } from '@playwright/test';
 import { EDGE_MARGIN } from '@/backend/placement';
 import { slotShare } from '@/types/channel';
 
-import { ALBATROS, DEMO, berths, join, openChannel, openNewChannel, readState, ships } from '@tests/helpers';
+import {
+    ALBATROS,
+    DEMO,
+    berths,
+    join,
+    openChannel,
+    openNewChannel,
+    openShipForm,
+    readState,
+    ships,
+} from '@tests/helpers';
 
 /**
  * Сцена: то, на чём уже наступали. Свой корабль однажды вставал на место без анимации,
@@ -679,8 +689,7 @@ test('качка идёт по одним часам, и пришедший по
     // Вода у них общая, значит и часы общие: начни точка свой круг с нуля — она качалась бы
     // вразрез с корпусом, который на неё же и встанет. Тем же держится качка перезаходящего:
     // он появляется в кадре заново и обязан попасть в ту волну, которая уже идёт по рейду.
-    await page.locator('[class*="shipMine"]').click();
-    await expect(berths(page).first()).toBeVisible();
+    await openShipForm(page);
 
     const clocks = await page.evaluate(() => {
         const seconds = (value: string): number => parseFloat(value) * (value.endsWith('ms') ? 0.001 : 1);
@@ -716,8 +725,7 @@ test('под своим кораблём лежит стрелка курса, �
     const mine = fleet.find((member) => member.memberId === ALBATROS)!;
     const key = `${mine.place.slot}-${mine.place.corridor}`;
 
-    await page.locator('[class*="shipMine"]').click();
-    await expect(berths(page).first()).toBeVisible();
+    await openShipForm(page);
 
     // Своё место разметка не прячет: на нём лежит стрелка курса, и под своим кораблём она
     // такая же нужная, как под любым другим местом, — курсом корабль встанет в обе стороны.
@@ -790,10 +798,25 @@ test('повторное нажатие по выбранному месту р�
     await expect(page.getByLabel('Курс вправо')).toHaveAttribute('aria-pressed', 'true');
 });
 
+/**
+ * Когда доля пройденного пути перевалила за `mark`, мс. Между кадрами — по прямой: кадр идёт
+ * 16 мс, а расхождение, которое ищут этой меркой, — в разы больше.
+ *
+ * Берём первый переход снизу вверх, а не первый кадр за меркой: на кадре, где браузер только
+ * назначил анимацию, прозрачность успевает мигнуть концом, и без взгляда на предыдущий кадр
+ * замер попадал бы в этот блик.
+ */
+const crossed = (path: { ms: number; part: number }[], mark: number): number => {
+    const at = path.findIndex((point, i) => i > 0 && point.part >= mark && path[i - 1].part < mark);
+    expect(at, `доля ${mark} не пройдена ни на одном кадре`).toBeGreaterThan(0);
+    const was = path[at - 1];
+    const now = path[at];
+    return was.ms + ((now.ms - was.ms) * (mark - was.part)) / (now.part - was.part);
+};
+
 test('разметка гаснет вместе с флотом, а не кадром', async ({ page }) => {
     await openChannel(page, DEMO, ALBATROS);
-    await page.locator('[class*="shipMine"]').click();
-    await expect(berths(page).first()).toBeVisible();
+    await openShipForm(page);
     // Ждём, пока флот договорит своё: замер идёт по долям пути, и начинать его посреди
     // предыдущего движения нельзя — доли считались бы от полпути.
     const hull = page.locator('[class*="shipBody"]').first();
@@ -813,14 +836,16 @@ test('разметка гаснет вместе с флотом, а не кад
     // что слой проходит через середину, а не перескакивает её.
     const frames = await page.evaluate(async () => {
         const ship = document.querySelector('[class*="shipBody"]')!;
-        const out: { field: number; ship: number }[] = [];
+        const out: { ms: number; field: number; ship: number }[] = [];
         const step = (): Promise<void> => new Promise((resolve) => requestAnimationFrame(() => resolve()));
         const cancel = [...document.querySelectorAll('button')].find((one) => one.textContent === 'Отмена');
+        const at = performance.now();
         cancel!.click();
         const sample = async (): Promise<void> => {
             await step();
             const field = document.querySelector('[class*="berthField"]');
             out.push({
+                ms: performance.now() - at,
                 field: field ? Number.parseFloat(getComputedStyle(field).opacity) : 0,
                 ship: Number.parseFloat(getComputedStyle(ship).opacity),
             });
@@ -836,11 +861,27 @@ test('разметка гаснет вместе с флотом, а не кад
     expect(midway.length, 'разметка не гасла, а пропала кадром').toBeGreaterThan(2);
 
     // И гаснет она ровно тогда, когда светлеет флот. Считаем обоих в долях пройденного пути:
-    // разметка идёт от единицы к нулю, корабль — от призрака к себе, и на каждом кадре доли
-    // обязаны сойтись. Так проверяется не длительность в стилях, а то, что видно глазом.
-    const ghost = frames[0].ship;
-    const apart = midway.map((frame) => Math.abs(1 - frame.field - (frame.ship - ghost) / (1 - ghost)));
-    expect(Math.max(...apart), 'разметка и флот идут вразнобой').toBeLessThan(0.1);
+    // разметка идёт от единицы к нулю, корабль — от призрака к себе, — и сверяем, когда каждый
+    // прошёл четверть, половину и три четверти. Так проверяется не длительность в стилях,
+    // а то, что видно глазом.
+    //
+    // Сверяем по времени, а не кадр в кадр, потому что кадр в кадр они и не совпадают: разметка
+    // уходит анимацией, корабль — переходом, и браузер заводит их с разных кадров. Глазу эти
+    // 16 мс не видны, а покадровому замеру видны отлично — на крутом начале ease-out соседние
+    // кадры расходятся на восьмую пути, и проверка сыпалась на ровном месте. Полсотни
+    // миллисекунд запаса кадровый разнобой покрывают с лихвой, а перепутанное движение — нет:
+    // разъедься разметка с флотом на длительность кадра (@expand-seconds вдвое дольше), середина
+    // разошлась бы на добрую сотню.
+    //
+    // Призрака берём самым тёмным кадром, а не первым: корабль только светлеет, и если первый
+    // замер пришёлся уже на движение, доли считались бы от полпути.
+    const ghost = Math.min(...frames.map((frame) => frame.ship));
+    const gone = frames.map((frame) => ({ ms: frame.ms, part: 1 - frame.field }));
+    const back = frames.map((frame) => ({ ms: frame.ms, part: (frame.ship - ghost) / (1 - ghost) }));
+    for (const mark of [0.25, 0.5, 0.75]) {
+        const apart = Math.abs(crossed(gone, mark) - crossed(back, mark));
+        expect(apart, `разметка и флот идут вразнобой на доле ${mark}`).toBeLessThan(50);
+    }
 
     // И уходит из кадра совсем: иначе прозрачный слой навсегда остался бы поверх сцены.
     expect(frames.at(-1)!.field, 'догоревшая разметка осталась в кадре').toBe(0);
@@ -864,6 +905,10 @@ test('подпись стоит на точке своего места, даж�
     // Открываем форму заново и переносим выбор на другое место: своё становится обычным
     // свободным, и точка на нём загорается — с ней и сверяем подпись. Сам корабль никуда
     // не идёт, место меняется только отправкой.
+    //
+    // Открываем её щелчком по своему кораблю — и это здесь единственное место, где так можно:
+    // на рейде он один, накрыть его некому. В демо-канале корабли стоят каждый раз по-новому,
+    // и ближний закрывает собой дальнего (см. openShipForm в helpers).
     await page.locator('[class*="shipMine"]').click();
     await expect(berths(page).first()).toBeVisible();
     await page.locator('[data-berth][aria-pressed="false"]').last().click();
@@ -888,8 +933,7 @@ test('подпись стоит на точке своего места, даж�
 test('пока выбирают место, призраками становятся все корабли, а подписи не кренятся', async ({ page }) => {
     await openChannel(page, DEMO, ALBATROS);
     await expect(ships(page)).toHaveCount(3);
-    await page.locator('[class*="shipMine"]').click();
-    await expect(berths(page).first()).toBeVisible();
+    await openShipForm(page);
 
     // Свой корабль высветляется наравне с чужими: место под ним закрыто им же, и, останься
     // он плотным, единственной невидимой стоянкой на рейде была бы как раз его собственная.
@@ -1015,8 +1059,8 @@ test('огни на рейде якорные, на ходу ходовые, и 
     expect(fore.top, 'носовой якорный должен быть выше кормового').toBeLessThan(aft.top);
 
     // Тронулись — якорные погасли, зажглись ходовые. Снимает корабль с места смена стоянки:
-    // щелчок по своему кораблю открывает форму, там выбирается другое место, и корабль уходит.
-    await page.locator('[class*="shipMine"]').click();
+    // в форме своего корабля выбирается другое место, и корабль уходит.
+    await openShipForm(page);
     await page.locator('[data-berth][aria-pressed="false"]').last().click();
     await shipFormSubmit(page).click();
     await expect(page.locator('[data-motion]')).toHaveCount(1);
