@@ -511,7 +511,6 @@ export default function App() {
                                 // чем вернуться назад. Нажатие мимо списка делает то же самое,
                                 // но по нему надо догадаться.
                                 <IconButton
-                                    large={expanded}
                                     onClick={() => setSheetOpen((open) => !open)}
                                     aria-label={sheetOpen ? 'Вернуться к разговору' : 'Корабли на связи'}
                                 >
@@ -544,7 +543,6 @@ export default function App() {
                         {inChat && expanded && (
                             <span className={styles.wideOnly}>
                                 <IconButton
-                                    large
                                     onClick={() => setMoving('out')}
                                     aria-label={side ? 'Разговор под кадром' : 'Разговор сбоку'}
                                 >
@@ -575,7 +573,6 @@ export default function App() {
                             Диагональ у обоих одна, меняются только концы, и переключение
                             читается как одно движение. */}
                         <IconButton
-                            large={expanded}
                             onClick={switchLayout}
                             aria-label={expanded ? 'Свернуть сцену' : 'Развернуть сцену'}
                         >

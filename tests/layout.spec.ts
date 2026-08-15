@@ -5,6 +5,7 @@ import {
     COLUMN_WIDTH,
     COMPACT_HEIGHT,
     CONTENT_DESKTOP_HEIGHT,
+    FADE_HEIGHT,
     MOBILE_MAX_WIDTH,
     SHEET_TOP_GAP,
     SHEET_WIDTH,
@@ -1419,6 +1420,88 @@ test('содержимое уходит под полоску, а домотан
     // нечего, и полоске взяться неоткуда.
     await openSheet(page);
     expect(await fadeStrength(page, 'shade'), 'полоска встала над списком, который весь на виду').toBe(0);
+});
+
+/** Отступы дорожки полосы прокрутки у первого прокручиваемого блока внутри `selector`, px. */
+const trackInset = (page: Page, selector: string): Promise<{ top: number; bottom: number }> =>
+    page
+        .locator(selector)
+        .first()
+        .evaluate((node) => {
+            const track = getComputedStyle(node, '::-webkit-scrollbar-track');
+            return { top: parseFloat(track.marginTop), bottom: parseFloat(track.marginBottom) };
+        });
+
+/**
+ * Полоса прокрутки не заезжает под скруглённый угол панели: сверху её поджимает ровно то же
+ * число, что и рост полоски (FADE_HEIGHT), — под полоской ей делать нечего, а угол она резала
+ * бы наискось.
+ *
+ * Правило это ничьё в отдельности: оно живёт в блоке с полоской (`ui/TopFade`) и достаётся
+ * любому прокручиваемому внутри — ленте, списку кораблей в шторке, форме корабля. Раньше оно
+ * стояло у ленты, и форма его не получала: её полоса начиналась от самой кромки.
+ *
+ * Снизу у каждого своё: полоса доходит дотуда же, докуда доходит текст, а поля у ленты, списка
+ * и формы разные. Это число блок объявляет о себе сам — `--scrollbar-bottom`.
+ */
+test('полосу прокрутки поджимает сверху у любого содержимого панели, а снизу — по полям хозяина', async ({ page }) => {
+    await openChannel(page, DEMO, ALBATROS);
+
+    const feed = await trackInset(page, 'main [class*="list_"]');
+    expect(feed.top, 'полоса ленты полезла под скруглённый угол').toBeCloseTo(FADE_HEIGHT, 0);
+    expect(feed.bottom, 'полоса ленты не отбита снизу').toBeGreaterThan(0);
+
+    await openSheet(page);
+    const crew = await trackInset(page, '[class*="shade_"] [class*="list_"]');
+    expect(crew.top, 'полоса списка кораблей полезла под скруглённый угол').toBeCloseTo(FADE_HEIGHT, 0);
+
+    await page.getByRole('button', { name: 'Настроить корабль' }).click();
+    const form = await trackInset(page, 'main form[class*="card"]');
+    expect(form.top, 'полоса формы полезла под скруглённый угол').toBeCloseTo(FADE_HEIGHT, 0);
+    // Поля у формы шире, чем у ленты: полоса кончается там же, где кончается текст.
+    expect(form.bottom, 'полоса формы кончается не по её полям').toBeGreaterThan(feed.bottom);
+});
+
+/** Размеры кнопки шапки по её подписи: круг и значок в нём, px. */
+const headerButton = (page: Page, name: string): Promise<{ size: number; icon: number }> =>
+    page
+        .getByRole('banner')
+        .getByRole('button', { name })
+        .evaluate((node) => {
+            const icon = node.querySelector('svg')?.getBoundingClientRect();
+            return { size: Math.round(node.getBoundingClientRect().width), icon: Math.round(icon?.width ?? 0) };
+        });
+
+/**
+ * Над развёрнутым кадром шапка просторнее, и кнопки в ней крупнее — все разом. Размер приходит
+ * к ним от самой шапки (`--icon-button-size`, `--icon-button-icon`), а не просится у каждой
+ * кнопки отдельным свойством: прежде просился, и кнопка выхода с рейда, добавленная позже,
+ * его не получила — стояла в ряду крупных мелочью.
+ *
+ * Проверяется поэтому не число, а равенство: сколько бы ни было кнопок в шапке и какая бы
+ * из них ни появилась завтра, они одного роста и вырастают вместе.
+ */
+test('кнопки в шапке одного роста и над развёрнутым кадром растут разом', async ({ page }) => {
+    await page.setViewportSize({ width: COLUMN_WIDTH, height: 900 });
+    await openChannel(page, DEMO, ALBATROS);
+
+    const small = await headerButton(page, 'Корабли на связи');
+    expect(await headerButton(page, 'Развернуть сцену'), 'в свёрнутой шапке кнопки разного роста').toEqual(small);
+
+    await page.getByRole('button', { name: 'Развернуть сцену' }).click();
+    await page.waitForTimeout(600);
+
+    const big = await headerButton(page, 'Корабли на связи');
+    expect(big.size, 'над развёрнутым кадром кнопки не выросли').toBeGreaterThan(small.size);
+    expect(big.icon, 'значок в выросшей кнопке остался прежним').toBeGreaterThan(small.icon);
+    expect(await headerButton(page, 'Свернуть сцену'), 'кнопка кадра отстала от остальных').toEqual(big);
+
+    // И выход с рейда — та самая кнопка, что отставала. Она встаёт в шапку на место списка,
+    // когда открыта форма своего корабля, и добавлена позже остальных: свойства на укрупнение
+    // ей тогда не досталось.
+    await openSheet(page);
+    await page.getByRole('button', { name: 'Настроить корабль' }).click();
+    expect(await headerButton(page, 'Уйти с рейда'), 'кнопка выхода отстала от остальных').toEqual(big);
 });
 
 /**

@@ -11,6 +11,10 @@ import styles from './IconButton.module.less';
  *   inField — маленькая, внутри поля ввода: скопировать адрес.
  *
  * Подпись обязательна в `aria-label`: без неё кнопка немая для всего, кроме глаз.
+ *
+ * Размера у кнопки своего нет — он приходит от того, в чём она лежит (--icon-button-size
+ * и --icon-button-icon, см. IconButton.module.less). Так все кнопки шапки над развёрнутым
+ * кадром растут разом, и новой в этом ряду не нужно об этом просить.
  */
 
 export type IconButtonVariant = 'plain' | 'muted' | 'accent' | 'inField';
@@ -19,12 +23,6 @@ interface IconButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
     variant?: IconButtonVariant;
     /** Делать нечего: кнопка сжимается и гаснет, не перехватывая нажатий. */
     inactive?: boolean;
-    /**
-     * Кнопка на укрупнённой раскладке: круг больше, значок в нём — тоже. Нужна там, где
-     * вырос сам кадр под кнопкой, — в шапке над полноэкранной сценой; на обычной раскладке
-     * такая кнопка была бы просто крупной кнопкой без причины.
-     */
-    large?: boolean;
     'aria-label': string;
 }
 
@@ -35,19 +33,8 @@ const VARIANT_CLASS: Record<IconButtonVariant, string> = {
     inField: styles.inField,
 };
 
-export default function IconButton({
-    variant = 'plain',
-    inactive = false,
-    large = false,
-    type = 'button',
-    ...rest
-}: IconButtonProps) {
-    const className = [
-        styles.iconButton,
-        VARIANT_CLASS[variant],
-        large ? styles.large : '',
-        inactive ? styles.inactive : '',
-    ]
+export default function IconButton({ variant = 'plain', inactive = false, type = 'button', ...rest }: IconButtonProps) {
+    const className = [styles.iconButton, VARIANT_CLASS[variant], inactive ? styles.inactive : '']
         .filter(Boolean)
         .join(' ');
     return <button {...rest} type={type} className={className} />;
