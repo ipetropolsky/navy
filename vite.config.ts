@@ -9,7 +9,6 @@ import {
     COLUMN_WIDTH,
     COMPACT_HEIGHT,
     CONTENT_DESKTOP_HEIGHT,
-    CONTENT_OVERLAP,
     FADE_HEIGHT,
     MOBILE_MAX_WIDTH,
     SHEET_TOP_GAP,
@@ -28,7 +27,6 @@ export default defineConfig({
                     `@column-width: ${COLUMN_WIDTH}px;\n` +
                     `@compact-height: ${COMPACT_HEIGHT}px;\n` +
                     `@content-desktop-height: ${CONTENT_DESKTOP_HEIGHT}px;\n` +
-                    `@content-overlap: ${CONTENT_OVERLAP}px;\n` +
                     `@sheet-width: ${SHEET_WIDTH}px;\n` +
                     `@sheet-top-gap: ${SHEET_TOP_GAP}px;\n` +
                     `@fade-height: ${FADE_HEIGHT}px;\n`,

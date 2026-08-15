@@ -5,7 +5,6 @@ import {
     COLUMN_WIDTH,
     COMPACT_HEIGHT,
     CONTENT_DESKTOP_HEIGHT,
-    CONTENT_OVERLAP,
     MOBILE_MAX_WIDTH,
     SHEET_TOP_GAP,
     SHEET_WIDTH,
@@ -962,10 +961,8 @@ test('раскладка переключается: кадр раздаётся
     // Ширина блока при переключении не меняется вовсе — ни сама, ни местом на экране.
     expect(tight.width, 'блок контента поехал в ширину вслед за кадром').toBe(roomy.width);
     expect(tight.left, 'блок контента съехал вбок').toBe(roomy.left);
-    // Кадр забрал ровно остаток окна, заехав блоку под верхнюю кромку на @content-overlap.
-    expect((await sceneBox(page)).height, 'кадр занял не тот остаток окна').toBe(
-        window.height - tight.height + CONTENT_OVERLAP
-    );
+    // Кадр забрал ровно остаток окна: блок с ним встык, ни заезда, ни зазора.
+    expect((await sceneBox(page)).height, 'кадр занял не тот остаток окна').toBe(window.height - tight.height);
     expect(await buttonWidth(page), 'кнопки в шапке остались прежними').toBeGreaterThan(smallButton);
 
     // Большой кадр не съедает остальное: разговор никуда не делся, и поле ввода из сжатого
@@ -1036,7 +1033,7 @@ test('свайп по кадру меняет раскладку в свою с�
     expect(await swipeScene(page, 120), 'кадр не отменил своё движение пальца').toBe(true);
     await expect
         .poll(async () => (await sceneBox(page)).height, { message: 'кадр не раздался от свайпа вниз' })
-        .toBe(phone.height - Math.min(COMPACT_HEIGHT, Math.round(phone.height * 0.6)) + CONTENT_OVERLAP);
+        .toBe(phone.height - Math.min(COMPACT_HEIGHT, Math.round(phone.height * 0.6)));
 
     // И обратно: по раздутому кадру своё движение — вверх.
     expect(await swipeScene(page, 120), 'раздутый кадр забрал движение вниз').toBe(false);
@@ -1874,8 +1871,8 @@ test('шапка растёт с кадром только на десктопе
  * с потолком в долю окна, — и десктопной прибавки блоку контента тут нет: колонка узкая,
  * реплики идут во всю ширину, и трём сообщениям с полем ввода хватает общей мерки.
  *
- * Заезд блока на кадр (@content-overlap) в обеих раскладках свой же: нижняя полоска моря
- * уходит под блок, иначе у моря своя граница, у блока своя, и обе приходятся на одну линию.
+ * Блок стоит встык с кадром в обеих раскладках: кадру достаётся его мерка, блоку — остаток
+ * окна, и ни заезда, ни зазора между ними нет.
  */
 test('на телефоне обе раскладки считаются от общей мерки сжатого', async ({ page }) => {
     const phone = { width: MOBILE_MAX_WIDTH - 90, height: 844 };
@@ -1889,7 +1886,7 @@ test('на телефоне обе раскладки считаются от о
         .toBe(compact);
     const roomy = await contentBox(page);
     expect(roomy.width, 'блок контента не занял ширину телефонного экрана').toBe(phone.width);
-    expect(roomy.top, 'блок контента не заехал на кадр').toBe(compact - CONTENT_OVERLAP);
+    expect(roomy.top, 'блок контента встал не встык с кадром').toBe(compact);
 
     // Раскладка «больше сцены»: сжат блок, и мерка у него та же общая, без десктопной прибавки.
     await page.getByRole('button', { name: 'Развернуть сцену' }).click();
@@ -1901,7 +1898,7 @@ test('на телефоне обе раскладки считаются от о
     // Кадр едет переходом, а рост блоку меняется разом: ждём, пока кадр доедет до остатка окна.
     await expect
         .poll(async () => (await sceneBox(page)).height, { message: 'кадр занял не тот остаток окна' })
-        .toBe(phone.height - tight.height + CONTENT_OVERLAP);
+        .toBe(phone.height - tight.height);
 });
 
 /**

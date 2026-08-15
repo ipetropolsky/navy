@@ -2,8 +2,8 @@
 // (небо занимает 40% сцены, шапка ~56px).
 @scene-min-height: 100px;
 
-// @column-width, @compact-height, @content-desktop-height и @content-overlap подставляются
-// в каждый .less из src/config/layout.ts — см. vite.config.ts.
+// @column-width, @compact-height и @content-desktop-height подставляются в каждый .less
+// из src/config/layout.ts — см. vite.config.ts.
 
 // Секунды и кривая разворота — общие со сценой, см. motion.less.
 @import '@/motion.less';
@@ -97,7 +97,7 @@
 // кадр упирается в свой минимум, и дальше уезжает под обрез блок контента, а не сцена
 // схлопывается в полоску.
 .appExpanded {
-    --scene-height-to: ~'max(@{scene-min-height}, calc(100dvh - var(--content-height) + @{content-overlap}))';
+    --scene-height-to: ~'max(@{scene-min-height}, calc(100dvh - var(--content-height)))';
 
     max-width: 100vw;
 }
@@ -148,8 +148,10 @@
 // с ним — сперва разъезжался бы на весь монитор, потом сужался обратно. Меняться при
 // переключении раскладок имеет право только кадр; блок контента стоит на месте.
 //
-// Заезд на сцену (@content-overlap) отрицательным полем: нижняя полоска моря уходит под блок.
-// Иначе у моря своя граница, у блока своя, и обе приходятся на одну линию.
+// Начинается блок ровно там, где кончается кадр. Заезд на сцену тут был — отрицательное поле
+// в тридцать пикселей, которым нижняя полоска моря уходила под блок, — и стоил он ступеньки
+// в каждой мерке: высота кадра, высота неба и все проверки считались «остаток окна плюс
+// тридцать». Встык выходит и проще, и ровнее.
 .content {
     --fade-from: var(--color-bg-chat);
 
@@ -159,7 +161,7 @@
     flex: 1 1 auto;
     min-height: 0;
     width: ~'min(100vw, @{column-width})';
-    margin: ~'calc(-1 * @{content-overlap})' auto 0;
+    margin-inline: auto;
     overflow: hidden;
     border-top: 1px solid var(--color-border);
     border-radius: 16px 16px 0 0;
