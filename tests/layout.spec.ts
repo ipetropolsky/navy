@@ -2020,3 +2020,146 @@ test('на границе телефона ничего не прыгает: ш�
         expect(middle[index], `${name} не поехал по шкале`).toBeLessThan(high);
     });
 });
+
+/**
+ * Длинная форма мотается сама, а кнопки внизу остаются на виду. Прокрутки у неё однажды
+ * не стало вовсе — блок контента снаружи обрезан наглухо, а своего скроллера форме не завели, —
+ * и десяток силуэтов в столбик просто уходил под обрез без права вернуться. Прилипшим кнопкам
+ * при этом было не к чему прилипать: `position: sticky` считается от того, что прокручивает.
+ *
+ * Проверяется и то, и другое: форме есть что мотать, домотать до конца выходит, а полоса кнопок
+ * всё это время стоит ровно на нижней кромке формы — не выше, иначе под ней светилась бы
+ * полоска фона в её нижнее поле.
+ */
+test('длинная форма мотается сама, а кнопки держатся нижней кромки', async ({ page }) => {
+    await page.setViewportSize({ width: MOBILE_MAX_WIDTH - 90, height: 844 });
+    await openChannel(page, DEMO, ALBATROS);
+    await openSheet(page);
+    await page.getByRole('button', { name: 'Настроить корабль' }).click();
+    await expect(page.getByPlaceholder('Гром'), 'форма корабля не открылась').toBeVisible();
+
+    const card = page.locator('form[class*="card"]');
+    const measure = () =>
+        card.evaluate((node) => ({
+            scrollable: node.scrollHeight - node.clientHeight,
+            top: Math.round(node.scrollTop),
+            cardBottom: Math.round(node.getBoundingClientRect().bottom),
+            actionsBottom: Math.round(node.querySelector('[class*="actions"]')!.getBoundingClientRect().bottom),
+        }));
+
+    const before = await measure();
+    expect(before.scrollable, 'форме нечего мотать — прокрутки у неё нет').toBeGreaterThan(0);
+    expect(before.actionsBottom, 'кнопки встали не на кромку формы').toBe(before.cardBottom);
+
+    await card.evaluate((node) => {
+        node.scrollTop = node.scrollHeight;
+    });
+    const after = await measure();
+    expect(after.top, 'форма не домоталась до конца').toBe(before.scrollable);
+    expect(after.actionsBottom, 'кнопки уехали с кромки вместе с формой').toBe(after.cardBottom);
+});
+
+/**
+ * Переключение раскладок не отрывает блок контента от нижней кромки окна. Своя высота у него
+ * тут была, и вставала она в конечное значение первым же кадром, пока кадр над ней только
+ * трогался с места: блок подскакивал вверх на разницу высот (замер: 244px при окне 844)
+ * и потом полперехода сползал обратно. Теперь рост ему никто не задаёт — он берёт остаток
+ * от кадра и потому едет вместе с ним.
+ *
+ * Меряется низ на каждом кадре перехода: он обязан стоять на кромке окна всё время, в обе
+ * стороны. Высота при этом обязана меняться — иначе проверка прошла бы и на неподвижном блоке.
+ */
+const bottomsWhileSwitching = (page: Page, button: string) =>
+    page.evaluate(async (label) => {
+        const main = document.querySelector('main')!;
+        const taken: { bottom: number; height: number }[] = [];
+        const probe = (): void => {
+            const box = main.getBoundingClientRect();
+            taken.push({ bottom: Math.round(box.bottom), height: Math.round(box.height) });
+        };
+        document.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!.click();
+        await new Promise<void>((resolve) => {
+            const tick = (): void => {
+                probe();
+                if (taken.length < 26) {
+                    requestAnimationFrame(tick);
+                } else {
+                    resolve();
+                }
+            };
+            requestAnimationFrame(tick);
+        });
+        return taken;
+    }, button);
+
+test('блок контента не отрывается от нижней кромки, пока раскладка переключается', async ({ page }) => {
+    const window = { width: MOBILE_MAX_WIDTH - 90, height: 844 };
+    await page.setViewportSize(window);
+    await openChannel(page, DEMO, ALBATROS);
+
+    const check = (frames: { bottom: number; height: number }[], button: string): void => {
+        const bottoms = [...new Set(frames.map((frame) => frame.bottom))];
+        expect(bottoms, `«${button}»: блок отрывался от нижней кромки`).toEqual([window.height]);
+
+        const heights = frames.map((frame) => frame.height);
+        expect(Math.max(...heights) - Math.min(...heights), `«${button}»: блок не менял высоту`).toBeGreaterThan(100);
+    };
+
+    check(await bottomsWhileSwitching(page, 'Развернуть сцену'), 'Развернуть сцену');
+    check(await bottomsWhileSwitching(page, 'Свернуть сцену'), 'Свернуть сцену');
+});
+
+/**
+ * Форма выезжает снизу целиком, а не встаёт на место первым же кадром.
+ *
+ * Съедала выезд автопрокрутка: блок контента был `overflow: hidden` — это прокрутка, просто
+ * без полосы, — а форма первым кадром висит ниже блока на всю свою высоту, и поле позывного
+ * в ней встаёт под фокус. Браузер честно доматывал блок до этого поля и тем самым возвращал
+ * форму на место: движения оставалось ровно столько, сколько прокрутке не хватило (замер:
+ * 273 из 319px в развёрнутой раскладке — то есть 46px вместо 319).
+ *
+ * Меряется покадрово одно и то же: блок не промотан ни на пиксель, а верх формы идёт от
+ * нижней кромки блока к его верхней. Раскладка развёрнутая — в ней блок ниже всего, и там
+ * разница между «выехала» и «встала на место» самая заметная.
+ */
+test('форма выезжает снизу целиком, а не встаёт на место сразу', async ({ page }) => {
+    await page.setViewportSize({ width: COLUMN_WIDTH + 440, height: 900 });
+    await openChannel(page, DEMO, ALBATROS);
+    await page.getByRole('button', { name: 'Развернуть сцену' }).click();
+    await expect(page.getByRole('button', { name: 'Свернуть сцену' })).toBeVisible();
+    await openSheet(page);
+
+    const frames = await page.evaluate(async () => {
+        const main = document.querySelector('main')!;
+        const taken: { scrolled: number; offset: number }[] = [];
+        const probe = (): void => {
+            const box = main.getBoundingClientRect();
+            const form = main.querySelector(':scope > div[class*="form"]');
+            taken.push({
+                scrolled: Math.round(main.scrollTop),
+                offset: form ? Math.round(form.getBoundingClientRect().top - box.top) : -1,
+            });
+        };
+        document.querySelector<HTMLButtonElement>('button[aria-label="Настроить корабль"]')!.click();
+        await new Promise<void>((resolve) => {
+            const tick = (): void => {
+                probe();
+                if (taken.length < 26) {
+                    requestAnimationFrame(tick);
+                } else {
+                    resolve();
+                }
+            };
+            requestAnimationFrame(tick);
+        });
+        return taken;
+    });
+
+    const scrolled = [...new Set(frames.map((frame) => frame.scrolled))];
+    expect(scrolled, 'блок контента промотал сам себя под сфокусированное поле').toEqual([0]);
+
+    const offsets = frames.map((frame) => frame.offset);
+    const height = await page.locator('main').evaluate((node) => Math.round(node.getBoundingClientRect().height));
+    expect(Math.max(...offsets), 'форма не начала выезд из-за нижней кромки блока').toBeGreaterThan(height - 8);
+    expect(Math.min(...offsets), 'форма не доехала до верхней кромки блока').toBeLessThan(2);
+});

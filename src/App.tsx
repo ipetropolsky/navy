@@ -455,7 +455,7 @@ export default function App() {
                     </div>
                 </div>
             </header>
-            <main className={[styles.content, expanded ? styles.contentCompact : ''].filter(Boolean).join(' ')}>
+            <main className={styles.content}>
                 <TopFade className={styles.base}>{baseContent}</TopFade>
                 {formSlide.mounted && me && (
                     <div
