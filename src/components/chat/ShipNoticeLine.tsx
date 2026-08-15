@@ -13,6 +13,15 @@ import { SHIP_KIND_LABELS, ShipField, ShipNotice, ShipTitle } from '@/types/chan
 /** Как корабль зовут целиком: тип, позывной, бортовой номер. */
 const TITLE_ORDER: ShipField[] = ['shipKind', 'name', 'hullNumber'];
 
+/**
+ * То же без номера. Номер стоит на аватарке рядом со строчкой, и во фразе он повторялся бы
+ * третий раз подряд — на аватарке, в строчке и на борту в кадре.
+ *
+ * У переоснащения номер во фразе всё же остаётся: там он может быть ровно тем, что поменялось,
+ * и выбрасывать его значило бы прятать саму новость.
+ */
+const SHORT_TITLE: ShipField[] = ['shipKind', 'name'];
+
 /** Название силуэта со строчной буквы: в середине фразы оно идёт не первым словом. */
 const lower = (text: string): string => text.charAt(0).toLowerCase() + text.slice(1);
 
@@ -30,6 +39,8 @@ interface TitleProps {
     changed?: ShipField[];
     /** Стоит ли титул в начале фразы: от этого зависит только буква в названии типа. */
     sentenceStart?: boolean;
+    /** Из чего складывать титул. По умолчанию — целиком, с номером. */
+    fields?: ShipField[];
 }
 
 /**
@@ -41,10 +52,10 @@ interface TitleProps {
  * двумя почти одинаковыми строчками он не должен. Кавычки в пометку не входят — выделенными
  * они выглядят кляксами по краям позывного.
  */
-function Title({ ship, changed = [], sentenceStart = false }: TitleProps) {
+function Title({ ship, changed = [], sentenceStart = false, fields = TITLE_ORDER }: TitleProps) {
     return (
         <>
-            {TITLE_ORDER.map((field, index) => {
+            {fields.map((field, index) => {
                 const text = part(ship, field, sentenceStart && index === 0);
                 const marked = changed.includes(field) ? <strong>{text}</strong> : text;
                 return (
@@ -63,15 +74,21 @@ interface ShipNoticeLineProps {
 }
 
 export default function ShipNoticeLine({ notice }: ShipNoticeLineProps): ReactNode {
-    const who = <Title ship={notice.before} sentenceStart />;
+    const who = <Title ship={notice.before} fields={SHORT_TITLE} sentenceStart />;
     switch (notice.event) {
         case 'refit':
-            // «Стало» — тем же полным титулом, только со строчной: он посреди фразы.
-            // Без `after` переоснащения не бывает, но тип этого не обещает, а строчка
-            // без второй половины — это просто «корабль теперь», и показывать её незачем.
+            // Только «стало», без «было» и без «теперь»: обе половины фразы отличались
+            // одним-двумя словами, и строчка выходила вдвое длиннее без нового смысла.
+            // Что именно поменялось, видно по пометке, а каким корабль был — по строчкам
+            // выше в той же ленте. Без `after` переоснащения не бывает, но тип этого
+            // не обещает, а показывать одно «было» под видом «стало» нельзя.
+            //
+            // Стрелка занимает место выброшенного «теперь»: без неё строчка читается
+            // не переменой, а ещё одним кораблём, вставшим на рейд.
             return notice.after ? (
                 <>
-                    {who} теперь <Title ship={notice.after} changed={notice.changed} />
+                    →&nbsp;
+                    <Title ship={notice.after} changed={notice.changed} sentenceStart />
                 </>
             ) : null;
         case 'left':

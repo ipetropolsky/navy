@@ -34,7 +34,8 @@ test('канал заводится с главной, и в него можно
     // Корабль в кадре, и канал знает, кто это.
     await expect(ships(page)).toHaveCount(1);
     await expect(page.locator('[class*="chatStatus"]')).toHaveText('1 на связи');
-    await expect(systemLines(page)).toHaveText(['Малый противолодочный корабль «Буря» 321 встал на рейд']);
+    // Номера в строчке нет: он стоит на аватарке рядом и на борту в кадре.
+    await expect(systemLines(page)).toHaveText(['Малый противолодочный корабль «Буря» встал на рейд']);
 });
 
 test('реплика уходит и привязывается ответом', async ({ page }) => {
@@ -108,16 +109,16 @@ test('уход с рейда отмечается в ленте и возвра�
     });
 });
 
-test('переоснащение пишет в ленту, что было и что стало', async ({ page }) => {
+test('переоснащение пишет в ленту, каким корабль стал', async ({ page }) => {
     await openChannel(page, DEMO, ALBATROS);
 
     await page.getByLabel('Корабли на связи').click();
     await page.getByRole('button', { name: 'Настроить корабль' }).click();
     await join(page, 'Буран', '512', 'Рейдовый тральщик');
 
-    await expect(systemLines(page).last()).toHaveText(
-        'Пограничный сторожевой катер «Альбатрос» 317 теперь рейдовый тральщик «Буран» 512'
-    );
+    // Стрелка вместо выброшенного «теперь»: без неё строчка читается не переменой,
+    // а ещё одним кораблём, вставшим на рейд.
+    await expect(systemLines(page).last()).toHaveText('→ Рейдовый тральщик «Буран» 512');
 });
 
 test('строчка о корабле называет его целиком и стоит по его сторону ленты', async ({ page }) => {
@@ -131,10 +132,8 @@ test('строчка о корабле называет его целиком и
     await join(page, 'Альбатрос', '512');
 
     const note = systemLines(page).last();
-    // Корабль назван целиком в обеих половинах, хотя изменилось в нём одно число.
-    await expect(note).toHaveText(
-        'Пограничный сторожевой катер «Альбатрос» 317 теперь пограничный сторожевой катер «Альбатрос» 512'
-    );
+    // Корабль назван целиком, хотя изменилось в нём одно число.
+    await expect(note).toHaveText('→ Пограничный сторожевой катер «Альбатрос» 512');
     // Помечено ровно изменившееся, и кавычки в пометку не входят.
     await expect(note.locator('strong')).toHaveText(['512']);
 
@@ -200,7 +199,7 @@ test('старший на рейде отмечен бэджем и высажи
 
     // Считаем не корабли в кадре, а канал: высаженный ещё уходит за кромку и висит в сцене
     // столько же, сколько ушедший сам.
-    await expect(systemLines(page).last()).toHaveText('Малый ракетный корабль «Вымпел» 561 выдворен с рейда');
+    await expect(systemLines(page).last()).toHaveText('Малый ракетный корабль «Вымпел» выдворен с рейда');
     const crew = await readState(page);
     expect(crew.channels['ch-demo'].members.map((member) => member.memberId)).not.toContain(VYMPEL);
 });

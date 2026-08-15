@@ -106,10 +106,31 @@ export default function MessageList({ messages, members, myId, onReply, onHail }
     }, []);
 
     const byId = new Map(members.map((member) => [member.memberId, member]));
-    // По кому группировать подряд идущие сообщения — по автору, и системная запись тут ничем
-    // не выделена: она тоже про конкретный корабль и встаёт в его же цепочку, с его аватаркой.
-    // Подписи она у соседей не отнимает: корабль в ней назван целиком, типом и номером.
-    const groupKey = (message: Message): string => message.author.memberId;
+
+    /**
+     * По кому группировать подряд идущие сообщения. По автору — и системная запись тут ничем
+     * не выделена: она тоже про конкретный корабль и встаёт в его же цепочку, с его аватаркой
+     * и его позывным над первой строкой.
+     *
+     * Но не только по автору: переоснащение обрывает цепочку. Корабль сменил позывной или
+     * бортовой номер — дальше он в ленте другой, и представиться должен заново, позывным
+     * и аватаркой. Сама запись о переоснащении остаётся в прежней цепочке: она про то,
+     * что случилось с тем кораблём, а новый начинается после неё.
+     */
+    const eras = new Map<string, number>();
+    const groupKeys = messages.map((message) => {
+        const { memberId } = message.author;
+        const era = eras.get(memberId) ?? 0;
+        if (message.kind === 'system' && message.notice.event === 'refit') {
+            // Смена силуэта цепочку не рвёт: в ленте от неё ничего не меняется — ни позывной,
+            // ни номер на аватарке, — а корабль в кадре человек и так видит.
+            const renamed = message.notice.changed?.some((field) => field === 'name' || field === 'hullNumber');
+            if (renamed) {
+                eras.set(memberId, era + 1);
+            }
+        }
+        return `${memberId}#${era}`;
+    });
 
     return (
         <div ref={listRef} className={styles.list} onScroll={handleScroll}>
@@ -117,10 +138,8 @@ export default function MessageList({ messages, members, myId, onReply, onHail }
             {messages.map((message, index) => {
                 const own = message.author.memberId === myId;
                 const author = byId.get(message.author.memberId);
-                const prev = messages[index - 1];
-                const next = messages[index + 1];
-                const firstOfGroup = !prev || groupKey(prev) !== groupKey(message);
-                const lastOfGroup = !next || groupKey(next) !== groupKey(message);
+                const firstOfGroup = index === 0 || groupKeys[index - 1] !== groupKeys[index];
+                const lastOfGroup = index === messages.length - 1 || groupKeys[index + 1] !== groupKeys[index];
                 // Место под аватарку держим у всякой чужой строки, системной в том числе:
                 // системная запись стоит в цепочке своего корабля и с его аватаркой.
                 const avatar = !own && (
@@ -145,8 +164,18 @@ export default function MessageList({ messages, members, myId, onReply, onHail }
                     return (
                         <div key={message.messageId} className={own ? styles.rowOwn : styles.row}>
                             {avatar}
-                            <div className={styles.systemNote}>
-                                <ShipNoticeLine notice={message.notice} />
+                            <div className={own ? styles.systemNoteOwn : styles.systemNote}>
+                                {!own && firstOfGroup && author && (
+                                    <MemberName name={author.name} color={author.color} />
+                                )}
+                                {/*
+                                 * Фраза обёрнута в один блок нарочно: плашка выкладывает
+                                 * содержимое колонкой, и без обёртки каждый кусок строчки —
+                                 * текст, помеченное слово — вставал бы на свою строку.
+                                 */}
+                                <span className={styles.text}>
+                                    <ShipNoticeLine notice={message.notice} />
+                                </span>
                             </div>
                         </div>
                     );

@@ -48,6 +48,7 @@ import {
     otherSide,
     shipWidthPercent,
 } from '@/types/channel';
+import { pick, shuffled } from '@/utils/random';
 
 /**
  * Чужой корабль на рейде, каким его видит расстановка: где стоит и какой ширины. Размер
@@ -212,17 +213,6 @@ const preferredSlot = (kind: ShipKind): number => {
     return Math.round((1 - size) * (SLOT_COUNT - 1));
 };
 
-const pick = <T>(items: T[]): T => items[Math.floor(Math.random() * items.length)];
-
-const shuffled = <T>(items: T[]): T[] => {
-    const copy = [...items];
-    for (let i = copy.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [copy[i], copy[j]] = [copy[j], copy[i]];
-    }
-    return copy;
-};
-
 const allSlots = (): number[] => [...new Array<number>(SLOT_COUNT)].map((_, index) => index);
 
 /** Полширины корпуса на этой дальности, % ширины сцены. */
@@ -373,7 +363,7 @@ const loneliness = (slot: number, corridor: Corridor, taken: Standing[]): number
  * не строго на неё, а где-то в своей полосе (см. restingAt) — это положение внутри места,
  * а не другое место.
  */
-const berthAt = (slot: number, corridor: Corridor): Berth => ({
+export const berthAt = (slot: number, corridor: Corridor): Berth => ({
     slot,
     corridor,
     left: CORRIDOR_CENTERS[corridor],
