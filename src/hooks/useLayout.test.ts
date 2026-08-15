@@ -68,6 +68,19 @@ describe('allowedLayout', () => {
         expect(layout.side).toBe(false);
     });
 
+    it('говорит заранее, встанет ли разговор сбоку после разворота', () => {
+        // Ответ нужен до разворота, а не после: разворот в боковую раскладку ведёт два движения
+        // сразу, и второе — переезд разговора в панель — начинается тем же нажатием. Про
+        // нынешнюю раскладку он молчит: в свёрнутой сбоку никого нет, а ответ всё равно «да».
+        const folded = wish({ expanded: false });
+        expect(allowedLayout(folded, 1400).side).toBe(false);
+        expect(allowedLayout(folded, 1400).sideOnExpand).toBe(true);
+        // Остальные две проверки на месте: разговор выбран внизу — разворот его туда и оставит,
+        // а в тесном окне боковой раскладки нет вовсе.
+        expect(allowedLayout(wish({ expanded: false, side: false }), 1400).sideOnExpand).toBe(false);
+        expect(allowedLayout(folded, SIDE_MIN_WINDOW - 1).sideOnExpand).toBe(false);
+    });
+
     it('раскладку «больше сцены» окно не отменяет', () => {
         // Разворот кадра — про высоту, а не про ширину: на телефоне он такой же законный.
         expect(allowedLayout(wish({ expanded: true, side: false }), 320).expanded).toBe(true);

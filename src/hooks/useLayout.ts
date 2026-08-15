@@ -41,6 +41,13 @@ export interface LayoutWish {
 export interface Layout extends LayoutWish {
     /** Возможна ли боковая раскладка в этом окне вообще: кнопку переезда показывать по нему. */
     sideFits: boolean;
+    /**
+     * Встанет ли разговор сбоку, когда кадр развернут. Не то же, что `side`: тот про раскладку,
+     * которая на экране сейчас, а этот — про ту, что получится. Знать это надо до разворота,
+     * а не после: разворот в боковую раскладку идёт двумя движениями сразу, и второе из них
+     * (переезд разговора в панель) надо начать тем же нажатием, что и первое.
+     */
+    sideOnExpand: boolean;
     /** Ширина панели в этом окне, px: доля, приведённая к пределам. */
     sideWidth: number;
     /** Куда упирается потяг за коридор, px. */
@@ -101,6 +108,9 @@ export const allowedLayout = (wish: LayoutWish, windowWidth: number): Layout => 
         // на ней рисует корабли и подписи — половина пикселя там видна размытой кромкой.
         sideWidth: clamp(Math.round(wish.sideShare * windowWidth), min, max),
         sideFits: sideFits(windowWidth),
+        // Тот же ответ, что и у `side`, но без первой из трёх проверок: развёрнутость тут
+        // не спрашивается, потому что спрашивают об этом как раз перед разворотом.
+        sideOnExpand: wish.side && sideFits(windowWidth),
         minWidth: min,
         maxWidth: max,
     };

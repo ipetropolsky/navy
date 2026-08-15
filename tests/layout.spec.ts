@@ -2426,6 +2426,79 @@ test('разговор переезжает двумя половинами, а 
 });
 
 /**
+ * Разворот с выбранной панелью ведёт два движения разом: кадр расхлопывается ровно так же,
+ * как расхлопнулся бы с разговором внизу, а разговор в это время уезжает за нижнюю кромку
+ * и приезжает в панель — тем же переездом, что и по кнопке.
+ *
+ * Прежде боковая раскладка вставала первым же кадром, до всякого движения, и разворот читался
+ * задом наперёд: сперва собиралась сжатая раскладка с узкой панелью сбоку, и уже она
+ * раздвигалась во всю ширину окна.
+ *
+ * Меряем покадрово, потому что и разница тут покадровая: в конце обе раскладки одинаковы,
+ * и весь спор — о том, что показано между.
+ */
+test('разворот с выбранной панелью расхлопывает кадр, а не собирает узкую раскладку', async ({ page }) => {
+    await openSide(page);
+    await page.getByRole('button', { name: 'Свернуть сцену' }).click();
+    await page.waitForTimeout(600);
+
+    const frames = await page.evaluate(async () => {
+        const main = document.querySelector('main')!;
+        // Приложение — то, что вокруг блока: по его ширине и видно расхлопывание.
+        const app = main.parentElement!;
+        const taken: { left: number; width: number; app: number }[] = [];
+        document.querySelector<HTMLButtonElement>('button[aria-label="Развернуть сцену"]')!.click();
+        const started = performance.now();
+        await new Promise<void>((resolve) => {
+            const tick = (): void => {
+                const rect = main.getBoundingClientRect();
+                taken.push({
+                    left: Math.round(rect.left),
+                    width: Math.round(rect.width),
+                    app: Math.round(app.getBoundingClientRect().width),
+                });
+                if (performance.now() - started < 700) {
+                    requestAnimationFrame(tick);
+                } else {
+                    resolve();
+                }
+            };
+            requestAnimationFrame(tick);
+        });
+        return taken;
+    });
+
+    const under = frames.filter((frame) => frame.width !== SIDE_AT_WIDE);
+    const beside = frames.filter((frame) => frame.width === SIDE_AT_WIDE);
+    expect(under.length, 'разговор встал в панель, не побыв под кадром').toBeGreaterThan(2);
+    expect(beside.length, 'разговор так и не доехал до панели').toBeGreaterThan(2);
+
+    // Кадр расхлопывается, пока разговор ещё внизу и в своей колонке: это и есть то самое
+    // движение из раскладки с чатом внизу.
+    expect(
+        under.every((frame) => frame.width === COLUMN_WIDTH),
+        'разговор под кадром стоит не в свою ширину'
+    ).toBe(true);
+    expect(
+        Math.max(...under.map((frame) => frame.app)) - Math.min(...under.map((frame) => frame.app)),
+        'кадр не раздавался, пока разговор был внизу'
+    ).toBeGreaterThan(100);
+
+    // А панель приезжает в кадр, который уже почти раздался. Меряем с запасом: разворот идёт
+    // дольше переезда, и к его середине кадру остаётся последняя доля пути.
+    expect(beside[0].app, 'панель собралась вместе с кадром, а не приехала в него').toBeGreaterThan(WIDE - 60);
+    // И приезжает она переездом: из-за правой кромки окна, а не готовой полосой на своём месте.
+    expect(beside[0].left - (WIDE - SIDE_AT_WIDE), 'разговор появился в панели уже на месте').toBeGreaterThan(
+        SIDE_AT_WIDE / 2
+    );
+
+    await page.waitForTimeout(600);
+    const content = await boxOf(page, 'main');
+    expect(content.width, 'разговор не встал в панель').toBe(SIDE_AT_WIDE);
+    expect(content.left, 'панель не прижата к правой кромке окна').toBe(WIDE - SIDE_AT_WIDE);
+});
+
+/**
  * Узкое окно: боковой раскладки нет вовсе. Кнопки переезда нет — нажимать её было бы враньём,
  * правила на этой ширине не применяются, — а разговор, застигнутый сужением окна сбоку,
  * оказывается там же, где и был бы всегда: под кадром и во всю ширину колонки.
