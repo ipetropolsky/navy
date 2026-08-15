@@ -5,7 +5,6 @@ import {
     COLUMN_WIDTH,
     COMPACT_HEIGHT,
     CONTENT_DESKTOP_HEIGHT,
-    CONTENT_GAP,
     CONTENT_OVERLAP,
     MOBILE_MAX_WIDTH,
     SHEET_TOP_GAP,
@@ -928,10 +927,23 @@ test('раскладка переключается: кадр раздаётся
     const small = await sceneBox(page);
     const roomy = await contentBox(page);
     expect(small.width, 'кадр и в сжатой раскладке во всю ширину окна').toBeLessThan(window.width);
-    // Ширина блока отмерена от окна, а не от приложения: колонка за вычетом полей с обеих сторон.
-    expect(roomy.width, 'блок контента взял не ширину колонки').toBe(
-        Math.min(window.width, COLUMN_WIDTH) - 2 * CONTENT_GAP
-    );
+    // Ширина блока отмерена от окна, а не от приложения: вся колонка целиком, от края до края.
+    expect(roomy.width, 'блок контента взял не ширину колонки').toBe(Math.min(window.width, COLUMN_WIDTH));
+    // И до нижней кромки окна тоже: поля вокруг блока нет ни с боков, ни снизу.
+    expect(roomy.top + roomy.height, 'блок контента не дошёл до нижней кромки окна').toBe(window.height);
+    // Скруглены и обведены только верхние углы: блок не плашка на воде, а начало нижней
+    // половины экрана.
+    const corners = await page.locator('main').evaluate((node) => {
+        const style = getComputedStyle(node);
+        return {
+            top: [style.borderTopLeftRadius, style.borderTopRightRadius],
+            bottom: [style.borderBottomLeftRadius, style.borderBottomRightRadius],
+            borders: [style.borderTopWidth, style.borderBottomWidth, style.borderLeftWidth, style.borderRightWidth],
+        };
+    });
+    expect(corners.top, 'верхние углы блока контента не скруглены').toEqual(['16px', '16px']);
+    expect(corners.bottom, 'нижние углы блока контента скруглены, а не доходят до кромки').toEqual(['0px', '0px']);
+    expect(corners.borders, 'рамка стоит не только сверху').toEqual(['1px', '0px', '0px', '0px']);
     const smallButton = await buttonWidth(page);
 
     await page.getByRole('button', { name: 'Развернуть сцену' }).click();
@@ -952,7 +964,7 @@ test('раскладка переключается: кадр раздаётся
     expect(tight.left, 'блок контента съехал вбок').toBe(roomy.left);
     // Кадр забрал ровно остаток окна, заехав блоку под верхнюю кромку на @content-overlap.
     expect((await sceneBox(page)).height, 'кадр занял не тот остаток окна').toBe(
-        window.height - tight.height - CONTENT_GAP + CONTENT_OVERLAP
+        window.height - tight.height + CONTENT_OVERLAP
     );
     expect(await buttonWidth(page), 'кнопки в шапке остались прежними').toBeGreaterThan(smallButton);
 
@@ -1024,7 +1036,7 @@ test('свайп по кадру меняет раскладку в свою с�
     expect(await swipeScene(page, 120), 'кадр не отменил своё движение пальца').toBe(true);
     await expect
         .poll(async () => (await sceneBox(page)).height, { message: 'кадр не раздался от свайпа вниз' })
-        .toBe(phone.height - Math.min(COMPACT_HEIGHT, Math.round(phone.height * 0.6)) - CONTENT_GAP + CONTENT_OVERLAP);
+        .toBe(phone.height - Math.min(COMPACT_HEIGHT, Math.round(phone.height * 0.6)) + CONTENT_OVERLAP);
 
     // И обратно: по раздутому кадру своё движение — вверх.
     expect(await swipeScene(page, 120), 'раздутый кадр забрал движение вниз').toBe(false);
@@ -1876,7 +1888,7 @@ test('на телефоне обе раскладки считаются от о
         .poll(async () => (await sceneBox(page)).height, { message: 'кадр встал не в свою сжатую мерку' })
         .toBe(compact);
     const roomy = await contentBox(page);
-    expect(roomy.width, 'блок контента не занял ширину телефонного экрана').toBe(phone.width - 2 * CONTENT_GAP);
+    expect(roomy.width, 'блок контента не занял ширину телефонного экрана').toBe(phone.width);
     expect(roomy.top, 'блок контента не заехал на кадр').toBe(compact - CONTENT_OVERLAP);
 
     // Раскладка «больше сцены»: сжат блок, и мерка у него та же общая, без десктопной прибавки.
@@ -1889,7 +1901,7 @@ test('на телефоне обе раскладки считаются от о
     // Кадр едет переходом, а рост блоку меняется разом: ждём, пока кадр доедет до остатка окна.
     await expect
         .poll(async () => (await sceneBox(page)).height, { message: 'кадр занял не тот остаток окна' })
-        .toBe(phone.height - tight.height - CONTENT_GAP + CONTENT_OVERLAP);
+        .toBe(phone.height - tight.height + CONTENT_OVERLAP);
 });
 
 /**

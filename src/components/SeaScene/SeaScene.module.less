@@ -488,7 +488,7 @@
     // По этой мерке — а не по нынешней высоте неба — считается плитка неба, и потому смена
     // раскладки её не пересчитывает: она только открывает больше уже отмеренного неба.
     // См. .skyStrip.
-    --sky-reach: ~'calc((100dvh - var(--content-height) - @{content-gap} + @{content-overlap}) * @{sky-share})';
+    --sky-reach: ~'calc((100dvh - var(--content-height) + @{content-overlap}) * @{sky-share})';
     // Концы лесенки размеров отметок. Тоже переменными и тоже ради .sceneFull: в развёрнутом
     // кадре они считаются от ширины окна.
     --berth-dot-far: @berth-dot-far;
