@@ -103,7 +103,24 @@
     initial-value: 0;
 }
 
+// Насколько окно широкое: 0 на @mobile-width и уже, 1 на @column-width и шире, между ними —
+// доля. Единственная мерка ширины в приложении: порогов по ширине больше нет нигде, каждое
+// зависящее от неё число — отрезок между двумя настроенными концами, а --wide говорит, в каком
+// месте отрезка мы стоим (см. fluid.less).
+//
+// tan(atan2(...)) — способ получить из отношения двух длин обычное число: делить длину на длину
+// calc() не умеет, а atan2 берёт две длины и отдаёт угол, тангенс которого и есть их отношение.
+@wide-span: (@column-width - @mobile-width);
+
+@property --wide {
+    syntax: '<number>';
+    inherits: true;
+    initial-value: 0;
+}
+
 :root {
+    --wide: ~'tan(atan2(clamp(0px, calc(100vw - @{mobile-width}), @{wide-span}), @{wide-span}))';
+
     color-scheme: dark;
 
     --color-bg-page: #030910;

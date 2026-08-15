@@ -4,7 +4,6 @@ import Pennant from '@/components/ships/Pennant';
 import IconButton from '@/components/ui/IconButton';
 import { useSnackbar } from '@/components/ui/Snackbar';
 import { Member, SHIP_KIND_LABELS } from '@/types/channel';
-import { useIsMobile } from '@/utils/viewport';
 
 import styles from './MembersList.module.less';
 
@@ -35,10 +34,10 @@ interface MembersListProps {
  * уже выбранный строчкой. Второе действие со своим кораблём — уйти с рейда — живёт
  * в шапке и появляется там же, где открылась форма.
  *
- * Вымпел стоит всегда, а словами звание подписано только там, где на это есть ширина:
- * на широком экране справа в строке стоит бэдж, на телефоне его нет — строчка и так занята
- * позывным, типом корабля и кнопкой. Отсюда и разница в нажатии: где подписи нет, вымпел
- * отвечает снекбаром, а где она есть — не отвечает ничем, потому что отвечать уже нечего.
+ * Вымпел стоит всегда и всегда отвечает званием — тычком на снекбар, наведением на подсказку.
+ * Словами звание подписано там, где на подпись есть ширина: бэдж справа в строке прячется,
+ * когда сам список становится узок (@container в стилях). Разметка про это не знает, и порога
+ * «телефон ли это» здесь нет — дело только в ширине блока, в котором список показывают.
  *
  * Сам по себе список — только колонка со своей прокруткой. Показывает его шторка (`Shade`),
  * причём вторым этажом — поверх разговора, а не на его месте, — и рамка, затемнение, выезд
@@ -46,7 +45,6 @@ interface MembersListProps {
  */
 export default function MembersList({ members, myId, seniorId, onEditMe, onKick, onHail }: MembersListProps) {
     const notify = useSnackbar();
-    const mobile = useIsMobile();
     const iAmSenior = Boolean(myId) && myId === seniorId;
 
     return (
@@ -63,29 +61,26 @@ export default function MembersList({ members, myId, seniorId, onEditMe, onKick,
                             <span className={styles.nameRow}>
                                 <MemberName name={member.name} color={member.color} />
                                 {mine && <span className={styles.you}> — ты</span>}
-                                {/* Вымпел с подписью справа — просто рисунок: нажимать
-                                    на него незачем, звание уже написано словами. Без
-                                    подписи он и есть единственный ответ на вопрос
-                                    «что это за флажок», и тогда он кнопка. */}
-                                {senior &&
-                                    (mobile ? (
-                                        <button
-                                            type="button"
-                                            className={styles.pennantButton}
-                                            aria-label={SENIOR_TITLE}
-                                            onClick={() => notify(SENIOR_TITLE)}
-                                        >
-                                            <Pennant />
-                                        </button>
-                                    ) : (
-                                        <span className={styles.pennantMark} title={SENIOR_TITLE}>
-                                            <Pennant />
-                                        </span>
-                                    ))}
+                                {/* Отвечает званием всегда: снекбар с тем же словом лишним
+                                    не бывает, а проверка «видна ли подпись» стоила бы порога
+                                    на пустом месте. */}
+                                {senior && (
+                                    <button
+                                        type="button"
+                                        className={styles.pennantButton}
+                                        aria-label={SENIOR_TITLE}
+                                        title={SENIOR_TITLE}
+                                        onClick={() => notify(SENIOR_TITLE)}
+                                    >
+                                        <Pennant />
+                                    </button>
+                                )}
                             </span>
                             <span className={styles.kind}>{SHIP_KIND_LABELS[member.shipKind]}</span>
                         </span>
-                        {senior && !mobile && <span className={styles.badge}>{SENIOR_TITLE}</span>}
+                        {/* Прячет подпись не разметка, а сам список: хватает ли ей места —
+                            вопрос его ширины, и отвечает на него @container в стилях. */}
+                        {senior && <span className={styles.badge}>{SENIOR_TITLE}</span>}
                         {mine && (
                             <IconButton
                                 variant="muted"

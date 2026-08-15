@@ -1836,10 +1836,11 @@ const headerSize = (page: Page) =>
  * Шапка растёт вместе с кадром — но только там, где кадр и правда становится больше. На телефоне
  * разворот отдаёт сцене тот же телефонный экран, укрупнять шапку не за чем, а название канала
  * на этой ширине и без того обрезано многоточием: от прибавки букв и полей от него оставалось
- * полслова. На десктопе кадр вырастает по-настоящему, и прежние размеры читались бы мелочью
- * в углу, — там шапка укрупняется по-прежнему.
+ * полслова. На широком окне кадр вырастает по-настоящему, и прежние размеры читались бы мелочью
+ * в углу, — там шапка укрупняется. Прибавка набирается вместе с шириной окна по шкале --wide,
+ * а не включается порогом; здесь проверяются оба её конца, непрерывность — отдельно ниже.
  */
-test('шапка растёт с кадром только на десктопе, а на телефоне остаётся как в свёрнутом виде', async ({ page }) => {
+test('шапка растёт с кадром на широком окне, а на телефоне остаётся как в свёрнутом виде', async ({ page }) => {
     await page.setViewportSize({ width: MOBILE_MAX_WIDTH - 90, height: 844 });
     await openChannel(page, DEMO, ALBATROS);
     const phone = await headerSize(page);
@@ -1968,4 +1969,54 @@ test('в коротком окне обе раскладки делят его �
         .toBe(Math.round(lying.height * 0.6));
     expect((await sceneBox(page)).height, 'кадр провалился ниже своей нижней мерки').toBeGreaterThanOrEqual(100);
     await expect(page.getByPlaceholder('Сообщение'), 'в сжатом блоке пропало поле ввода').toBeInViewport();
+});
+
+/**
+ * Ступеньки на границе телефона нет. Прежде на 480px стоял порог, и один пиксель ширины разом
+ * переставлял всё, что под телефон подгонялось: небо, месяц, коридоры рейда, укладку стрелки
+ * курса, размеры шапки и кнопок. Теперь у каждого такого числа два настроенных конца и шкала
+ * между ними (`--wide` в index.less), и проверяется ровно это.
+ *
+ * Меряются мерки сцены, а не картинка: именно они переставлялись порогом, а всё остальное
+ * в кадре считается от них.
+ *
+ * Три условия сразу. На 479 и 480 — одно и то же (телефонный конец шкалы стоит на 480px,
+ * и до него включительно ничего не меняется). На 481 — почти то же: шаг в один пиксель даёт
+ * шаг в сотые доли, а не в десятки. И посередине отрезка каждое число стоит строго между
+ * своими концами — то есть шкала и правда едет, а не переключается где-то в другом месте.
+ */
+const RAMP = ['--sky-drop', '--berth-arrow-eye', '--berth-arrow-lean', '--berth-arrow-times', '--moon-disc-max'];
+
+const rampValues = (page: Page) =>
+    page.evaluate((names) => {
+        const style = getComputedStyle(document.querySelector('[class*="scenePainted"]')!);
+        return names.map((name) => Number.parseFloat(style.getPropertyValue(name)));
+    }, RAMP);
+
+test('на границе телефона ничего не прыгает: ширина ведёт мерки сцены плавно', async ({ page }) => {
+    await page.setViewportSize({ width: MOBILE_MAX_WIDTH - 1, height: 844 });
+    await openChannel(page, DEMO, ALBATROS);
+
+    const at = async (width: number) => {
+        await page.setViewportSize({ width, height: 844 });
+        // Ширину браузер применяет не тем же кадром, что и замер.
+        await page.waitForTimeout(150);
+        return rampValues(page);
+    };
+
+    const before = await at(MOBILE_MAX_WIDTH - 1);
+    const edge = await at(MOBILE_MAX_WIDTH);
+    const after = await at(MOBILE_MAX_WIDTH + 1);
+    const middle = await at((MOBILE_MAX_WIDTH + COLUMN_WIDTH) / 2);
+    const wide = await at(COLUMN_WIDTH + 140);
+
+    expect(edge, 'на 479 и 480 мерки сцены разошлись').toEqual(before);
+    RAMP.forEach((name, index) => {
+        expect(Math.abs(after[index] - edge[index]), `${name} прыгнул на пикселе после порога`).toBeLessThan(0.5);
+
+        // Посередине — строго между концами, с какой бы стороны конец ни был больше.
+        const [low, high] = [edge[index], wide[index]].sort((a, b) => a - b);
+        expect(middle[index], `${name} не поехал по шкале`).toBeGreaterThan(low);
+        expect(middle[index], `${name} не поехал по шкале`).toBeLessThan(high);
+    });
 });

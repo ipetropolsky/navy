@@ -10,7 +10,7 @@ import { useSnackbar } from '@/components/ui/Snackbar';
 import { channelLink } from '@/routing';
 import { copyText } from '@/utils/clipboard';
 import { SLUG_MAX_LENGTH, isValidSlug, slugify, slugifyInput } from '@/utils/slug';
-import { isMobile } from '@/utils/viewport';
+import { isTouch } from '@/utils/viewport';
 
 import styles from './CreateChannel.module.less';
 
@@ -114,8 +114,8 @@ export default function CreateChannel({ onCreate, demoHref, onOpenDemo }: Create
                     maxLength={40}
                     placeholder="Эскадра «Полночь»"
                     autoComplete="off"
-                    // На телефоне фокус сразу выкидывает клавиатуру поверх формы — там ставим его руками.
-                    autoFocus={!isMobile()}
+                    // Пальцем — значит клавиатура экранная, и фокус выкинул бы её поверх формы.
+                    autoFocus={!isTouch()}
                     onChange={(event) => handleTitleChange(event.target.value)}
                 />
             </Field>

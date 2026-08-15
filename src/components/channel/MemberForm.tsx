@@ -24,7 +24,7 @@ import {
     shipSizeShare,
 } from '@/types/channel';
 import { plural } from '@/utils/plural';
-import { isMobile } from '@/utils/viewport';
+import { isTouch } from '@/utils/viewport';
 
 import styles from './MemberForm.module.less';
 
@@ -208,8 +208,8 @@ export default function MemberForm({
                     maxLength={20}
                     placeholder="Гром"
                     autoComplete="off"
-                    // На телефоне фокус сразу выкидывает клавиатуру поверх формы.
-                    autoFocus={!isMobile()}
+                    // Пальцем — значит клавиатура экранная, и фокус выкинул бы её поверх формы.
+                    autoFocus={!isTouch()}
                     onChange={(event) => setName(event.target.value)}
                 />
             </Field>
