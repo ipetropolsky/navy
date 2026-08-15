@@ -1,10 +1,11 @@
-import { ReactNode, UIEvent, useLayoutEffect, useRef } from 'react';
+import { UIEvent, useLayoutEffect, useRef } from 'react';
 
 import Avatar from '@/components/ships/Avatar';
 import MemberName from '@/components/ships/MemberName';
-import { Member, Message } from '@/types/channel';
+import { ChatMessage, Member, Message } from '@/types/channel';
 
 import ReplyQuote from '@/components/chat/ReplyQuote';
+import ShipNoticeLine from '@/components/chat/ShipNoticeLine';
 
 import styles from './MessageList.module.less';
 
@@ -14,25 +15,12 @@ const formatTime = (at: number): string =>
 
 const formatDate = (at: number): string => new Date(at).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
 
-/**
- * Выделение в системной строчке. Бэкенд помечает изменившееся двумя звёздочками — тем же
- * знаком, что и markdown, — а лента превращает пометку в `strong`, который в служебной строчке
- * набран не жирным, а плотным (см. .systemNote в стилях). Разметка нарочно сведена к одному
- * приёму: полноценный markdown в служебной строке не нужен, а текст без разбора всё равно
- * читается.
- */
-const emphasise = (text: string): ReactNode[] =>
-    text.split('**').map((part, index) =>
-        // Ключ по порядку тут и есть тождество: куски различаются только местом в строке.
-        index % 2 ? <strong key={index}>{part}</strong> : part
-    );
-
 interface MessageListProps {
     messages: Message[];
     members: Member[];
     /** Чьи сообщения показывать своими — справа и без подписи. */
     myId: string;
-    onReply: (message: Message) => void;
+    onReply: (message: ChatMessage) => void;
     /** Окликнуть корабль автора: тычок в аватарку — и тот отвечает лампой. */
     onHail: (memberId: string) => void;
 }
@@ -127,13 +115,43 @@ export default function MessageList({ messages, members, myId, onReply, onHail }
         <div ref={listRef} className={styles.list} onScroll={handleScroll}>
             {messages.length > 0 && <div className={styles.dateChip}>{formatDate(messages[0].sentAt)}</div>}
             {messages.map((message, index) => {
-                const system = message.kind === 'system';
                 const own = message.author.memberId === myId;
                 const author = byId.get(message.author.memberId);
                 const prev = messages[index - 1];
                 const next = messages[index + 1];
                 const firstOfGroup = !prev || groupKey(prev) !== groupKey(message);
                 const lastOfGroup = !next || groupKey(next) !== groupKey(message);
+                // Место под аватарку держим у всякой чужой строки, системной в том числе:
+                // системная запись стоит в цепочке своего корабля и с его аватаркой.
+                const avatar = !own && (
+                    <div className={styles.avatarCell}>
+                        {lastOfGroup && author && (
+                            <Avatar
+                                number={author.hullNumber}
+                                name={author.name}
+                                onHail={() => onHail(author.memberId)}
+                            />
+                        )}
+                    </div>
+                );
+
+                /*
+                 * Системная запись стоит на месте пузыря и в той же строке — с аватаркой автора
+                 * и по его сторону ленты, — но пузырём не притворяется: она мельче, приглушена
+                 * и помечена косой полоской. Отвечать на неё не на что, поэтому это блок,
+                 * а не кнопка: канал сообщает о корабле, а не говорит за него.
+                 */
+                if (message.kind === 'system') {
+                    return (
+                        <div key={message.messageId} className={own ? styles.rowOwn : styles.row}>
+                            {avatar}
+                            <div className={styles.systemNote}>
+                                <ShipNoticeLine notice={message.notice} />
+                            </div>
+                        </div>
+                    );
+                }
+
                 const thread = message.thread;
                 const replyTo = thread
                     ? messages.find((candidate) => candidate.messageId === thread.messageId)
@@ -141,46 +159,24 @@ export default function MessageList({ messages, members, myId, onReply, onHail }
 
                 return (
                     <div key={message.messageId} className={own ? styles.rowOwn : styles.row}>
-                        {!own && (
-                            <div className={styles.avatarCell}>
-                                {lastOfGroup && author && (
-                                    <Avatar
-                                        number={author.hullNumber}
-                                        name={author.name}
-                                        onHail={() => onHail(author.memberId)}
-                                    />
-                                )}
-                            </div>
-                        )}
-                        {/*
-                         * Системная запись стоит на месте пузыря и в той же строке — с аватаркой
-                         * автора и по его сторону ленты, — но пузырём не притворяется: она мельче,
-                         * приглушена и помечена косой полоской. Отвечать на неё не на что, поэтому
-                         * это блок, а не кнопка: канал сообщает о корабле, а не говорит за него.
-                         */}
-                        {system ? (
-                            <div className={styles.systemNote}>{emphasise(message.text)}</div>
-                        ) : (
-                            <button
-                                type="button"
-                                className={own ? styles.bubbleOwn : styles.bubble}
-                                onClick={() => onReply(message)}
-                                title="Ответить"
-                            >
-                                {!own && firstOfGroup && author && (
-                                    <MemberName name={author.name} color={author.color} />
-                                )}
-                                {replyTo && (
-                                    <span className={styles.replyCell}>
-                                        <ReplyQuote author={byId.get(replyTo.author.memberId)} text={replyTo.text} />
-                                    </span>
-                                )}
-                                <span className={styles.text}>
-                                    {message.text}
-                                    <span className={styles.time}>{formatTime(message.sentAt)}</span>
+                        {avatar}
+                        <button
+                            type="button"
+                            className={own ? styles.bubbleOwn : styles.bubble}
+                            onClick={() => onReply(message)}
+                            title="Ответить"
+                        >
+                            {!own && firstOfGroup && author && <MemberName name={author.name} color={author.color} />}
+                            {replyTo && replyTo.kind !== 'system' && (
+                                <span className={styles.replyCell}>
+                                    <ReplyQuote author={byId.get(replyTo.author.memberId)} text={replyTo.text} />
                                 </span>
-                            </button>
-                        )}
+                            )}
+                            <span className={styles.text}>
+                                {message.text}
+                                <span className={styles.time}>{formatTime(message.sentAt)}</span>
+                            </span>
+                        </button>
                     </div>
                 );
             })}

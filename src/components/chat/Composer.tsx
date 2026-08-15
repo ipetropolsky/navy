@@ -2,14 +2,14 @@ import { SyntheticEvent, useRef, useState } from 'react';
 
 import IconButton from '@/components/ui/IconButton';
 import Input from '@/components/ui/Input';
-import { MAX_MESSAGE_LENGTH, Member, Message } from '@/types/channel';
+import { ChatMessage, MAX_MESSAGE_LENGTH, Member } from '@/types/channel';
 
 import ReplyQuote from '@/components/chat/ReplyQuote';
 
 import styles from './Composer.module.less';
 
 interface ComposerProps {
-    replyTo: Message | null;
+    replyTo: ChatMessage | null;
     replyToAuthor: Member | null;
     onCancelReply: () => void;
     onSend: (text: string) => void;

@@ -6,7 +6,11 @@ import { ChannelSnapshot } from '@/backend/types';
 /**
  * Демо-канал: три корабля и уже начатый разговор. Нужен, чтобы чат было на что посмотреть
  * до того, как в него кто-то войдёт, — пустая лента ничего не показывает ни про группировку
- * сообщений, ни про ответы, ни про цвета позывных.
+ * сообщений, ни про ответы, ни про цвета позывных, ни про строчки самого канала.
+ *
+ * Строчки канала здесь тоже настоящие: три о входе и одна о переоснащении. Вымпел вошёл
+ * с бортовым 555 и сменил его на 561 — так в демо видно оба вида строчки, ровный и с пометкой
+ * на изменившемся.
  *
  * Записывается в хранилище один раз, при первом запуске. Если состояние там уже есть,
  * демо не трогает его: разговор, который вы вели вчера, не должен пропадать из-за того,
@@ -85,6 +89,27 @@ export const createDemoChannel = (): ChannelSnapshot => ({
     members: placeDemoCrew(),
     messages: [
         {
+            messageId: 'msg-join-1',
+            author: { memberId: 'm-albatros' },
+            kind: 'system',
+            notice: { event: 'joined', before: { shipKind: 'pr1400', name: 'Альбатрос', hullNumber: '317' } },
+            sentAt: minutesAfterMidnight(21, 30),
+        },
+        {
+            messageId: 'msg-join-2',
+            author: { memberId: 'm-vympel' },
+            kind: 'system',
+            notice: { event: 'joined', before: { shipKind: 'pr1234', name: 'Вымпел', hullNumber: '555' } },
+            sentAt: minutesAfterMidnight(21, 32),
+        },
+        {
+            messageId: 'msg-join-3',
+            author: { memberId: 'm-rezvy' },
+            kind: 'system',
+            notice: { event: 'joined', before: { shipKind: 'pr205', name: 'Резвый', hullNumber: '208' } },
+            sentAt: minutesAfterMidnight(21, 34),
+        },
+        {
             messageId: 'msg-1',
             author: { memberId: 'm-albatros' },
             text: 'Встали на рейде у острова. Море спокойное, видимость отличная.',
@@ -114,6 +139,18 @@ export const createDemoChannel = (): ChannelSnapshot => ({
             author: { memberId: 'm-vympel' },
             text: 'Вымпел на позиции, к переходу готов.',
             sentAt: minutesAfterMidnight(21, 44),
+        },
+        {
+            messageId: 'msg-refit',
+            author: { memberId: 'm-vympel' },
+            kind: 'system',
+            notice: {
+                event: 'refit',
+                before: { shipKind: 'pr1234', name: 'Вымпел', hullNumber: '555' },
+                after: { shipKind: 'pr1234', name: 'Вымпел', hullNumber: '561' },
+                changed: ['hullNumber'],
+            },
+            sentAt: minutesAfterMidnight(21, 45),
         },
         {
             messageId: 'msg-6',

@@ -1,7 +1,8 @@
-import { Channel, MAX_MESSAGE_LENGTH, Member, Message, SHIP_KIND_LABELS, ShipKind, isSameBerth } from '@/types/channel';
+import { Channel, MAX_MESSAGE_LENGTH, Member, Message, ShipNotice, isSameBerth } from '@/types/channel';
 import { isValidSlug } from '@/utils/slug';
 import { localStore } from '@/utils/storage';
 
+import { refitNotice, shipTitle } from '@/backend/notice';
 import { isBerthFree, placeShip } from '@/backend/placement';
 import { DEMO_CHANNEL_ID, createDemoChannel } from '@/backend/seed';
 import {
@@ -43,7 +44,7 @@ const BROADCAST_NAME = 'kilvater';
  * Здесь должна появиться миграция раньше, чем в канале заведётся первый неигрушечный разговор.
  * Подробно — в docs/BACKEND-API.md, раздел «К чужим данным — бережно».
  */
-const STORAGE_VERSION = 12;
+const STORAGE_VERSION = 13;
 
 /** Ключ, под которым состояние лежало до появления версии. Чистим, чтобы не мусорить. */
 const LEGACY_STORAGE_KEY = 'kilvater.v1';
@@ -100,55 +101,6 @@ const writeState = (state: ServerState): void => {
 
 const randomId = (prefix: string): string =>
     `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-
-/** Название силуэта со строчной буквы: в строчке оно идёт не первым словом. */
-const kindLabel = (kind: ShipKind): string => {
-    const label = SHIP_KIND_LABELS[kind];
-    return label.charAt(0).toLowerCase() + label.slice(1);
-};
-
-/**
- * Как корабль зовут целиком: тип, позывной, бортовой номер. Именно в таком порядке его
- * и называют — «сторожевой катер „Гром“ 111», — и с этого начинается любая системная строчка,
- * иначе по одному позывному не понять, о ком речь.
- */
-const shipTitle = (member: Member): string =>
-    `${SHIP_KIND_LABELS[member.shipKind]} «${member.name}» ${member.hullNumber}`;
-
-/**
- * Пометить изменившееся. Двумя звёздочками, как в markdown; лента превращает пометку
- * в жирное (см. `emphasise` в components/chat/MessageList).
- */
-const marked = (text: string, changed: boolean): string => (changed ? `**${text}**` : text);
-
-/**
- * Строчка о переоснащении: кем корабль был и кем стал.
- *
- * Называем корабль целиком в обеих половинах, даже если поменялся один бортовой номер.
- * Перечислять только изменившееся («теперь 517») короче, но читается это обрывком: строчка
- * о корабле должна называть корабль, а не разницу между двумя его состояниями.
- *
- * Изменившееся при этом помечено: глазу нужно за что-то зацепиться, а искать отличие между
- * двумя почти одинаковыми строчками он не должен. Кавычки в пометку не входят — жирными они
- * выглядят кляксами по краям позывного.
- *
- * Цвет позывного не отмечаем: он не меняет ни имени, ни облика.
- */
-const refitNotice = (before: Member, after: Member): string | null => {
-    const kindChanged = before.shipKind !== after.shipKind;
-    const nameChanged = before.name !== after.name;
-    const hullChanged = before.hullNumber !== after.hullNumber;
-    if (!kindChanged && !nameChanged && !hullChanged) {
-        return null;
-    }
-    // Тип с маленькой буквы: он стоит в середине фразы, а не в её начале.
-    const title = [
-        marked(kindLabel(after.shipKind), kindChanged),
-        `«${marked(after.name, nameChanged)}»`,
-        marked(after.hullNumber, hullChanged),
-    ].join(' ');
-    return `${shipTitle(before)} теперь ${title}`;
-};
 
 /** Адрес свободен, если его не занял другой канал. Сам себя канал не блокирует. */
 const isSlugFree = (state: ServerState, slug: string, exceptId?: string): boolean =>
@@ -237,11 +189,16 @@ export function createLocalBackend(): ChannelBackend {
         deliver(event);
     };
 
-    /** Записать в ленту строчку от самого канала и разослать её как обычное сообщение. */
-    const postNotice = async (channelId: string, memberId: string, text: string, sentAt: number): Promise<void> => {
-        const notice: Message = { messageId: randomId('msg'), author: { memberId }, kind: 'system', text, sentAt };
-        await mutate(channelId, (current) => current.messages.push(notice));
-        emit(channelId, { type: 'message-added', message: notice });
+    /** Записать в ленту запись от самого канала и разослать её как обычное сообщение. */
+    const postNotice = async (
+        channelId: string,
+        memberId: string,
+        notice: ShipNotice,
+        sentAt: number
+    ): Promise<void> => {
+        const message: Message = { messageId: randomId('msg'), author: { memberId }, kind: 'system', notice, sentAt };
+        await mutate(channelId, (current) => current.messages.push(message));
+        emit(channelId, { type: 'message-added', message });
     };
 
     /** Позывной и бортовой номер должны быть свободны: иначе в ленте не различить, кто говорит. */
@@ -379,9 +336,14 @@ export function createLocalBackend(): ChannelBackend {
                 emit(channelId, { type: 'channel-updated', channel });
             }
             // Вход отмечается в ленте: корабль заплывает в кадр молча, и без строчки в чате
-            // непонятно, кто пришёл. Текст складывает бэкенд — тогда он останется прежним,
-            // даже если корабль потом сменит позывной.
-            await postNotice(channelId, member.memberId, `${shipTitle(member)} встал на рейд`, member.joinedAt);
+            // непонятно, кто пришёл. В записи лежит снимок того, как корабль звали сейчас, —
+            // тогда строчка останется прежней, даже если он потом сменит позывной.
+            await postNotice(
+                channelId,
+                member.memberId,
+                { event: 'joined', before: shipTitle(member) },
+                member.joinedAt
+            );
             return delay({ member });
         },
 
@@ -419,9 +381,9 @@ export function createLocalBackend(): ChannelBackend {
                 return { ...member };
             });
             emit(channelId, { type: 'member-updated', member: updated });
-            const text = before && refitNotice(before, updated);
-            if (text) {
-                await postNotice(channelId, updated.memberId, text, Date.now());
+            const notice = before && refitNotice(before, updated);
+            if (notice) {
+                await postNotice(channelId, updated.memberId, notice, Date.now());
             }
             return delay({ member: updated });
         },
@@ -431,9 +393,7 @@ export function createLocalBackend(): ChannelBackend {
             // называть в строчке будет нечего.
             const gone = await dropMember(channelId, memberId);
             if (gone) {
-                // «Сняться с рейда» — это и значит покинуть якорную стоянку: подняли якорь
-                // и пошли. Ровно то, что происходит в кадре, и ровно так об этом и говорят.
-                await postNotice(channelId, memberId, `${shipTitle(gone)} снялся с рейда`, Date.now());
+                await postNotice(channelId, memberId, { event: 'left', before: shipTitle(gone) }, Date.now());
             }
             return delay(undefined);
         },
@@ -451,9 +411,9 @@ export function createLocalBackend(): ChannelBackend {
                 }
             });
             if (gone) {
-                // Строчка от старшего, а не от высаженного: распорядился он, и по цвету
-                // позывного в ленте это видно.
-                await postNotice(channelId, memberId, `${shipTitle(gone)} выдворен с рейда`, Date.now());
+                // Запись от старшего, а не от высаженного: распорядился он, и по тому, в чьей
+                // цепочке она встала, это видно.
+                await postNotice(channelId, memberId, { event: 'kicked', before: shipTitle(gone) }, Date.now());
             }
             return delay(undefined);
         },

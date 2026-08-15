@@ -50,10 +50,12 @@ test('реплика уходит и привязывается ответом',
     // или своему собственному — и цитата над строкой ввода не появляется вовсе. Ловится это
     // только на неспешной машине и без окна на экране, поэтому щёлкаем с повтором: попытка
     // засчитана, когда над строкой ввода встала цитата того самого сообщения.
-    const target = (await readState(page)).channels['ch-demo'].messages[0];
+    // Первая реплика, а не первое сообщение: лента начинается со строчек канала о входе,
+    // и пузырей среди них нет — щёлкать в них не по чему.
+    const target = (await readState(page)).channels['ch-demo'].messages.find((message) => message.text)!;
     await expect(async () => {
         await bubbles(page).first().click();
-        await expect(page.locator('[class*="replyBar"]')).toContainText(target.text, { timeout: 2000 });
+        await expect(page.locator('[class*="replyBar"]')).toContainText(target.text!, { timeout: 2000 });
     }, 'лента так и не показала, на что отвечает').toPass({ timeout: 20_000 });
     await send(page, 'Идём следом');
 
@@ -67,7 +69,7 @@ test('реплика уходит и привязывается ответом',
     const state = await readState(page);
     const messages = state.channels['ch-demo'].messages;
     const reply = messages.at(-1)!;
-    expect(reply.thread?.messageId).toBe(messages[0].messageId);
+    expect(reply.thread?.messageId).toBe(target.messageId);
     expect(reply.author.memberId).toBe(ALBATROS);
 });
 
@@ -98,9 +100,12 @@ test('уход с рейда отмечается в ленте и возвра�
     await expect(page.getByPlaceholder('Гром')).toBeVisible();
     const state = await readState(page);
     expect(state.channels['ch-demo'].members.map((member) => member.memberId)).not.toContain(ALBATROS);
-    expect(state.channels['ch-demo'].messages.at(-1)!.text).toBe(
-        'Пограничный сторожевой катер «Альбатрос» 317 снялся с рейда'
-    );
+    // Бэкенд пишет данными, а не фразой: каким корабль был на момент ухода. Как это сказать
+    // словами, решает лента — и её слова проверяются выше, по самой строчке на экране.
+    expect(state.channels['ch-demo'].messages.at(-1)!.notice).toEqual({
+        event: 'left',
+        before: { shipKind: 'pr1400', name: 'Альбатрос', hullNumber: '317' },
+    });
 });
 
 test('переоснащение пишет в ленту, что было и что стало', async ({ page }) => {

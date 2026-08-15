@@ -137,11 +137,24 @@ interface StoredMember {
     place: { slot: number; corridor: string; left: number; facing: string; enterFrom: string };
 }
 
+interface StoredShipTitle {
+    shipKind: string;
+    name: string;
+    hullNumber: string;
+}
+
 interface StoredMessage {
     messageId: string;
     author: { memberId: string };
-    text: string;
+    /** Есть у реплики. У системной записи вместо него — `notice`: канал пишет данными. */
+    text?: string;
     kind?: string;
+    notice?: {
+        event: string;
+        before: StoredShipTitle;
+        after?: StoredShipTitle;
+        changed?: string[];
+    };
     thread?: { messageId: string };
 }
 
