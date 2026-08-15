@@ -4,23 +4,24 @@ import styles from './Avatar.module.less';
 
 interface AvatarProps {
     number: string;
+    /** Позывной: подсказка под курсором у аватарки, которая ничего не делает. */
     name?: string;
     large?: boolean;
-    /** Оклик: по нажатию корабль отзывается лампой. Без него аватарка — просто картинка. */
-    onHail?: () => void;
+    /**
+     * Что делает тычок и как это назвать. Без него аватарка — просто картинка: кнопкой она
+     * становится только тогда, когда есть что нажимать, и иначе не должна ни попадать в обход
+     * с клавиатуры, ни менять курсор. Название приходит снаружи, потому что дело у аватарки
+     * разное: в ленте она открывает карточку корабля, в списке — окликает.
+     */
+    action?: { title: string; onClick: () => void };
 }
 
 /**
  * Аватарка участника: бортовой номер в кружке. Лицо у корабля одно — номер на борту.
- *
- * Если оклик задан, аватарка становится кнопкой: тычок в неё — способ спросить «который
- * из них твой?», и корабль отвечает лампой со своего места на рейде. Кнопкой она при этом
- * становится только тогда, когда есть кого окликать: аватарка без отклика не должна ни
- * попадать в обход с клавиатуры, ни менять курсор.
  */
-export default function Avatar({ number, name, large = false, onHail }: AvatarProps) {
+export default function Avatar({ number, name, large = false, action }: AvatarProps) {
     const look = large ? styles.avatarLarge : styles.avatar;
-    if (!onHail) {
+    if (!action) {
         return (
             <span className={look} title={name}>
                 <HullBadge number={number} />
@@ -28,12 +29,7 @@ export default function Avatar({ number, name, large = false, onHail }: AvatarPr
         );
     }
     return (
-        <button
-            type="button"
-            className={`${look} ${styles.hail}`}
-            onClick={onHail}
-            title={name ? `Окликнуть «${name}»` : 'Окликнуть'}
-        >
+        <button type="button" className={`${look} ${styles.hail}`} onClick={action.onClick} title={action.title}>
             <HullBadge number={number} />
         </button>
     );

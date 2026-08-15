@@ -145,7 +145,7 @@ test('курс выбирается в форме, и корабль встаё�
 
     // Ставим курс вправо и смотрим на список кораблей: силуэты в кнопках стоят на этом курсе.
     await page.getByLabel('Курс вправо').click();
-    const inForm = page.locator('[class*="kindShip"] [data-facing]');
+    const inForm = page.locator('[class*="portraitShip"] [data-facing]');
     expect(await inForm.count(), 'силуэтов в форме не видно').toBeGreaterThan(1);
     await expect(inForm.first()).toHaveAttribute('data-facing', 'right');
     await expect(inForm.last()).toHaveAttribute('data-facing', 'right');
@@ -1057,14 +1057,38 @@ const watchLamps = (page: Page, within = '[class*="shipLane"]'): Promise<void> =
 
 const flashes = (page: Page): Promise<Record<string, number>> => page.evaluate(() => window.__flashes);
 
-test('оклик: тычок в аватарку — и корабль отвечает лампой', async ({ page }) => {
+test('карточка чужого корабля открывается и из кадра, и из ленты', async ({ page }) => {
+    await openChannel(page, DEMO, ALBATROS);
+    const fleet = Object.values((await readState(page)).channels)[0].members;
+    const other = fleet.find((member) => member.memberId !== ALBATROS)!;
+
+    // Из кадра: тычок по чужому корпусу. В карточке — тот самый корабль, а не первый попавшийся:
+    // сверяем по бортовому номеру, он на рейде у каждого свой.
+    await page.locator(`[data-berth-ship="${other.place.slot}-${other.place.corridor}"]`).click();
+    const card = page.getByRole('region', { name: 'Корабль' });
+    await expect(card).toContainText(`Бортовой номер ${other.hullNumber}`);
+    await expect(card).toContainText(other.name);
+    // Свой корабль карточки не открывает: по нему открывается форма.
+    await expect(card).not.toContainText('Альбатрос');
+
+    // Закрыли — и открыли заново из ленты, тычком по аватарке. Это те же три цифры на борту,
+    // и приводить они должны к тому же кораблю.
+    await card.getByRole('button', { name: 'Закрыть' }).click();
+    await expect(card).toBeHidden();
+    await page.locator(`button[title="Корабль «${other.name}»"]`).first().click();
+    await expect(page.getByRole('region', { name: 'Корабль' })).toContainText(`Бортовой номер ${other.hullNumber}`);
+});
+
+test('оклик из карточки корабля — и он отвечает лампой', async ({ page }) => {
     await openChannel(page, DEMO, ALBATROS);
     await watchLamps(page);
 
-    // Аватарка окликаемая — значит кнопка. Кого именно окликаем, написано на ней самой.
-    const avatar = page.locator('button[title^="Окликнуть"]').first();
-    const hailed = (await avatar.getAttribute('title'))!.replace(/^Окликнуть «|»$/g, '');
+    // Аватарка в ленте открывает карточку, а окликают уже из неё. Кого именно — написано
+    // на самой аватарке.
+    const avatar = page.locator('button[title^="Корабль «"]').first();
+    const hailed = (await avatar.getAttribute('title'))!.replace(/^Корабль «|»$/g, '');
     await avatar.click();
+    await page.getByRole('button', { name: 'Окликнуть' }).click();
 
     // K — это «−·−», три вспышки. Ждём именно трёх: одной хватило бы и на случайное мигание.
     await expect

@@ -21,8 +21,12 @@ interface MessageListProps {
     /** Чьи сообщения показывать своими — справа и без подписи. */
     myId: string;
     onReply: (message: Message) => void;
-    /** Окликнуть корабль автора: тычок в аватарку — и тот отвечает лампой. */
-    onHail: (memberId: string) => void;
+    /**
+     * Показать карточку корабля автора: тычок в аватарку — и видно, кто это говорит. В ленте
+     * от чужого корабля видны только три цифры на аватарке, и связать их с силуэтом в кадре
+     * иначе нечем.
+     */
+    onShowShip: (memberId: string) => void;
 }
 
 /**
@@ -44,7 +48,7 @@ const STICK_SLOP = 24;
 const TAP_SLOP = 8;
 
 /** Лента сообщений в стиле Telegram: группировка по автору, ответы, тап по сообщению — ответить. */
-export default function MessageList({ messages, members, myId, onReply, onHail }: MessageListProps) {
+export default function MessageList({ messages, members, myId, onReply, onShowShip }: MessageListProps) {
     const listRef = useRef<HTMLDivElement>(null);
 
     /**
@@ -207,7 +211,10 @@ export default function MessageList({ messages, members, myId, onReply, onHail }
                             <Avatar
                                 number={author.hullNumber}
                                 name={author.name}
-                                onHail={() => onHail(author.memberId)}
+                                action={{
+                                    title: `Корабль «${author.name}»`,
+                                    onClick: () => onShowShip(author.memberId),
+                                }}
                             />
                         )}
                     </div>

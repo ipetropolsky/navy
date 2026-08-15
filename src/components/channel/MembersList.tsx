@@ -56,7 +56,13 @@ export default function MembersList({ members, myId, seniorId, onEditMe, onKick,
                 const senior = member.memberId === seniorId;
                 return (
                     <div key={member.memberId} className={mine ? styles.rowActive : styles.row}>
-                        <Avatar number={member.hullNumber} large onHail={() => onHail(member.memberId)} />
+                        {/* В списке аватарка окликает, а не открывает карточку: строчка и так
+                            показывает всё, что в карточке есть, — позывной, силуэт, вымпел. */}
+                        <Avatar
+                            number={member.hullNumber}
+                            large
+                            action={{ title: `Окликнуть «${member.name}»`, onClick: () => onHail(member.memberId) }}
+                        />
                         <span className={styles.info}>
                             <span className={styles.nameRow}>
                                 <MemberName name={member.name} color={member.color} />

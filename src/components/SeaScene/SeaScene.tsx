@@ -224,6 +224,8 @@ interface SeaSceneProps {
     berths?: BerthChoice;
     /** Щелчок по своему кораблю: открыть форму корабля, где меняется и место. */
     onEditShip?: () => void;
+    /** Щелчок по чужому кораблю: показать его карточку. Своим на рейде распоряжаются, чужой смотрят. */
+    onShowShip?: (memberId: string) => void;
     /**
      * Канал загружен и список кораблей окончательный. Нужен, чтобы отличить «пока пусто,
      * потому что ещё грузимся» от «пусто, потому что на рейде никого»: от этого зависит,
@@ -239,7 +241,16 @@ interface SeaSceneProps {
 }
 
 /** Ночное море: слои неба, месяца, облаков, острова и воды с кораблями-участниками. */
-export default function SeaScene({ members, myId, morseFeeds, ready, berths, onEditShip, full }: SeaSceneProps) {
+export default function SeaScene({
+    members,
+    myId,
+    morseFeeds,
+    ready,
+    berths,
+    onEditShip,
+    onShowShip,
+    full,
+}: SeaSceneProps) {
     // Кто уже был в кадре. Заплывает только тот, кто вошёл при нас; те, что стояли на рейде
     // до нашего прихода, просто оказываются на месте — въезжать им неоткуда, мы пришли к ним.
     //
@@ -911,6 +922,20 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
                     // Пока форма и так открыта, корабль ничего не открывает и указателем
                     // не притворяется: щелчок по воде в этот момент занят выбором места.
                     const canEdit = Boolean(onEditShip) && !berths && member.memberId === myId && !motionKind;
+                    // Чужой корабль открывает свою карточку — тем же тычком и по тем же
+                    // условиям: идущий и тут ничего не открывает, а пока выбирают место,
+                    // щелчок по воде занят выбором.
+                    const canShow = Boolean(onShowShip) && !berths && member.memberId !== myId && !motionKind;
+                    // Своим кораблём распоряжаются, чужой смотрят: рейд общий, но переставлять
+                    // на нём можно только себя. Действие у корпуса одно, и что оно делает,
+                    // написано на нём же.
+                    const action =
+                        (canEdit && onEditShip
+                            ? { onClick: onEditShip, title: 'Изменить корабль и место на рейде' }
+                            : null) ??
+                        (canShow && onShowShip
+                            ? { onClick: () => onShowShip(member.memberId), title: `Корабль «${member.name}»` }
+                            : null);
                     return (
                         // Дорожка во всю ширину кадра: она и возит корабль. Ход и место на рейде
                         // считаются в долях кадра, поэтому и блок нужен шириной с кадр — см. стили.
@@ -960,16 +985,20 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
                             }
                         >
                             <div
-                                className={[styles.shipSlot, canEdit ? styles.shipMine : ''].filter(Boolean).join(' ')}
+                                className={[
+                                    styles.shipSlot,
+                                    canEdit ? styles.shipMine : '',
+                                    canShow ? styles.shipShown : '',
+                                ]
+                                    .filter(Boolean)
+                                    .join(' ')}
                                 // На каком месте стоит этот корпус. Нужно проверке: подпись знает
                                 // своё место (data-berth-name), и только по общему ключу их можно
                                 // свести в пару — по порядку в кадре нельзя, корабль бывает отведён
                                 // от края кадра и обгоняет соседа по оси.
                                 data-berth-ship={berthKey(member.place)}
-                                // Чужие корабли не трогаем: рейд общий, но распоряжаться там можно
-                                // только собой.
-                                onClick={canEdit ? onEditShip : undefined}
-                                title={canEdit ? 'Изменить корабль и место на рейде' : undefined}
+                                onClick={action?.onClick}
+                                title={action?.title}
                             >
                                 {/* Кивок живёт своим блоком: он тоже поворот, а поворот на слоте уже занят
                             дифферентом, и на качающемся блоке — тангажом. Свойство одно на элемент,

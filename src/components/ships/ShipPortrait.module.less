@@ -1,0 +1,52 @@
+// Место под силуэт одно на всех: соотношение сторон приходит из разметки, поэтому портреты
+// одной высоты. Корабль стоит по центру и прижат к низу — ватерлинией к линейке. Из-за этого
+// мелкий катер не всплывает к середине, а стоит на той же воде, что и корвет, и отступ
+// до линейки у всех один.
+.portraitBox {
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    width: 100%;
+}
+
+// Ширина силуэта приходит из разметки: она считается из его длины, а высота идёт за ней сама.
+// Разворот по курсу делает сам корабль (facing) — вместе с ним переезжают и огни, а от простого
+// отражения картинки они остались бы на месте.
+.portraitShip {
+    display: block;
+}
+
+// Масштабная линейка под кораблём: десять метров, пять делений по два, как на чертеже.
+// Стоит по центру, под серединой корабля.
+.scaleRow {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    margin: 4px 0 12px;
+}
+
+.scaleLabel {
+    white-space: nowrap;
+    color: var(--color-text-muted);
+    font-size: var(--font-size-caption);
+}
+
+// Линейка: светлые и тёмные деления в обводку, как на чертеже.
+.scaleBar {
+    flex: none;
+    display: flex;
+    height: 6px;
+    outline: 1px solid var(--color-text-muted);
+}
+
+.scaleLight {
+    flex: 1;
+    background: var(--color-text);
+}
+
+.scaleDark {
+    flex: 1;
+    background: var(--color-ship);
+}

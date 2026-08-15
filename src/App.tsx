@@ -17,6 +17,7 @@ import SeaScene from '@/components/SeaScene/SeaScene';
 import CreateChannel from '@/components/channel/CreateChannel';
 import MemberForm from '@/components/channel/MemberForm';
 import MembersList from '@/components/channel/MembersList';
+import ShipCard from '@/components/channel/ShipCard';
 import Composer from '@/components/chat/Composer';
 import MessageList from '@/components/chat/MessageList';
 import Button from '@/components/ui/Button';
@@ -83,9 +84,11 @@ const randomCourse = (): Side => (Math.random() < 0.5 ? 'left' : 'right');
  * содержимое блока, поэтому море не прыгает при переходах, а корабли видно ещё до входа
  * в канал.
  *
- * Поверх этого — три вещи, и все три необязательные: раскладка «больше сцены» (одна кнопка
- * в шапке), форма своего корабля (выезжает поверх разговора) и шторка со списком кораблей
- * (выезжает поверх всего). Ничего четвёртого в приложении нет.
+ * Поверх этого — четыре вещи, и все четыре необязательные: раскладка «больше сцены» (одна
+ * кнопка в шапке), форма своего корабля (выезжает поверх разговора) и две шторки поверх всего —
+ * список кораблей и карточка чужого корабля. Шторок именно две, а не одна с разным содержимым:
+ * приходят они с разных сторон — из шапки и из кадра, — и открытыми разом не бывают.
+ * Ничего пятого в приложении нет.
  *
  * Данные приходят из useChannel, а тот берёт их у ChannelBackend. Ни localStorage,
  * ни соседних вкладок здесь не видно: всё это дело бэкенда.
@@ -102,6 +105,9 @@ export default function App() {
     // Открыта ли форма своего корабля. Она выезжает поверх разговора — по той же причине
     // и тем же движением, что и шторка.
     const [editing, setEditing] = useState(false);
+    // Чей корабль показан карточкой. Своей карточки нет: свой корабль настраивают, а не
+    // разглядывают, и по нему открывается форма.
+    const [shownId, setShownId] = useState<string | null>(null);
     const notify = useSnackbar();
 
     // Раскладка целиком: развёрнут ли кадр, стоит ли разговор сбоку и какой он ширины. Всё
@@ -136,6 +142,19 @@ export default function App() {
     // ссылку каждый раз и заставлял пересчитывать всё, что от него зависит.
     const members = useMemo(() => channel?.members ?? [], [channel]);
     const me = members.find((member) => member.memberId === myId) ?? null;
+    // Чей корабль в карточке. Ищем каждый раз заново, а не запоминаем самого участника:
+    // он мог за это время переоснаститься или уйти с рейда, и карточка обязана показывать
+    // нынешний корабль, а не тот, каким его открыли. Ушёл совсем — карточка закрывается сама:
+    // показывать нечего.
+    const shownMember = shownId ? (members.find((member) => member.memberId === shownId) ?? null) : null;
+    // Кого рисовать в карточке, пока она уезжает. Закрытая шторка ещё какое-то время на экране,
+    // а корабля у неё в этот момент уже нет — и без этой памяти карточка на прощание схлопывалась
+    // бы в пустую полоску.
+    const shownLastRef = useRef(shownMember);
+    if (shownMember) {
+        shownLastRef.current = shownMember;
+    }
+    const shownCard = shownMember ?? shownLastRef.current;
     // Чем форма заполняется при переоснащении. Собираем заявку руками, а не отдаём участника
     // целиком: курс у него лежит в месте на рейде, и без этой сборки форма открывалась бы
     // со случайным курсом у корабля, который уже на что-то смотрит.
@@ -229,6 +248,13 @@ export default function App() {
         }
         setPickedBerth(berth);
     };
+
+    // Показать карточку чужого корабля. Список кораблей при этом закрываем: карточка — это
+    // ответ про один корабль, и оставшийся под ней список отвечал бы про все разом.
+    const handleShowShip = useCallback((memberId: string) => {
+        setSheetOpen(false);
+        setShownId(memberId);
+    }, []);
 
     const handleCreate = async (draft: ChannelDraft) => {
         const { channel: created } = await backend.createChannel({ channel: draft });
@@ -371,7 +397,7 @@ export default function App() {
                         members={members}
                         myId={me.memberId}
                         onReply={setReplyTo}
-                        onHail={handleHail}
+                        onShowShip={handleShowShip}
                     />
                     <Composer
                         replyTo={replyTo}
@@ -530,6 +556,9 @@ export default function App() {
                         // Щелчок по своему кораблю открывает ту же форму, что и кнопка
                         // «Настроить корабль»: и корабль, и место на рейде меняются в одном месте.
                         onEditShip={() => setEditing(true)}
+                        // А щелчок по чужому — его карточку: своим на рейде распоряжаются,
+                        // чужой разглядывают.
+                        onShowShip={handleShowShip}
                         berths={
                             picking
                                 ? { options: berthOptions, picked: pickedBerth, facing, onPick: handlePickBerth }
@@ -740,6 +769,23 @@ export default function App() {
                     onKick={(memberId) => void channelState.kick(memberId)}
                     onHail={handleHail}
                 />
+            </Shade>
+            {/* Карточка чужого корабля — такой же шторкой. Второй шторкой, а не содержимым
+                первой: список и карточка приходят с разных сторон — из шапки и из кадра, —
+                и класть карточку внутрь списка значило бы открывать список там, где его
+                не звали. Открыты обе разом они не бывают: карточка закрывает список за собой. */}
+            <Shade open={Boolean(shownMember)} onClose={() => setShownId(null)} label="Корабль" inside={atSide}>
+                {shownCard && (
+                    <ShipCard
+                        key={shownCard.memberId}
+                        member={shownCard}
+                        senior={shownCard.memberId === channel?.channel.owner?.memberId}
+                        // Оклик уходит на рейд, а карточка остаётся открытой: лампа отвечает
+                        // и на портрете, и на самом корабле в кадре, и закрыть её в этот миг
+                        // значило бы спрятать половину ответа.
+                        onHail={() => handleHail(shownCard.memberId)}
+                    />
+                )}
             </Shade>
         </div>
     );

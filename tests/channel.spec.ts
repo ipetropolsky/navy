@@ -221,7 +221,7 @@ test('набранный номер стоит на выбранном кора�
     // тут в том, что борт с номером один, — на всех сразу номер читался бы как часть рисунка.
     const onHulls = (): Promise<string[]> =>
         page
-            .locator('[class*="kindShip"] [class*="hullNumber"]')
+            .locator('[class*="portraitShip"] [class*="hullNumber"]')
             .evaluateAll((nodes) => nodes.map((node) => node.textContent ?? '').filter(Boolean));
 
     expect(await onHulls(), 'номер сел не на один борт').toEqual(['317']);
@@ -231,7 +231,7 @@ test('набранный номер стоит на выбранном кора�
     ).toHaveText('317');
 
     // Выбрали другой силуэт — номер перешёл вместе с выбором, прежний борт остался чистым.
-    const kinds = page.locator('button:has([class*="kindShip"])');
+    const kinds = page.locator('button:has([class*="portraitShip"])');
     await kinds.nth(3).click();
     expect(await onHulls(), 'номер остался на прежнем борту').toEqual(['317']);
     await expect(kinds.nth(3).locator('[class*="hullNumber"]'), 'номер не перешёл на новый выбор').toHaveText('317');

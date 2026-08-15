@@ -2,8 +2,7 @@ import { useState } from 'react';
 
 import { ChannelError, MemberDraft } from '@/backend';
 import MemberName from '@/components/ships/MemberName';
-import Ship from '@/components/ships/Ship';
-import { SHIP_SPRITES } from '@/components/ships/shipSprites';
+import ShipPortrait, { shipSpecLine } from '@/components/ships/ShipPortrait';
 import Button from '@/components/ui/Button';
 import Field from '@/components/ui/Field';
 import Input from '@/components/ui/Input';
@@ -17,13 +16,10 @@ import {
     MorseFeed,
     SHIP_KINDS,
     SHIP_KIND_LABELS,
-    SHIP_SPECS,
     ShipKind,
     Side,
     isValidHullNumber,
-    shipSizeShare,
 } from '@/types/channel';
-import { plural } from '@/utils/plural';
 import { isTouch } from '@/utils/viewport';
 
 import styles from './MemberForm.module.less';
@@ -77,54 +73,6 @@ const CourseArrow = ({ side }: { side: Side }) => (
         />
     </svg>
 );
-
-/**
- * Размер силуэта в списке — тем же правилом, что и в сцене (shipSizeShare): самый длинный
- * корабль занимает всю ширину кнопки, самый короткий — SHIP_SIZE_MIN от неё, остальные между.
- * Строго по длине катер выходил бы втрое мельче корабля, и разглядеть его было бы нечего.
- *
- * Масштаб от этого у каждого свой, и сравнивать силуэты между собой на глаз уже нельзя —
- * зато под каждым стоит его собственная линейка на десять метров, и по ней разница видна сразу.
- *
- * Всё считается долями ширины кнопки, ни одного числа в пикселях: на любом экране и при любом
- * изменении окна и линейка, и силуэт тянутся вместе, а соотношение между ними не меняется.
- */
-const SCALE_METRES = 10;
-const SCALE_SEGMENTS = [0, 1, 2, 3, 4];
-
-/** Ширина силуэта в долях ширины кнопки — по тому же правилу, что и размер корабля в сцене. */
-const shipWidth = (kind: ShipKind): number => shipSizeShare(kind);
-
-/**
- * Ширина линейки: десять метров в масштабе именно этого силуэта. У мелкого корабля масштаб
- * крупнее — и линейка длиннее. Толщина и подпись у всех одинаковые: меняется только длина.
- */
-const scaleWidth = (kind: ShipKind): number => (SCALE_METRES * shipWidth(kind)) / SHIP_SPECS[kind].length;
-
-/** Высота силуэта в долях ширины кнопки: ширина, делённая на пропорции его рисунка. */
-const shipHeight = (kind: ShipKind): number =>
-    (shipWidth(kind) * SHIP_SPRITES[kind].size.height) / SHIP_SPRITES[kind].size.width;
-
-/**
- * Место под силуэт: у всех кнопок одно, ростом с самый высокий из рисунков в их собственном
- * масштабе. Кнопки от этого одной высоты, корабли стоят на одном уровне, а лишнего поля
- * над мачтами ровно столько, сколько нужно самому высокому.
- */
-const IMAGE_BOX_ASPECT = 1 / Math.max(...SHIP_KINDS.map(shipHeight));
-
-const percent = (share: number): string => `${(share * 100).toFixed(2)}%`;
-
-/**
- * Строчка с характеристиками силуэта: длина, водоизмещение, полный ход. Числа не украшение —
- * по ним считается ход корабля в сцене, и катер потому и уходит с рейда быстрее тральщика.
- * Порядок тот же, что в справочниках: размер, масса, скорость.
- */
-const shipSpecLine = (kind: ShipKind): string => {
-    const spec = SHIP_SPECS[kind];
-    const number = (value: number): string => value.toLocaleString('ru-RU');
-    const knots = `${number(spec.knots)} ${plural(spec.knots, ['узел', 'узла', 'узлов'])}`;
-    return `${number(spec.length)} м · ${number(spec.displacement)} т · ${knots}`;
-};
 
 /**
  * Корабль участника: силуэт, цвет, бортовой номер и позывной. Форма одна и та же
@@ -280,11 +228,8 @@ export default function MemberForm({
                                 setReply((prev) => ({ seq: (prev?.seq ?? 0) + 1, text: HAIL_SIGNAL }));
                             }}
                         >
-                            {/* Место под силуэт одно на всех, а сам силуэт в нём той ширины,
-                                какую даёт его длина. Корабль тут тот же, что в сцене, вместе
-                                с огнями и сигнальной лампой: стоянка на рейде — это то, ради
-                                чего его и выбирают, а огни у каждого силуэта свои и стоят
-                                по-разному.
+                            {/* Портрет — общий с карточкой чужого корабля (ShipPortrait):
+                                силуэт в своём масштабе и линейка под ним.
 
                                 Выбранный корабль стоит под парами: у него горят ходовые огни,
                                 у остальных — якорные. Так и видно, который из них сейчас твой,
@@ -294,26 +239,13 @@ export default function MemberForm({
                                 корпусе ровно там же и того же размера, каким будет виден
                                 в кадре. На всех сразу он читался бы как часть рисунка, а так
                                 видно, как номер сядет именно на этот борт. */}
-                            <span className={styles.kindImageBox} style={{ aspectRatio: IMAGE_BOX_ASPECT }}>
-                                <span className={styles.kindShip} style={{ width: percent(shipWidth(kind)) }}>
-                                    <Ship
-                                        kind={kind}
-                                        name={SHIP_KIND_LABELS[kind]}
-                                        hullNumber={kind === shipKind ? hullNumber : ''}
-                                        facing={facing}
-                                        mode={kind === shipKind ? 'underway' : 'anchored'}
-                                        morseFeed={kind === shipKind ? reply : null}
-                                    />
-                                </span>
-                            </span>
-                            <span className={styles.scaleRow}>
-                                <span className={styles.scaleBar} style={{ width: percent(scaleWidth(kind)) }}>
-                                    {SCALE_SEGMENTS.map((step) => (
-                                        <span key={step} className={step % 2 ? styles.scaleDark : styles.scaleLight} />
-                                    ))}
-                                </span>
-                                <span className={styles.scaleLabel}>{SCALE_METRES} м</span>
-                            </span>
+                            <ShipPortrait
+                                kind={kind}
+                                hullNumber={kind === shipKind ? hullNumber : ''}
+                                facing={facing}
+                                mode={kind === shipKind ? 'underway' : 'anchored'}
+                                morseFeed={kind === shipKind ? reply : null}
+                            />
                             <span className={styles.kindLabel}>{SHIP_KIND_LABELS[kind]}</span>
                             <span className={styles.kindSpec}>{shipSpecLine(kind)}</span>
                         </button>

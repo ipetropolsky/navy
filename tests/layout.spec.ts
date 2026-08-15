@@ -721,7 +721,7 @@ test.describe('десктоп', () => {
                 scaleMetres: parseFloat(button.querySelector('[class*="scaleLabel"]')!.textContent),
                 shipWidth: button.querySelector('img')!.getBoundingClientRect().width,
                 scaleWidth: button.querySelector('[class*="scaleBar"]')!.getBoundingClientRect().width,
-                buttonWidth: button.querySelector('[class*="kindImageBox"]')!.getBoundingClientRect().width,
+                buttonWidth: button.querySelector('[class*="portraitBox"]')!.getBoundingClientRect().width,
             }))
         );
 
@@ -877,7 +877,7 @@ const edgeGap = (page: Page): Promise<number> =>
 test('корабль не встаёт бортом на обрез кадра, и поле у него одно на всех экранах', async ({ page }) => {
     await openNewChannel(page, 'polya');
     // Самый крупный корабль справочника стоит в списке первым: проекты идут по убыванию длины.
-    await page.locator('button:has([class*="kindShip"])').first().click();
+    await page.locator('button:has([class*="portraitShip"])').first().click();
     await page.locator('[data-berth="9-left"]').click();
     await join(page, 'Гроза', '404');
     // Ход у самого крупного корабля на ближней линии долгий, и меряться он мешает: по дороге
