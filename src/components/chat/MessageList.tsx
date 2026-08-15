@@ -65,6 +65,13 @@ export default function MessageList({ messages, members, myId, onReply, onShowSh
      */
     const stuckRef = useRef(true);
 
+    /**
+     * Где лента стояла на прошлом отсчёте, px. По ней отличаем движение человека от того,
+     * что низ уехал сам: ужавшееся окошко ленты не двигает `scrollTop` ни на пиксель, зато
+     * отодвигает от него конец списка.
+     */
+    const topRef = useRef(0);
+
     /** Последняя своя реплика: по ней видно, что человек сам дописал разговор до конца. */
     const lastMessage = messages.at(-1);
     const lastOwnId =
@@ -73,9 +80,30 @@ export default function MessageList({ messages, members, myId, onReply, onShowSh
             : null;
     const lastOwnRef = useRef(lastOwnId);
 
+    /**
+     * Отцепляем только на движение вверх, а не по одному расстоянию до низа.
+     *
+     * Расстояния мало: лента то и дело оказывается далеко от конца не потому, что её отмотали,
+     * а потому, что окошко ужалось — сменили раскладку, выехала клавиатура, поднялась панель
+     * ответа. `scrollTop` при этом стоит на месте, конец списка отъезжает вниз, и правило
+     * «далеко от низа — значит отцеплена» отпускало ленту навсегда: дальше её не возвращало
+     * ни новое сообщение, ни доехавшая до конца раскладка.
+     *
+     * Поэтому смотрим на само движение. Ушли вверх — человек читает старое, держим место.
+     * Дошли до низа (хоть рукой, хоть нашей же доводкой) — прицепляем обратно. Проверка на низ
+     * стоит первой: подросшее окошко браузер поджимает `scrollTop` сам, и это движение вверх
+     * ленту отцеплять не должно — она в этот момент как раз стоит у конца.
+     */
     const handleScroll = (event: UIEvent<HTMLDivElement>): void => {
         const list = event.currentTarget;
-        stuckRef.current = list.scrollHeight - list.scrollTop - list.clientHeight <= STICK_SLOP;
+        const bottomGap = list.scrollHeight - list.scrollTop - list.clientHeight;
+        const wentUp = list.scrollTop < topRef.current;
+        topRef.current = list.scrollTop;
+        if (bottomGap <= STICK_SLOP) {
+            stuckRef.current = true;
+        } else if (wentUp) {
+            stuckRef.current = false;
+        }
     };
 
     /**

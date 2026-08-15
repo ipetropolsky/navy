@@ -377,6 +377,42 @@ test('лента держится низа, пока её не отмотали,
 });
 
 /**
+ * Ужавшееся окошко ленты — не отмотка.
+ *
+ * Смена раскладки, выехавшая клавиатура, поднявшаяся панель ответа — всё это оставляет
+ * `scrollTop` на месте и отодвигает от него конец списка. Мерка «далеко от низа — значит
+ * отмотали» на этом и ломалась: одно нажатие по кнопке кадра отцепляло ленту навсегда,
+ * и дальше её не возвращало ни доехавшая раскладка, ни новое сообщение.
+ */
+test('лента держится низа при смене раскладки', async ({ context }) => {
+    const mine = await context.newPage();
+    const theirs = await context.newPage();
+    await openChannel(mine, DEMO, ALBATROS);
+    await openChannel(theirs, DEMO, VYMPEL);
+
+    for (let index = 0; index < 12; index += 1) {
+        // eslint-disable-next-line no-await-in-loop
+        await send(theirs, `Отметка ${index}`);
+    }
+    await expect
+        .poll(async () => (await scrollState(mine)).bottom, { message: 'лента не стоит внизу' })
+        .toBeLessThan(24);
+
+    // Кадр разворачивается — блок с разговором ужимается под ним, и лента едет вместе с ним.
+    await mine.getByRole('button', { name: 'Развернуть сцену' }).click();
+    await expect
+        .poll(async () => (await scrollState(mine)).bottom, { message: 'ужавшаяся лента отстала от низа' })
+        .toBeLessThan(24);
+
+    // И остаётся прицепленной: следующее сообщение видно, а не догадываешься о нём по счётчику.
+    await send(theirs, 'После разворота');
+    await expect(bubbles(mine).last()).toContainText('После разворота');
+    await expect
+        .poll(async () => (await scrollState(mine)).bottom, { message: 'после разворота лента отцепилась от низа' })
+        .toBeLessThan(24);
+});
+
+/**
  * Две вкладки, переставляющие корабли в один и тот же миг.
  *
  * Состояние «сервера» лежит одним JSON-ом на весь браузер, и всякая перестановка — это
