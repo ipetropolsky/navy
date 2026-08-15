@@ -34,8 +34,10 @@ test('канал заводится с главной, и в него можно
     // Корабль в кадре, и канал знает, кто это.
     await expect(ships(page)).toHaveCount(1);
     await expect(page.locator('[class*="chatStatus"]')).toHaveText('1 на связи');
-    // Номера в строчке нет: он стоит на аватарке рядом и на борту в кадре.
-    await expect(systemLines(page)).toContainText(['Малый противолодочный корабль «Буря» встал на рейд']);
+    // В строчке один силуэт: позывной написан над ней, номер стоит на аватарке рядом
+    // и на борту в кадре, — называть корабль трижды подряд незачем.
+    await expect(systemLines(page)).toContainText(['Малый противолодочный корабль встал на рейд']);
+    await expect(systemLines(page).first()).not.toContainText('Буря');
 });
 
 test('реплика уходит и привязывается ответом', async ({ page }) => {
@@ -234,7 +236,7 @@ test('старший на рейде отмечен бэджем и высажи
 
     // Считаем не корабли в кадре, а канал: высаженный ещё уходит за кромку и висит в сцене
     // столько же, сколько ушедший сам.
-    await expect(systemLines(page).last()).toContainText('Малый ракетный корабль «Вымпел» выдворен с рейда');
+    await expect(systemLines(page).last()).toContainText('Малый ракетный корабль выдворен с рейда');
     const crew = await readState(page);
     expect(crew.channels['ch-demo'].members.map((member) => member.memberId)).not.toContain(VYMPEL);
 });

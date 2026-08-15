@@ -1,4 +1,4 @@
-import { Fragment, ReactNode } from 'react';
+import { ReactNode } from 'react';
 
 import { SHIP_KIND_LABELS, ShipField, ShipNotice, ShipTitle } from '@/types/channel';
 
@@ -9,13 +9,6 @@ import { SHIP_KIND_LABELS, ShipField, ShipNotice, ShipTitle } from '@/types/chan
  * был, каким стал и что именно в нём поменялось (см. `ShipNotice`). Зашитая в хранилище фраза
  * означала бы, что поправить формулировку можно только правкой уже записанного.
  */
-
-/**
- * Как корабль зовут в строчке о входе и уходе: тип и позывной. Бортового номера здесь нет —
- * он стоит на аватарке рядом со строчкой и на борту в кадре, и третий раз подряд ему в ленте
- * делать нечего.
- */
-const TITLE_ORDER: ShipField[] = ['shipKind', 'name'];
 
 /** Название силуэта со строчной буквы: в середине фразы оно идёт не первым словом. */
 const lower = (text: string): string => text.charAt(0).toLowerCase() + text.slice(1);
@@ -29,18 +22,14 @@ const part = (ship: ShipTitle, field: ShipField, sentenceStart: boolean): ReactN
     return field === 'name' ? <>«{ship.name}»</> : ship.hullNumber;
 };
 
-/** Как корабль зовут: тип и позывной, с большой буквы — фраза с этого и начинается. */
+/**
+ * Как корабль зовут в строчке о входе и уходе: одним силуэтом, с большой буквы — фраза
+ * с этого и начинается. Ни позывного, ни номера здесь нет: позывной написан над самой
+ * строчкой, номер стоит на аватарке рядом с ней и на борту в кадре, и повторять их в фразе
+ * значило бы называть корабль трижды подряд.
+ */
 function Title({ ship }: { ship: ShipTitle }) {
-    return (
-        <>
-            {TITLE_ORDER.map((field, index) => (
-                <Fragment key={field}>
-                    {index > 0 && ' '}
-                    {part(ship, field, index === 0)}
-                </Fragment>
-            ))}
-        </>
-    );
+    return <>{part(ship, 'shipKind', true)}</>;
 }
 
 interface ShipNoticeLineProps {
