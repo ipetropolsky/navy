@@ -162,6 +162,40 @@ const MOTION_CLASS: Record<string, string> = {
 const MOTION_GRACE_MS = 1500;
 
 /**
+ * Сколько ждём тишины, прежде чем снять мерку с переменившегося кадра, мс. Больше длительности
+ * кадра и меньше самого короткого движения, которое кадр меняет.
+ */
+const SETTLE_MS = 150;
+
+/**
+ * Следить за размерами и мерить, когда движение утихло.
+ *
+ * Мерки, которые снимает сцена, — высота воды и запас моря по бокам от рейда — нужны ей
+ * посчитанными, а не покадровыми: по ним ищут ближайшее к пальцу место и прокладывают путь
+ * уходящему кораблю, и промежуточные значения перехода не значат ничего. А стоят они дорого:
+ * кадр меняет высоту переходом, `ResizeObserver` отзывается на каждый кадр этого перехода,
+ * и каждый его отклик — новое состояние, то есть новая отрисовка всей сцены. На одну смену
+ * раскладки этих отрисовок набиралось под полсотни, по две на кадр, и на неспешной машине
+ * переход от них заметно спотыкался.
+ *
+ * Отсюда отсрочка: каждый новый отклик отодвигает замер, и он случается один раз — когда
+ * размеры устоялись. Первый замер при этом делают на месте, не дожидаясь ни отклика,
+ * ни отсрочки: до него сцена не знает о себе вовсе.
+ */
+const observeSettled = (targets: Element[], measure: () => void): (() => void) => {
+    let timer = 0;
+    const observer = new ResizeObserver(() => {
+        window.clearTimeout(timer);
+        timer = window.setTimeout(measure, SETTLE_MS);
+    });
+    targets.forEach((target) => observer.observe(target));
+    return () => {
+        window.clearTimeout(timer);
+        observer.disconnect();
+    };
+};
+
+/**
  * Как называется место на рейде вслух. Разметка различима глазом, но не голосом: тому, кто
  * слушает страницу читалкой, нужно словами — в какой стороне кадра место и какая это линия.
  */
@@ -312,6 +346,9 @@ export default function SeaScene({
     // море переменилось: кадр сжался под клавиатуру, повернулся телефон. Точки мест стоят
     // в долях кадра, а искать ближайшую к указателю приходится в пикселях, и после такой
     // перемены их надо перемерить. Спрашиваем сам слой воды: он и есть море.
+    //
+    // Мерка целая, а не дробная: пересчитывать разметку от четверти пикселя незачем, а лишний
+    // повод для этого дробная мерка даёт на каждом кадре перехода.
     const seaRef = useRef<HTMLDivElement>(null);
     const [seaHeight, setSeaHeight] = useState(0);
     useEffect(() => {
@@ -319,9 +356,9 @@ export default function SeaScene({
         if (!water) {
             return undefined;
         }
-        const observer = new ResizeObserver(([entry]) => setSeaHeight(entry.contentRect.height));
-        observer.observe(water);
-        return () => observer.disconnect();
+        const measure = (): void => setSeaHeight(water.clientHeight);
+        measure();
+        return observeSettled([water], measure);
     }, []);
 
     // Высота картинки неба в кадре, px. Нужна она кружку неба под месяцем: кружок рисует тот же
@@ -467,9 +504,11 @@ export default function SeaScene({
      * а за кромку сцены. Путь считается в долях рейда — в них же меряются и корабль,
      * и расстановка, — поэтому и запас переводим в них же.
      *
-     * Мерка нужна живая: рейд идёт за высотой кадра, кадр — за шторкой и за окном. Меряем
-     * оба блока сразу, потому что меняться они умеют порознь: раздали окно в ширину — рейд
-     * упёрся в свою пропорцию и остался прежним, а моря по бокам прибавилось.
+     * Мерку приходится обновлять: рейд идёт за высотой кадра, кадр — за шторкой и за окном.
+     * Меряем оба блока сразу, потому что меняться они умеют порознь: раздали окно в ширину —
+     * рейд упёрся в свою пропорцию и остался прежним, а моря по бокам прибавилось. Снимается
+     * она по затишью (см. observeSettled): путь кораблю прокладывают в тот миг, когда он
+     * тронулся, и посередине чужого перехода эта мерка всё равно ничего не значит.
      */
     const raidRef = useRef<HTMLDivElement>(null);
     const [overhang, setOverhang] = useState(0);
@@ -483,10 +522,8 @@ export default function SeaScene({
             const raidWidth = raid.clientWidth;
             setOverhang(raidWidth > 0 ? Math.max(0, ((scene.clientWidth - raidWidth) / 2 / raidWidth) * 100) : 0);
         };
-        const observer = new ResizeObserver(measure);
-        observer.observe(raid);
-        observer.observe(scene);
-        return () => observer.disconnect();
+        measure();
+        return observeSettled([raid, scene], measure);
     }, []);
     const motionStartedAt = useRef(new Map<string, { kind: string; at: number }>());
 
@@ -632,15 +669,32 @@ export default function SeaScene({
      *
      * Задержка в стилях при этом остаётся: до первого кадра подводить ещё нечего, и корабль
      * должен появиться уже качающимся, а не ждать своей очереди.
+     *
+     * Спрашивать у элемента его анимации на каждой отрисовке нельзя: `getAnimations` заставляет
+     * браузер досчитать стили, а при открытом поле выбора мест качающихся элементов набирается
+     * три десятка. Поэтому анимации запоминаем: у элемента они заводятся вместе с ним и живут,
+     * пока он жив. Спросить их надо ровно раз — на той отрисовке, где элемент появился; дальше
+     * остаётся поставить начало, и то если оно разошлось с нужным (сменилось место — сменилась
+     * и фаза). Сторожем стоит `playState`: отменённая анимация — примета того, что стили
+     * пересобрали её заново, и запомненное больше не про этот элемент.
      */
+    const waveAnimations = useRef(new WeakMap<Element, Animation[]>());
     useLayoutEffect(() => {
         for (const element of sceneRef.current?.querySelectorAll<HTMLElement>('[data-wave]') ?? []) {
+            let animations = waveAnimations.current.get(element);
+            if (!animations || animations.some((animation) => animation.playState === 'idle')) {
+                animations = element.getAnimations();
+                waveAnimations.current.set(element, animations);
+            }
             const phase = Number(element.dataset.wave);
-            element.getAnimations().forEach((animation) => {
+            for (const animation of animations) {
                 // Тангаж опережает качку на четверть цикла — то же правило, что и в стилях.
                 const lead = (animation as CSSAnimation).animationName?.includes('pitch') ? WAVE_SECONDS / 4 : 0;
-                animation.startTime = -(phase + lead) * 1000;
-            });
+                const startTime = -(phase + lead) * 1000;
+                if (animation.startTime !== startTime) {
+                    animation.startTime = startTime;
+                }
+            }
         }
     });
 

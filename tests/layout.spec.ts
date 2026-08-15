@@ -159,10 +159,18 @@ const hoverBerth = async (page: Page, key: string): Promise<BerthShape> => {
     const light = page.locator(`[data-lit="${key}"]`);
     const dot = (await light.boundingBox())!;
     await page.mouse.move(dot.x + dot.width / 2, dot.y + dot.height / 2);
-    // Растёт круг переходом, поэтому ждём: сразу после наведения он ещё точка.
+    // Растёт круг переходом, поэтому ждём — и ждём не «стало больше точки», а «перестало
+    // расти»: мерка, снятая на полпути, показывает промежуточный размер, и кратность
+    // с ней не сходится. Двух одинаковых замеров подряд для этого довольно.
+    let previous = -1;
     await expect
-        .poll(async () => (await light.boundingBox())!.width, `место ${key} под указателем не подсветилось`)
-        .toBeGreaterThan(dot.width * 2);
+        .poll(async () => {
+            const width = (await light.boundingBox())!.width;
+            const grown = width > dot.width * 2 && width === previous;
+            previous = width;
+            return grown;
+        }, `место ${key} под указателем не подсветилось`)
+        .toBe(true);
     return (await berthShapes(page)).find((shape) => shape.key === key)!;
 };
 
