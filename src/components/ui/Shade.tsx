@@ -54,6 +54,12 @@ interface ShadeProps {
     onClose: () => void;
     /** Чем шторка подписана тем, кто её не видит. */
     label: string;
+    /**
+     * Шторка внутри блока контента, а не поверх окна. Так она стоит, когда разговор убран
+     * в боковую панель: поверх окна она накрыла бы собой рейд, ради которого разговор
+     * туда и убирают. На узком окне боковой раскладки нет, и это не действует.
+     */
+    inside?: boolean;
     children: ReactNode;
 }
 
@@ -75,7 +81,7 @@ interface ShadeProps {
  * Едет она сдвигом, а не высотой: высоту ей задаёт содержимое, и разводить её во времени
  * значило бы перекладывать содержимое на каждом кадре выезда.
  */
-export default function Shade({ open, onClose, label, children }: ShadeProps) {
+export default function Shade({ open, onClose, label, inside = false, children }: ShadeProps) {
     const shadeRef = useRef<HTMLElement>(null);
     const { mounted, onTransitionEnd } = useSlide(open);
     // Сдвиг вниз, пока шторку тянут, px. Стоит inline-стилем и идёт за пальцем без перехода;
@@ -164,7 +170,12 @@ export default function Shade({ open, onClose, label, children }: ShadeProps) {
     }
 
     const leaving = !open;
-    const look = [styles.shade, leaving ? styles.shadeLeaving : '', shift === null ? '' : styles.shadeDragging]
+    const look = [
+        styles.shade,
+        inside ? styles.shadeInside : '',
+        leaving ? styles.shadeLeaving : '',
+        shift === null ? '' : styles.shadeDragging,
+    ]
         .filter(Boolean)
         .join(' ');
 
@@ -176,7 +187,9 @@ export default function Shade({ open, onClose, label, children }: ShadeProps) {
                 (см. z-index в App.module.less), и кнопками из неё шторка и закрывается. */}
             <button
                 type="button"
-                className={[styles.backdrop, leaving ? styles.backdropLeaving : ''].filter(Boolean).join(' ')}
+                className={[styles.backdrop, inside ? styles.backdropInside : '', leaving ? styles.backdropLeaving : '']
+                    .filter(Boolean)
+                    .join(' ')}
                 style={shift === null ? undefined : { opacity: Math.max(1 - shift / 200, 0) }}
                 aria-label="Закрыть шторку"
                 onClick={onClose}

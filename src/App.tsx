@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+    AnimationEvent as ReactAnimationEvent,
+    TransitionEvent,
+    useCallback,
+    useEffect,
+    useMemo,
+    useRef,
+    useState,
+} from 'react';
 
 import { ChannelDraft, ChannelError, MemberDraft, backend, freeBerths, suggestBerth } from '@/backend';
 import { DEMO_CHANNEL_SLUG } from '@/backend/seed';
@@ -31,6 +39,17 @@ import styles from './App.module.less';
  * а забытый потолок молча обрезал бы его на полуслове.
  */
 const HAIL_HOLD_MS = morseDuration(HAIL_SIGNAL) + 1200;
+
+/**
+ * Через сколько половина переезда блока контента считается доехавшей, даже если о конце
+ * движения так и не сообщили, мс. Анимации бывают отключены совсем, а вкладка в фоне их
+ * не отыгрывает; без страховки блок остался бы за кромкой навсегда — то есть разговор
+ * пропал бы с экрана.
+ *
+ * Число с запасом от самой половины (@move-seconds в motion.less — 0.18s): срабатывать оно
+ * должно только тогда, когда события уже точно не будет.
+ */
+const MOVE_GRACE_MS = 600;
 
 /** С каким кораблём открывается форма у того, кто ещё не в строю. */
 const DEFAULT_SHIP_KIND: ShipKind = 'pr12412';
@@ -78,12 +97,41 @@ export default function App() {
     // корабля и выбираешь место на том же большом кадре.
     const [expanded, setExpanded] = useState(false);
 
+    // Где стоит блок контента: под кадром или сбоку от него. Второе положение бывает только
+    // в развёрнутой раскладке и только на широком окне — сузилось окно, и правила боковой
+    // раскладки просто перестают применяться (см. @side-min-width в App.module.less).
+    // Свёрнутая раскладка возвращает блок вниз: сбоку он стоит во всю высоту окна, а сжатому
+    // кадру рядом с ним не остаётся ничего.
+    const [side, setSide] = useState(false);
+    // Переезд: 'out' — блок уходит с прежнего места, 'in' — приезжает на новое. Пока не
+    // переезжает, его нет вовсе. Половинки идут по очереди, и место меняется между ними —
+    // одно движение из угла в угол было бы полётом коробки через всю сцену.
+    const [moving, setMoving] = useState<'out' | 'in' | null>(null);
+
     // Раскладку переключает не только кнопка, но и свайп по кадру: сжатый раздаётся движением
     // вниз, раздутый сжимается движением вверх — палец ведёт кромку кадра туда, куда она поедет.
     // Обратные движения кадр не трогают, и потяг страницы к обновлению на них работает как был.
     const sceneRef = useRef<HTMLDivElement>(null);
-    const switchLayout = useCallback(() => setExpanded((was) => !was), []);
+    const switchLayout = useCallback(
+        () =>
+            setExpanded((was) => {
+                if (was) {
+                    // Свернули кадр — разговор возвращается вниз, и без переезда: кадр в этот
+                    // миг и так едет, и второе движение поверх него читалось бы поломкой.
+                    setSide(false);
+                    setMoving(null);
+                }
+                return !was;
+            }),
+        []
+    );
     useSwipe(sceneRef, expanded ? 'up' : 'down', switchLayout);
+
+    // Где блок стоит на самом деле. Боковое положение бывает только в развёрнутой раскладке,
+    // и держится это вычислением, а не порядком вызовов: раскладку переключают и кнопкой,
+    // и свайпом, и стоит одному пути забыть про сброс — свёрнутый кадр окажется рядом
+    // с панелью во всю высоту окна, то есть нигде.
+    const atSide = side && expanded;
 
     // Пустой список — тоже список, но новый на каждой отрисовке: без useMemo он менял бы
     // ссылку каждый раз и заставлял пересчитывать всё, что от него зависит.
@@ -343,9 +391,65 @@ export default function App() {
     // остаётся на экране, см. useSlide.
     const formSlide = useSlide(editing && inChat);
 
+    /**
+     * Конец первой половины переезда: блок ушёл за кромку. Здесь и только здесь меняется место —
+     * пока блок за кромкой, его перекладывание ничего не показывает. Дальше вторая половина
+     * сама приедет из-за той кромки, к которой он теперь стоит.
+     *
+     * Проверяется и цель, и свойство: внутри блока едет своё — форма поверх разговора,
+     * ответы, кнопки, — и до переезда это не относится.
+     */
+    const handleContentTransitionEnd = (event: TransitionEvent<HTMLElement>) => {
+        if (moving === 'out' && event.target === event.currentTarget && event.propertyName === 'transform') {
+            setSide((was) => !was);
+            setMoving('in');
+        }
+    };
+
+    /** Конец второй половины: блок на месте, переезда больше нет. */
+    const handleContentAnimationEnd = (event: ReactAnimationEvent<HTMLElement>) => {
+        if (moving === 'in' && event.target === event.currentTarget) {
+            setMoving(null);
+        }
+    };
+
+    // Страховка на случай, когда о конце движения так и не сообщили: анимации бывают отключены
+    // совсем, а вкладка в фоне их не отыгрывает. Первая половина без этого оставила бы блок
+    // за кромкой навсегда — то есть разговор просто пропал бы с экрана.
+    //
+    // Срок с запасом от самого движения (см. MOVE_GRACE_MS): доводит переезд только тогда,
+    // когда событие уже точно не придёт, и в обычной жизни не срабатывает ни разу.
+    useEffect(() => {
+        if (!moving) {
+            return undefined;
+        }
+        const timer = window.setTimeout(() => {
+            if (moving === 'out') {
+                setSide((was) => !was);
+                setMoving('in');
+            } else {
+                setMoving(null);
+            }
+        }, MOVE_GRACE_MS);
+        return () => window.clearTimeout(timer);
+    }, [moving]);
+
+    const contentLook = [
+        styles.content,
+        atSide ? styles.contentSide : '',
+        moving === 'out' ? styles.contentGoing : '',
+        moving === 'in' ? styles.contentComing : '',
+    ]
+        .filter(Boolean)
+        .join(' ');
+
     return (
-        <div className={[styles.app, expanded ? styles.appExpanded : ''].filter(Boolean).join(' ')}>
-            <header className={styles.header}>
+        <div
+            className={[styles.app, expanded ? styles.appExpanded : '', atSide ? styles.appSide : '']
+                .filter(Boolean)
+                .join(' ')}
+        >
+            <header className={[styles.header, atSide ? styles.headerSide : ''].filter(Boolean).join(' ')}>
                 <div className={styles.scene} ref={sceneRef}>
                     <SeaScene
                         members={members}
@@ -428,13 +532,51 @@ export default function App() {
                                     )}
                                 </IconButton>
                             ))}
+                        {/* Куда поставить разговор — вниз под кадр или сбоку от него.
+                            Кнопка есть только в развёрнутой раскладке: в свёрнутой сбоку
+                            стоять нечему, там сжат сам кадр. На узком окне её нет вовсе —
+                            прячет её то же правило, по которому не работает и сама боковая
+                            раскладка (см. .wideOnly).
+
+                            Значок — плашка с отделённой полосой: справа, когда разговор
+                            встанет сбоку, и снизу, когда вернётся вниз. Рисунок один,
+                            меняется только та сторона, к которой прижата полоса. */}
+                        {inChat && expanded && (
+                            <span className={styles.wideOnly}>
+                                <IconButton
+                                    large
+                                    onClick={() => setMoving('out')}
+                                    aria-label={side ? 'Разговор под кадром' : 'Разговор сбоку'}
+                                >
+                                    <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+                                        <rect
+                                            x="3"
+                                            y="4"
+                                            width="18"
+                                            height="16"
+                                            rx="2"
+                                            stroke="currentColor"
+                                            strokeWidth="2"
+                                            fill="none"
+                                        />
+                                        <path
+                                            d={side ? 'M3 15h18' : 'M15 4v16'}
+                                            stroke="currentColor"
+                                            strokeWidth="2"
+                                            strokeLinecap="round"
+                                            fill="none"
+                                        />
+                                    </svg>
+                                </IconButton>
+                            </span>
+                        )}
                         {/* Переключатель раскладки. Значок — стрелки по диагонали: в разные
                             стороны, когда разворачивать, и к середине, когда сворачивать.
                             Диагональ у обоих одна, меняются только концы, и переключение
                             читается как одно движение. */}
                         <IconButton
                             large={expanded}
-                            onClick={() => setExpanded((on) => !on)}
+                            onClick={switchLayout}
                             aria-label={expanded ? 'Свернуть сцену' : 'Развернуть сцену'}
                         >
                             <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
@@ -455,7 +597,11 @@ export default function App() {
                     </div>
                 </div>
             </header>
-            <main className={styles.content}>
+            <main
+                className={contentLook}
+                onTransitionEnd={handleContentTransitionEnd}
+                onAnimationEnd={handleContentAnimationEnd}
+            >
                 <TopFade className={styles.base}>{baseContent}</TopFade>
                 {formSlide.mounted && me && (
                     <div
@@ -481,7 +627,14 @@ export default function App() {
             </main>
             {/* Список кораблей — шторкой поверх всего. Закрывается совсем, а не складывается:
                 сложенный список был бы полоской ни с чем поверх разговора. */}
-            <Shade open={sheetOpen && inChat && !editing} onClose={() => setSheetOpen(false)} label="Корабли на связи">
+            <Shade
+                open={sheetOpen && inChat && !editing}
+                onClose={() => setSheetOpen(false)}
+                label="Корабли на связи"
+                // Сбоку шторка вылезает не поверх окна, а внутри разговора: поверх окна она
+                // накрыла бы собой рейд, ради которого разговор в панель и убирают.
+                inside={atSide}
+            >
                 <MembersList
                     members={members}
                     myId={myId}

@@ -8,6 +8,8 @@ import {
     MOBILE_MAX_WIDTH,
     SHEET_TOP_GAP,
     SHEET_WIDTH,
+    SIDE_MIN_WIDTH,
+    SIDE_WIDTH,
 } from '@/config/layout';
 import { SLOT_COUNT, slotDepth, slotShare } from '@/types/channel';
 
@@ -2162,4 +2164,172 @@ test('форма выезжает снизу целиком, а не встаё�
     const height = await page.locator('main').evaluate((node) => Math.round(node.getBoundingClientRect().height));
     expect(Math.max(...offsets), 'форма не начала выезд из-за нижней кромки блока').toBeGreaterThan(height - 8);
     expect(Math.min(...offsets), 'форма не доехала до верхней кромки блока').toBeLessThan(2);
+});
+
+/** Ширина окна, на которой боковая раскладка заведомо работает. */
+const WIDE = SIDE_MIN_WIDTH + 200;
+
+/** Ширина окна, на которой её заведомо нет. */
+const NARROW = SIDE_MIN_WIDTH - 100;
+
+/** Коробка блока в координатах окна. */
+const boxOf = (page: Page, selector: string) =>
+    page.locator(selector).evaluate((node) => {
+        const rect = node.getBoundingClientRect();
+        return {
+            left: Math.round(rect.left),
+            top: Math.round(rect.top),
+            right: Math.round(rect.right),
+            width: Math.round(rect.width),
+            height: Math.round(rect.height),
+        };
+    });
+
+/** Открыть канал в развёрнутой раскладке на широком окне и убрать разговор в боковую панель. */
+const openSide = async (page: Page): Promise<void> => {
+    await page.setViewportSize({ width: WIDE, height: 900 });
+    await openChannel(page, DEMO, ALBATROS);
+    await page.getByRole('button', { name: 'Развернуть сцену' }).click();
+    await expect(page.getByRole('button', { name: 'Свернуть сцену' })).toBeVisible();
+    await page.getByRole('button', { name: 'Разговор сбоку' }).click();
+    // Переезд идёт двумя половинами; ждём обе с запасом.
+    await page.waitForTimeout(600);
+};
+
+/**
+ * Боковая раскладка: разговор справа во всю высоту окна, кадру — весь остаток ширины.
+ *
+ * Мерок тут три, и все три легко разъезжаются по мелочи: и .contentSide, и .headerSide спорят
+ * за вес с .content и .header — селектор у обоих в один класс, медиа-запрос веса не прибавляет.
+ * Стоило правилу оказаться выше того, что оно правит, — и блок разъезжался во всю ширину окна,
+ * отжимая кадр в ноль.
+ */
+test('на широком окне разговор встаёт сбоку во всю высоту, кадру достаётся остальное', async ({ page }) => {
+    await openSide(page);
+
+    const content = await boxOf(page, 'main');
+    const frame = await boxOf(page, 'header');
+    expect(content.width, 'блок не встал в ширину боковой панели').toBe(SIDE_WIDTH);
+    expect(content.right, 'блок не прижат к правой кромке окна').toBe(WIDE);
+    expect(content.height, 'блок не во всю высоту окна').toBe(900);
+    expect(frame.width, 'кадру достался не весь остаток ширины').toBe(WIDE - SIDE_WIDTH);
+    expect(frame.height, 'кадр не во всю высоту окна').toBe(900);
+});
+
+/**
+ * Шторка и форма в боковой раскладке вылезают внутри панели, а не поверх окна: поверх окна
+ * они накрыли бы собой рейд, ради которого разговор в панель и убирают. Затемнение под
+ * шторкой — тоже по панели.
+ */
+test('шторка, затемнение и форма остаются внутри боковой панели', async ({ page }) => {
+    await openSide(page);
+    await openSheet(page);
+
+    const shade = await boxOf(page, 'section[aria-label="Корабли на связи"]');
+    expect(shade.width, 'шторка шире панели').toBe(SIDE_WIDTH);
+    expect(shade.left, 'шторка вылезла на кадр').toBe(WIDE - SIDE_WIDTH);
+
+    const backdrop = await boxOf(page, 'button[aria-label="Закрыть шторку"]');
+    expect(backdrop.width, 'затемнение погасило рейд, а не панель').toBe(SIDE_WIDTH);
+    expect(backdrop.left, 'затемнение легло на кадр').toBe(WIDE - SIDE_WIDTH);
+
+    await page.getByRole('button', { name: 'Настроить корабль' }).click();
+    await page.waitForTimeout(500);
+    // Форма стоит внутри блока и меряется по нему же: у боковой панели слева рамка,
+    // и на неё форма честно уже своей полосы.
+    const content = await boxOf(page, 'main');
+    const form = await boxOf(page, 'main > div[class*="form"]');
+    expect(form.width, 'форма шире панели').toBeLessThanOrEqual(content.width);
+    expect(form.width, 'форма не заняла панель целиком').toBeGreaterThan(content.width - 4);
+    expect(form.left, 'форма вылезла на кадр').toBeGreaterThanOrEqual(content.left);
+});
+
+/**
+ * Переезд идёт двумя половинами по очереди: сперва блок уходит за ту кромку, у которой стоял,
+ * и только оказавшись за ней меняет место, потом приезжает из-за новой кромки. Одно движение
+ * из угла в угол было бы полётом коробки через всю сцену.
+ *
+ * Меряем покадрово: пока блок в колонке, он едет вниз и никуда вбок; сменив место, он обязан
+ * начаться за правой кромкой окна и дойти до своей полосы. Ни одного кадра между половинами,
+ * на котором блок уже на новом месте и уже без сдвига, быть не должно — это и был бы скачок.
+ */
+test('разговор переезжает двумя половинами, а не прыгает через сцену', async ({ page }) => {
+    await page.setViewportSize({ width: WIDE, height: 900 });
+    await openChannel(page, DEMO, ALBATROS);
+    await page.getByRole('button', { name: 'Развернуть сцену' }).click();
+    await expect(page.getByRole('button', { name: 'Свернуть сцену' })).toBeVisible();
+
+    const frames = await page.evaluate(async () => {
+        const main = document.querySelector('main')!;
+        const taken: { left: number; top: number; width: number }[] = [];
+        document.querySelector<HTMLButtonElement>('button[aria-label="Разговор сбоку"]')!.click();
+        const started = performance.now();
+        await new Promise<void>((resolve) => {
+            const tick = (): void => {
+                const rect = main.getBoundingClientRect();
+                taken.push({
+                    left: Math.round(rect.left),
+                    top: Math.round(rect.top),
+                    width: Math.round(rect.width),
+                });
+                if (performance.now() - started < 600) {
+                    requestAnimationFrame(tick);
+                } else {
+                    resolve();
+                }
+            };
+            requestAnimationFrame(tick);
+        });
+        return taken;
+    });
+
+    const under = frames.filter((frame) => frame.width !== SIDE_WIDTH);
+    const beside = frames.filter((frame) => frame.width === SIDE_WIDTH);
+    expect(under.length, 'блок не побыл под кадром').toBeGreaterThan(2);
+    expect(beside.length, 'блок так и не встал сбоку').toBeGreaterThan(2);
+
+    // Уход: только вниз и до конца — за нижнюю кромку окна.
+    expect(new Set(under.map((frame) => frame.left)).size, 'уходящий блок поехал вбок').toBe(1);
+    expect(Math.max(...under.map((frame) => frame.top)), 'блок сменил место, не уйдя за кромку').toBeGreaterThan(880);
+
+    // Приезд: первым кадром на новом месте блок ещё целиком за правой кромкой окна.
+    expect(beside[0].left, 'блок появился сбоку уже на своём месте — переезда не видно').toBeGreaterThanOrEqual(WIDE);
+    expect(beside[beside.length - 1].left, 'блок не доехал до своей полосы').toBe(WIDE - SIDE_WIDTH);
+});
+
+/**
+ * Узкое окно: боковой раскладки нет вовсе. Кнопки переезда нет — нажимать её было бы враньём,
+ * правила на этой ширине не применяются, — а разговор, застигнутый сужением окна сбоку,
+ * оказывается там же, где и был бы всегда: под кадром и во всю ширину колонки.
+ */
+test('на узком окне боковой раскладки нет, а разговор возвращается под кадр', async ({ page }) => {
+    await openSide(page);
+    await page.setViewportSize({ width: NARROW, height: 900 });
+    await page.waitForTimeout(300);
+
+    await expect(page.getByRole('button', { name: /^Разговор/ })).toHaveCount(0);
+    const content = await boxOf(page, 'main');
+    expect(content.width, 'блок остался в ширину панели').toBe(Math.min(NARROW, COLUMN_WIDTH));
+    expect(content.height, 'блок остался во всю высоту окна').toBeLessThan(900);
+});
+
+/**
+ * Сворачивание кадра возвращает разговор вниз, откуда бы его ни сворачивали. Держится это
+ * вычислением, а не сбросом на каждом пути: раскладку переключают и кнопкой, и свайпом,
+ * и забытый сброс оставил бы сжатый кадр рядом с панелью во всю высоту окна.
+ */
+test('свёрнутая раскладка возвращает разговор под кадр', async ({ page }) => {
+    await openSide(page);
+    await page.getByRole('button', { name: 'Свернуть сцену' }).click();
+    await page.waitForTimeout(600);
+
+    const content = await boxOf(page, 'main');
+    expect(content.width, 'свёрнутая раскладка оставила разговор в панели').toBe(COLUMN_WIDTH);
+    expect(content.height, 'разговор не занял всё, что осталось от сжатого кадра').toBeGreaterThan(400);
+
+    // Развернули заново — разговор начинает снизу: памяти о боковом положении у него нет.
+    await page.getByRole('button', { name: 'Развернуть сцену' }).click();
+    await page.waitForTimeout(600);
+    expect((await boxOf(page, 'main')).width, 'разговор сам вернулся в панель').toBe(COLUMN_WIDTH);
+    await expect(page.getByRole('button', { name: 'Разговор сбоку' })).toBeVisible();
 });

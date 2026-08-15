@@ -13,6 +13,8 @@ import {
     MOBILE_MAX_WIDTH,
     SHEET_TOP_GAP,
     SHEET_WIDTH,
+    SIDE_MIN_WIDTH,
+    SIDE_WIDTH,
 } from './src/config/layout';
 
 export default defineConfig({
@@ -29,7 +31,9 @@ export default defineConfig({
                     `@content-desktop-height: ${CONTENT_DESKTOP_HEIGHT}px;\n` +
                     `@sheet-width: ${SHEET_WIDTH}px;\n` +
                     `@sheet-top-gap: ${SHEET_TOP_GAP}px;\n` +
-                    `@fade-height: ${FADE_HEIGHT}px;\n`,
+                    `@fade-height: ${FADE_HEIGHT}px;\n` +
+                    `@side-width: ${SIDE_WIDTH}px;\n` +
+                    `@side-min-width: ${SIDE_MIN_WIDTH}px;\n`,
             },
         },
     },
