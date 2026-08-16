@@ -8,6 +8,8 @@ import {
     COLUMN_WIDTH,
     FADE_HEIGHT,
     MOBILE_MAX_WIDTH,
+    SCENE_MIN_HEIGHT,
+    SCENE_MIN_SHARE,
     SCENE_MIN_WIDTH,
     SHEET_INSET,
     SHEET_TOP_GAP,
@@ -3476,4 +3478,124 @@ test('подведённая к нижней кромке кромка тоже 
 
     await leadChat(page, -chatSize(PHONE) + 20);
     await expect(page.getByRole('button', { name: 'Вернуть разговор' }), 'разговор не ушёл с экрана').toBeVisible();
+});
+
+/** Наименьший рост кадра в этом окне, px: больший из доли окна и трёхсот пикселей. */
+const sceneMin = (view: { width: number; height: number }): number =>
+    Math.max(SCENE_MIN_HEIGHT, view.height * SCENE_MIN_SHARE);
+
+/** Кадр и разговор разом: их высоты и то, насколько один заехал под другой. */
+const stack = async (page: Page): Promise<{ scene: number; chat: number; overlap: number }> => {
+    const scene = await boxOf(page, 'header');
+    const chat = await boxOf(page, 'main');
+    return { scene: scene.height, chat: chat.height, overlap: scene.top + scene.height - chat.top };
+};
+
+/**
+ * Кадр под разговором: сколько разговор оставил, столько кадр и берёт, плюс полоска заезда.
+ * Пока разговору отдана не больше чем половина окна, это простое вычитание; а как разговор
+ * поднимается выше, кадр упирается в свой наименьший рост и дальше не сжимается — разговор
+ * идёт поверх него. Заезд от этого делается больше положенного, но видно этого нигде: лишнее
+ * оказывается под разговором.
+ *
+ * Мерка кадра тут не круглая, а большая из двух — треть окна и триста пикселей: на высоком
+ * окне треть больше трёхсот, на низком — меньше, и кадру достаётся большая. В 300px ещё виден
+ * рейд с кораблями и полоса неба над ними, в меньшем не видно уже ничего.
+ */
+test('кадр берёт остаток окна с заездом, а ниже своей мерки прячется под разговором', async ({ page }) => {
+    await page.setViewportSize(PHONE);
+    await openChannel(page, DEMO, ALBATROS);
+
+    const stood = await stack(page);
+    expect(stood.scene, 'кадр взял не остаток окна').toBeCloseTo(PHONE.height - stood.chat + CHAT_OVERLAP, 0);
+    expect(stood.overlap, 'кадр заехал под разговор не на свою полоску').toBeCloseTo(CHAT_OVERLAP, 0);
+
+    // Подняли разговор на полсотни — кадр отдал ровно столько же и не пиксели сверх того.
+    await leadChat(page, 50);
+    const raised = await stack(page);
+    expect(raised.chat, 'разговор не пошёл за указателем').toBeCloseTo(stood.chat + 50, 0);
+    expect(raised.scene, 'кадр отдал не то, что взял разговор').toBeCloseTo(stood.scene - 50, 0);
+    expect(raised.overlap, 'полоска заезда переменилась').toBeCloseTo(CHAT_OVERLAP, 0);
+
+    // А теперь во весь рост: кадру осталось бы восемь десятков пикселей, и он вместо этого
+    // встал на свою мерку, а разговор пошёл поверх.
+    await leadChat(page, 500);
+    const covered = await stack(page);
+    expect(covered.chat, 'разговор поднялся не во весь рост').toBe(chatRoom(PHONE));
+    expect(covered.scene, 'кадр сжался ниже своей мерки').toBeCloseTo(sceneMin(PHONE), 0);
+    expect(covered.overlap, 'разговор не пошёл поверх кадра').toBeGreaterThan(CHAT_OVERLAP);
+});
+
+/**
+ * Приезд разговора к точке — движение, а не прыжок: кадр раздаётся под него ровно теми же
+ * секундами и той же кривой. Проверяется это покадрово и по стыку: щели между кадром
+ * и разговором не бывает ни на одном кадре, и обе коробки идут в одну сторону без возвратов.
+ *
+ * Порознь каждая из них выглядела бы правильной: разговор приезжает к своей точке, кадр
+ * встаёт в свой рост. Разъехаться они могут только между собой — и видно это только на стыке.
+ */
+test('приезд разговора к точке раздаёт кадр без щели на стыке', async ({ page }) => {
+    await page.setViewportSize(PHONE);
+    await openChannel(page, DEMO, ALBATROS);
+
+    // Подводим кромку почти к двум третям и отпускаем на месте: приезжать разговору недалеко,
+    // но приезжать он будет — а вместе с ним и кадр.
+    const { x, y } = await gripSpot(page);
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x, y - (Math.round(chatRoom(PHONE) * 2 * CHAT_SHARE) - chatSize(PHONE) - 20), { steps: 8 });
+    await page.waitForTimeout(FLING_MS * 3);
+
+    // Замер идёт покадрово и изнутри страницы: снаружи каждый заход стоит миллисекунд, и весь
+    // приезд успел бы кончиться за три замера. Съёмку заводим до отпускания и не ждём её здесь:
+    // ждать нужно палец, а он поднимется следующей строкой, — иначе приезд кончился бы прежде,
+    // чем указателю дали отпустить.
+    const recording = page.evaluate(async () => {
+        const probe = (): { scene: number; chat: number; seam: number } => {
+            const scene = document.querySelector('header')!.getBoundingClientRect();
+            const chat = document.querySelector('main')!.getBoundingClientRect();
+            return { scene: scene.height, chat: chat.height, seam: scene.bottom - chat.top };
+        };
+        const taken: ReturnType<typeof probe>[] = [];
+        await new Promise<void>((resolve) => {
+            const tick = (): void => {
+                taken.push(probe());
+                if (taken.length < 40) {
+                    requestAnimationFrame(tick);
+                } else {
+                    resolve();
+                }
+            };
+            requestAnimationFrame(tick);
+        });
+        return taken;
+    });
+    await page.mouse.up();
+    const frames = await recording;
+
+    // Допуск в полпикселя — на дробную высоту и округление разметки, а не на движение:
+    // расхождения, которые ловит проверка, были бы в десятки пикселей.
+    const SLACK = 0.5;
+    // Сперва — что съёмка вообще застала ход: приедь разговор до первого кадра, все проверки
+    // ниже прошли бы на неподвижной картинке и не значили бы ничего.
+    expect(
+        frames[frames.length - 1].chat - frames[0].chat,
+        'съёмка началась после приезда: проверять на ней нечего'
+    ).toBeGreaterThan(5);
+    expect(
+        frames.every((frame) => frame.seam >= CHAT_OVERLAP - SLACK),
+        'на стыке кадра и разговора появлялась щель'
+    ).toBe(true);
+    expect(
+        frames.every((frame, i) => i === 0 || frame.chat >= frames[i - 1].chat - SLACK),
+        'разговор ехал с возвратом'
+    ).toBe(true);
+    expect(
+        frames.every((frame, i) => i === 0 || frame.scene <= frames[i - 1].scene + SLACK),
+        'кадр ехал с возвратом'
+    ).toBe(true);
+    expect(frames[frames.length - 1].chat, 'разговор не приехал к двум третям').toBeCloseTo(
+        Math.round(chatRoom(PHONE) * 2 * CHAT_SHARE),
+        0
+    );
 });
