@@ -4,6 +4,7 @@ import {
     PointerEvent as ReactPointerEvent,
     useCallback,
     useEffect,
+    useLayoutEffect,
     useMemo,
     useRef,
     useState,
@@ -115,6 +116,42 @@ export default function App() {
     const sceneRef = useRef<HTMLDivElement>(null);
     const toggleChat = useCallback(() => (shown ? hide() : show()), [shown, hide, show]);
     useSwipe(sceneRef, shown ? 'down' : 'up', toggleChat);
+
+    /**
+     * Переезд разговора из раскладки в раскладку.
+     *
+     * Повернули телефон — коробка меняет сторону, и ехать ей туда неоткуда: прежнего места
+     * в новом окне уже нет. Поэтому переезд — не полёт из угла в угол, а приезд из-за своей
+     * новой кромки, и приезжает разговор сразу в том размере, в каком встанет. Прежде вместо
+     * этого он оказывался на новом месте первым же кадром и оттуда поджимался до нужной
+     * ширины на глазах — замер на повороте: 390px схлопывались до 333 за те же полсекунды,
+     * что и всё остальное движение.
+     *
+     * Держится это одним кадром — тем единственным, в котором коробка стоит за кромкой
+     * (`.appAtEdge`). Переходы в нём сняты все разом: иначе браузер повёз бы её из старого
+     * места в новое, а заодно из старой ширины в новую. Считается этот кадр так, будто
+     * разговора на экране нет вовсе (см. `takenNow` ниже), — и со следующего кадра всё
+     * трогается разом: коробка едет на место, кадр уступает ей ровно столько, сколько она
+     * занимает, полоса шапки и коридор для потяга идут за ними. Тем же самым движением,
+     * каким разговор возвращают кнопкой.
+     */
+    const [atEdge, setAtEdge] = useState(false);
+    const modeWas = useRef(mode);
+    useLayoutEffect(() => {
+        if (modeWas.current !== mode) {
+            modeWas.current = mode;
+            setAtEdge(true);
+        }
+    }, [mode]);
+    useEffect(() => {
+        if (!atEdge) {
+            return undefined;
+        }
+        // Кадром, а не таймером: тронуться коробка должна с той отрисовки, в которой она уже
+        // стоит за кромкой, — иначе переходу не от чего отсчитывать, и он не поедет вовсе.
+        const frame = requestAnimationFrame(() => setAtEdge(false));
+        return () => cancelAnimationFrame(frame);
+    }, [atEdge]);
 
     // Пустой список — тоже список, но новый на каждой отрисовке: без useMemo он менял бы
     // ссылку каждый раз и заставлял пересчитывать всё, что от него зависит.
@@ -451,6 +488,14 @@ export default function App() {
     // и выбрать их было нечем.
     const taken = formOpen ? boxSize : size;
 
+    // Единственный кадр переезда считается так, будто разговора на экране нет вовсе: занято
+    // ничего, на экране ничего, а сама коробка своего размера не теряет. Со следующего кадра
+    // числа возвращаются настоящие — и приезд из-за кромки оказывается тем же самым движением,
+    // каким разговор возвращают кнопкой. Отсюда и главное: кадр отдаёт место не рывком,
+    // а ровно под приезжающую коробку, и щели между ними не бывает ни на одном кадре.
+    const takenNow = atEdge ? 0 : taken;
+    const chatNow = atEdge ? 0 : size;
+
     /**
      * Потяг за коридор вдоль кромки разговора.
      *
@@ -516,7 +561,12 @@ export default function App() {
 
     return (
         <div
-            className={[styles.app, atSide ? styles.appSide : styles.appUnder, dragging ? styles.appDragging : '']
+            className={[
+                styles.app,
+                atSide ? styles.appSide : styles.appUnder,
+                dragging ? styles.appDragging : '',
+                atEdge ? styles.appAtEdge : '',
+            ]
                 .filter(Boolean)
                 .join(' ')}
             // Три размера одной и той же коробки — той, что стоит внизу в вертикальной
@@ -536,8 +586,8 @@ export default function App() {
             style={
                 {
                     '--box-to': `${boxSize}px`,
-                    '--chat-to': `${size}px`,
-                    '--taken-to': `${taken}px`,
+                    '--chat-to': `${chatNow}px`,
+                    '--taken-to': `${takenNow}px`,
                 } as CSSProperties
             }
         >

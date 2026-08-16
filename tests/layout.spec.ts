@@ -2825,6 +2825,94 @@ test('повёрнутое окно само уводит разговор по�
     await expect(page.locator('[role="separator"]'), 'под кадром остался коридор для потяга').toHaveCount(0);
 });
 
+/**
+ * Покадровый снимок переезда: меняем форму окна и следим за коробкой разговора и за кадром.
+ *
+ * Ждём мы тут не «доехало», а «как ехало», поэтому кадры собираем сами, а не смотрим на
+ * готовое: промежуточные размеры на то и промежуточные, что в покое их уже нет.
+ */
+const boxWhileTurning = async (page: Page, to: { width: number; height: number }) => {
+    await page.evaluate(() => {
+        const main = document.querySelector('main')!;
+        const head = document.querySelector('header')!;
+        const taken: { left: number; top: number; width: number; height: number; edge: number }[] = [];
+        (window as unknown as { turn: typeof taken }).turn = taken;
+        const tick = (): void => {
+            const box = main.getBoundingClientRect();
+            const frame = head.getBoundingClientRect();
+            taken.push({
+                left: Math.round(box.left),
+                top: Math.round(box.top),
+                width: Math.round(box.width),
+                height: Math.round(box.height),
+                // Кромка кадра со стороны разговора: снизу под кадром, справа сбоку.
+                edge: Math.round(box.width < box.height ? frame.right : frame.bottom),
+            });
+            if (taken.length < 40) {
+                requestAnimationFrame(tick);
+            }
+        };
+        requestAnimationFrame(tick);
+    });
+    await page.setViewportSize(to);
+    await page.waitForTimeout(900);
+    return page.evaluate(
+        () =>
+            (
+                window as unknown as {
+                    turn: { left: number; top: number; width: number; height: number; edge: number }[];
+                }
+            ).turn
+    );
+};
+
+/**
+ * Смена раскладки: разговор приезжает из-за новой кромки уже в своём размере.
+ *
+ * Прежде он оказывался на новом месте первым же кадром и оттуда поджимался до нужной ширины
+ * на глазах — замер на повороте: 390px схлопывались до 333 за те же полсекунды, что и всё
+ * остальное движение. Промежуточных размеров не должно быть вовсе: ехать разговору положено
+ * смещением, а размер брать готовым.
+ *
+ * Заодно проверяется главное следствие: кадр отдаёт место ровно под приезжающую коробку,
+ * и щели между ними не бывает ни на одном кадре. Первым кадром переезда всё считается так,
+ * будто разговора нет вовсе, — потому кромка кадра и трогается вместе с ним, а не стоит
+ * на старом месте.
+ */
+test('повёрнутое окно не поджимает разговор, а привозит его из-за кромки', async ({ page }) => {
+    await openSide(page);
+
+    // Первые кадры снимка могут застать ещё старую раскладку: окно уже другой формы, а разметка
+    // о ней пока не знает. Переезд начинается там, где кончается старое, — с них и считаем.
+    const since = <T>(frames: T[], started: (frame: T) => boolean): T[] => frames.slice(frames.findIndex(started));
+
+    // Сбоку → под кадр. Едет верх, стоит высота.
+    const down = since(await boxWhileTurning(page, TURNED), (frame) => frame.height === chatSize(TURNED));
+    expect(
+        [...new Set(down.map((frame) => frame.height))],
+        'разговор поджимался по высоте, вместо того чтобы приехать'
+    ).toEqual([chatSize(TURNED)]);
+    const tops = down.map((frame) => frame.top);
+    expect(Math.max(...tops), 'разговор не начал переезд из-за нижней кромки окна').toBe(TURNED.height);
+    expect(Math.min(...tops), 'разговор не доехал до своего места').toBe(TURNED.height - chatSize(TURNED));
+    down.forEach((frame) => {
+        expect(frame.edge, 'между кадром и приезжающим разговором открылась щель').toBeGreaterThanOrEqual(frame.top);
+    });
+
+    // Под кадром → сбоку. Едет левая кромка, стоит ширина.
+    const aside = since(await boxWhileTurning(page, WIDE), (frame) => frame.width === SIDE_AT_WIDE);
+    expect(
+        [...new Set(aside.map((frame) => frame.width))],
+        'разговор поджимался по ширине, вместо того чтобы приехать'
+    ).toEqual([SIDE_AT_WIDE]);
+    const lefts = aside.map((frame) => frame.left);
+    expect(Math.max(...lefts), 'разговор не начал переезд из-за правой кромки окна').toBe(WIDE.width);
+    expect(Math.min(...lefts), 'разговор не доехал до своего места').toBe(WIDE.width - SIDE_AT_WIDE);
+    aside.forEach((frame) => {
+        expect(frame.edge, 'между кадром и приезжающей панелью открылась щель').toBeGreaterThanOrEqual(frame.left);
+    });
+});
+
 /** Ширина бокового разговора: справа он всегда упирается в кромку окна. */
 const sideWidth = async (page: Page): Promise<number> => (await boxOf(page, 'main')).width;
 
