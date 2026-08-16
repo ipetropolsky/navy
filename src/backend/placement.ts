@@ -319,8 +319,12 @@ const fitsAlongside = (slot: number, kind: ShipKind, other: Standing): boolean =
  *
  * А вот теснота по дальности (MIN_SLOT_GAP) сюда не входит: соседняя линия того же коридора
  * не запрещена, она просто хуже прочих, и разбирается это при выборе (preferredBerths).
+ *
+ * Наружу торчит ради проверок: это сердце всех запретов рейда, и проверять его через
+ * расстановку значило бы смотреть на ответ, в который случай подмешал ещё три правила.
+ * Порядок в ответе случайный — сравнивать его надо составом, а не списком.
  */
-const freeCorridors = (slot: number, kind: ShipKind, taken: Standing[]): Corridor[] => {
+export const freeCorridors = (slot: number, kind: ShipKind, taken: Standing[]): Corridor[] => {
     const island = slot < ISLAND_FREE_SLOT;
     const here = taken.filter((other) => other.place.slot === slot);
     if (here.length + (island ? 1 : 0) >= SLOT_CAPACITY) {
@@ -522,8 +526,13 @@ export const fleetLefts = (fleet: Anchored[], leaving: ReadonlySet<string> = new
  * тесноту в «своей» части рейда вместо простора в чужой, и получалась бы та же стопка силуэтов
  * на соседних линиях, от которой всё и затевалось. Не осталось свободных — тесные снова в деле:
  * встать рядом можно, просто это последнее, что берётся.
+ *
+ * Наружу торчит ради проверок: тут собраны все склонности расстановки — размер, теснота,
+ * простор, — и спрашивать про них `suggestBerth` значило бы выяснять, чем кончил случай,
+ * вместо того чтобы смотреть, из чего он выбирал. Порядок в ответе случайный: сравнивать
+ * его надо составом, а не списком.
  */
-const preferredBerths = (kind: ShipKind, taken: Standing[]): Berth[] => {
+export const preferredBerths = (kind: ShipKind, taken: Standing[]): Berth[] => {
     const wanted = preferredSlot(kind);
     const free = allSlots().flatMap((slot) =>
         freeCorridors(slot, kind, taken).map((corridor) => berthAt(slot, corridor))

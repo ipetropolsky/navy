@@ -1,8 +1,29 @@
-import { describe, expect, test } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
-import { Corridor, ISLAND_FREE_SLOT, ISLAND_SIDE, ShipKind, otherSide, shipWidthPercent } from '@/types/channel';
+import {
+    Berth,
+    CORRIDORS,
+    Corridor,
+    ISLAND_FREE_SLOT,
+    ISLAND_SIDE,
+    SLOT_COUNT,
+    ShipKind,
+    otherSide,
+    shipWidthPercent,
+} from '@/types/channel';
 
-import { Anchored, fleetLefts, placeShip } from '@/backend/placement';
+import {
+    Anchored,
+    Standing,
+    berthAt,
+    fleetLefts,
+    freeBerths,
+    freeCorridors,
+    isBerthFree,
+    placeShip,
+    preferredBerths,
+    suggestBerth,
+} from '@/backend/placement';
 
 /**
  * Заход на рейд: с какой стороны корабль приходит и куда встаёт носом. Правило счётное,
@@ -17,8 +38,49 @@ import { Anchored, fleetLefts, placeShip } from '@/backend/placement';
 /** Средний корабль справочника: влезает на любой слот. */
 const KIND: ShipKind = 'pr201';
 
+/** Самый длинный корабль справочника: его тянет к дальнему краю рейда. */
+const BIG: ShipKind = 'pr1234';
+
+/** Самый короткий: его тянет к переднему плану, и рядом с ним помещается кто угодно. */
+const SMALL: ShipKind = 'pr1400';
+
 /** Ближняя половина рейда, где остров уже не помеха. */
 const NEAR = 8;
+
+/**
+ * Чужой корабль на рейде, каким его видит расстановка: место да силуэт. Курс и сторона захода
+ * тут для полноты — ни один запрет их не читает.
+ */
+const standing = (slot: number, corridor: Corridor, kind: ShipKind = SMALL): Standing => ({
+    shipKind: kind,
+    place: { ...berthAt(slot, corridor), facing: 'left', enterFrom: 'right' },
+});
+
+/**
+ * Места одной строчкой, по возрастанию. Порядок в ответах расстановки случайный — она
+ * нарочно перемешивает набор, — поэтому сравнивать их можно только составом.
+ */
+const spots = (berths: Berth[]): string[] => berths.map((berth) => `${berth.slot}:${berth.corridor}`).sort();
+
+/** Все места на этих дальностях в этих коридорах — так короче перечислять ожидаемое. */
+const spread = (slots: number[], corridors: Corridor[]): Berth[] =>
+    slots.flatMap((slot) => corridors.map((corridor) => berthAt(slot, corridor)));
+
+/**
+ * Рейд, на котором свободны только тесные места: дальние слоты держит остров да по кораблю
+ * на каждом, ближние заняты парами, а на слоте 3 стоит один — и оба оставшихся места на нём
+ * соседям в затылок: в центре сосед на слоте 2, справа — на слоте 4.
+ */
+const CROWDED_RAID: Standing[] = [
+    standing(0, 'center'),
+    standing(1, 'center'),
+    standing(2, 'center'),
+    standing(3, 'left'),
+    ...[4, 5, 6, 7, 8, 9].flatMap((slot) => [standing(slot, 'center'), standing(slot, 'right')]),
+];
+
+/** Тот же рейд, занятый до последнего места. */
+const FULL_RAID: Standing[] = [...CROWDED_RAID, standing(3, 'center')];
 
 describe('заход на рейд', () => {
     test('в боковой коридор корабль заходит снаружи и встаёт носом к середине кадра', () => {
@@ -55,6 +117,184 @@ describe('заход на рейд', () => {
             const place = placeShip(KIND, [], { slot: NEAR, corridor: 'center', left: 50 });
             expect(place?.facing).toBe(otherSide(place!.enterFrom));
         }
+    });
+});
+
+/**
+ * Запреты рейда: куда встать нельзя вовсе. Это сердце расстановки — на `freeCorridors`
+ * стоят и свободные места на воде, и выбор случайного места, и проверка выбранного в форме, —
+ * и спрашивать про запреты `placeShip` значило бы смотреть на ответ, в который случай
+ * подмешал ещё три склонности.
+ */
+describe('запреты рейда', () => {
+    test('место соседа занято, а та же полоса на соседней линии — нет', () => {
+        // На линии сосед в центре: его коридор занят — точка на воде у них была бы одна
+        // на двоих. А вот соседняя линия того же коридора не запрещена: это теснота,
+        // и разбирается она при выборе, а не здесь.
+        const taken = [standing(NEAR, 'center')];
+        expect([...freeCorridors(NEAR, KIND, taken)].sort()).toEqual(['left', 'right']);
+        expect([...freeCorridors(NEAR - 1, KIND, taken)].sort()).toEqual(['center', 'left', 'right']);
+    });
+
+    test('на дальних слотах левого коридора нет никогда, и второму места там не остаётся', () => {
+        // Слева остров: на дальних слотах корабль оказался бы прямо на суше. Он же и держит
+        // линию за соседа — там, где стоит берег, второму кораблю не встать.
+        for (let slot = 0; slot < ISLAND_FREE_SLOT; slot += 1) {
+            expect(freeCorridors(slot, KIND, []), `слот ${slot}`).not.toContain('left');
+            expect(freeCorridors(slot, KIND, [standing(slot, 'center')]), `слот ${slot}`).toEqual([]);
+        }
+        expect(freeCorridors(ISLAND_FREE_SLOT, KIND, [])).toContain('left');
+    });
+
+    test('двое на линии занимают её целиком, сколько бы воды между ними ни оставалось', () => {
+        // Третьему на линии не стоять, даже если он катер и вода на него есть: он оказался бы
+        // заперт между двумя соседями, и уходя с рейда прошёл бы сквозь одного из них.
+        const pair = [standing(NEAR, 'left'), standing(NEAR, 'right')];
+        expect(freeCorridors(NEAR, SMALL, pair)).toEqual([]);
+    });
+
+    test('не расходятся бортами — линия занята, и коридор тут ни при чём', () => {
+        // Два самых длинных корабля на ближней линии занимают почти весь кадр: разойтись им
+        // негде, и запрет тут на всю линию, а не на чей-то коридор — расходятся-то они
+        // по всему кадру, а не внутри своих полос.
+        const near = SLOT_COUNT - 1;
+        expect(freeCorridors(near, BIG, [standing(near, 'center', BIG)])).toEqual([]);
+        // Та же пара подальше, где силуэты мельче, на линию помещается.
+        expect([...freeCorridors(6, BIG, [standing(6, 'center', BIG)])].sort()).toEqual(['left', 'right']);
+    });
+});
+
+/**
+ * Куда корабль встаёт, когда места не выбирали. Тут три склонности разом — размер, теснота
+ * и простор, — и все три проверяются составом набора (`preferredBerths`), а не тем, куда
+ * в итоге ткнул случай: набор и есть решение, жребий из него только достаёт.
+ */
+describe('куда корабль встаёт сам', () => {
+    beforeEach(() => {
+        // Жребий подменён, чтобы прогон повторялся: сам ответ мы проверяем не на конкретное
+        // место, а на попадание в набор, который посчитан выше.
+        vi.spyOn(Math, 'random').mockReturnValue(0);
+    });
+
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
+    test('крупный выбирает из дальней части рейда, мелкий — из ближней', () => {
+        // Самый длинный тянется к горизонту, самый короткий — к переднему плану, и берётся
+        // не один «свой» слот, а четыре ближайших к нему: иначе строй выстроился бы по росту.
+        // На дальних слотах левого коридора в наборе нет — там остров.
+        expect(spots(preferredBerths(BIG, []))).toEqual(
+            spots([...spread([0, 1, 2], ['center', 'right']), ...spread([3], CORRIDORS)])
+        );
+        expect(spots(preferredBerths(SMALL, []))).toEqual(spots(spread([6, 7, 8, 9], CORRIDORS)));
+    });
+
+    test('заняты желаемые дальности — набор сдвигается к следующим по удалённости', () => {
+        // Три дальних слота держит остров да по кораблю на каждом — и набор крупного уезжает
+        // к ближним от них, а не рассыпается по всему рейду. Центральный коридор на слотах 3
+        // и 4 из набора выпал: там в трёх слотах стоит сосед по этой же полосе.
+        const island = [standing(0, 'center'), standing(1, 'center'), standing(2, 'center')];
+        expect(spots(preferredBerths(BIG, island))).toEqual(
+            spots([...spread([3, 4], ['left', 'right']), ...spread([5, 6], CORRIDORS)])
+        );
+    });
+
+    test('тесное место в набор не попадает, пока есть просторные', () => {
+        // Сосед в центре на слоте 5 закрывает свою полосу на три слота в каждую сторону —
+        // не запретом, а тем, что такие места берутся последними. Пока на рейде есть хоть
+        // одно просторное, тесные не рассматриваются вовсе.
+        const taken = [standing(5, 'center')];
+        expect(spots(preferredBerths(SMALL, taken))).toEqual(
+            spots([...spread([6, 7], ['left', 'right']), ...spread([8, 9], CORRIDORS)])
+        );
+        const chosen = suggestBerth(SMALL, taken);
+        expect(chosen).not.toBeNull();
+        expect(spots(preferredBerths(SMALL, taken))).toContain(`${chosen!.slot}:${chosen!.corridor}`);
+    });
+
+    test('просторных не осталось — берётся тесное', () => {
+        // Рейд занят весь, кроме двух мест на слоте 3, и оба тесные: в центре сосед на слоте 2,
+        // справа — на слоте 4. Встать рядом можно, просто это последнее, что берётся, —
+        // и когда другого нет, расстановка берёт именно это, а не отказывает.
+        const berths = spots([berthAt(3, 'center'), berthAt(3, 'right')]);
+        expect(spots(freeBerths(KIND, CROWDED_RAID))).toEqual(berths);
+        expect(spots(preferredBerths(KIND, CROWDED_RAID))).toEqual(berths);
+        const chosen = suggestBerth(KIND, CROWDED_RAID);
+        expect(chosen).not.toBeNull();
+        expect(berths).toContain(`${chosen!.slot}:${chosen!.corridor}`);
+    });
+});
+
+/**
+ * Свободные места — то, что человек видит овалами на воде. Тут запреты и ничего больше:
+ * склонности расстановки сюда не достают, потому что человек смотрит на весь кадр разом
+ * и решает сам.
+ */
+describe('свободные места на воде', () => {
+    test('занятое место пропадает, занятая линия — целиком, а соседняя остаётся', () => {
+        const alone = freeBerths(KIND, [standing(NEAR, 'center')]);
+        expect(spots(alone)).not.toContain(`${NEAR}:center`);
+        expect(spots(alone)).toContain(`${NEAR}:left`);
+        // Соседняя линия того же коридора предлагается наравне с прочими: это «не хочется»,
+        // а не «нельзя», и решать за выбирающего тут нечего.
+        expect(spots(alone)).toContain(`${NEAR - 1}:center`);
+        // А на дальних слотах левого коридора нет вовсе: там остров.
+        expect(spots(alone)).not.toContain('0:left');
+        expect(spots(alone)).toContain('0:center');
+
+        const pair = freeBerths(KIND, [standing(NEAR, 'center'), standing(NEAR, 'left')]);
+        expect(spots(pair).filter((spot) => spot.startsWith(`${NEAR}:`))).toEqual([]);
+    });
+
+    test('отметки стоят на осях коридоров и от вызова к вызову не ездят', () => {
+        // Разметка на воде — про выбор, и стоять она должна стройно: точка места — это ось
+        // коридора, одна и та же для всех кораблей и во всех вкладках.
+        const axes: Record<Corridor, number> = { left: 22.1, center: 50, right: 77.9 };
+        const first = freeBerths(KIND, [standing(NEAR, 'center')]);
+        for (const berth of first) {
+            expect(berth.left, `${berth.slot}:${berth.corridor}`).toBeCloseTo(axes[berth.corridor], 6);
+        }
+        const again = freeBerths(KIND, [standing(NEAR, 'center')]);
+        expect(spots(again)).toEqual(spots(first));
+    });
+});
+
+/**
+ * Место, выбранное в форме. Полагаться на этот выбор нельзя: пока человек раздумывал,
+ * туда мог встать кто-то другой.
+ */
+describe('выбранное в форме место', () => {
+    beforeEach(() => {
+        vi.spyOn(Math, 'random').mockReturnValue(0);
+    });
+
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
+    test('свободное — корабль встаёт ровно на него', () => {
+        // Ни разброса, ни склонностей: выбрали — значит, туда, даже если рядом сосед.
+        const wanted = berthAt(NEAR, 'left');
+        const place = placeShip(KIND, [standing(NEAR, 'center')], wanted);
+        expect(place).toMatchObject(wanted);
+    });
+
+    test('занятое — корабль встаёт на свободное, а не отказывается', () => {
+        // Место заняли, пока человек раздумывал. Отказывать не за что: корабль встаёт так,
+        // как если бы места не выбирали вовсе, — на свободное и по правилам расстановки.
+        const wanted = berthAt(NEAR, 'center');
+        const place = placeShip(KIND, [standing(NEAR, 'center')], wanted);
+        expect(place).not.toBeNull();
+        expect(place).not.toMatchObject({ slot: wanted.slot, corridor: wanted.corridor });
+        expect(isBerthFree(place!, KIND, [standing(NEAR, 'center')]), 'встал на занятое место').toBe(true);
+    });
+
+    test('мест нет вовсе — расстановка отказывает', () => {
+        // При пяти участниках на десять слотов такого не бывает, но ответ на этот случай
+        // должен быть определённый: null, а не первое попавшееся место.
+        expect(placeShip(KIND, FULL_RAID)).toBeNull();
+        expect(placeShip(KIND, FULL_RAID, berthAt(NEAR, 'left'))).toBeNull();
     });
 });
 
