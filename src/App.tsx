@@ -909,10 +909,6 @@ export default function App() {
                         key={shownCard.memberId}
                         member={shownCard}
                         senior={shownCard.memberId === channel?.channel.owner?.memberId}
-                        // Оклик уходит на рейд, а карточка остаётся открытой: лампа отвечает
-                        // и на портрете, и на самом корабле в кадре, и закрыть её в этот миг
-                        // значило бы спрятать половину ответа.
-                        onHail={() => handleHail(shownCard.memberId)}
                     />
                 )}
             </Shade>

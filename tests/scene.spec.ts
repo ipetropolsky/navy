@@ -1177,27 +1177,106 @@ test('нажатие по воде достаётся ближайшему ко�
     await expect(page.getByRole('region', { name: 'Корабль' }), 'нажатие по небу открыло карточку').toBeHidden();
 });
 
-test('оклик из карточки корабля — и он отвечает лампой', async ({ page }) => {
+test('«Сигнал» зажигает лампу на портрете, а рейд остаётся тёмным', async ({ page }) => {
     await openChannel(page, DEMO, ALBATROS);
-    await watchLamps(page);
 
-    // Аватарка в ленте открывает карточку, а окликают уже из неё. Кого именно — написано
-    // на самой аватарке.
-    const avatar = page.locator('button[title^="Корабль «"]').first();
-    const hailed = (await avatar.getAttribute('title'))!.replace(/^Корабль «|»$/g, '');
-    await avatar.click();
-    await page.getByRole('button', { name: 'Окликнуть' }).click();
+    // Аватарка в ленте открывает карточку, а сигнал просят уже из неё.
+    await page.locator('button[title^="Корабль «"]').first().click();
+    const card = page.getByRole('region', { name: 'Корабль' });
+    await expect(card).toBeVisible();
+
+    // Смотрим разом за лампами всего рейда и за лампой на портрете: сигнал — дело карточки,
+    // и до рейда он доходить не должен. Различаются они подписью спрайта: в кадре корабли
+    // подписаны позывными, портрет — названием типа.
+    await watchLamps(page, '[class*="shipLane"], [class*="portraitShip"]');
+    await card.getByRole('button', { name: 'Сигнал' }).click();
 
     // K — это «−·−», три вспышки. Ждём именно трёх: одной хватило бы и на случайное мигание.
+    const portrait = await card.locator('[class*="portraitShip"] img').getAttribute('alt');
     await expect
-        .poll(async () => (await flashes(page))[`Корабль «${hailed}»`], 'окликнутый корабль не ответил лампой')
-        .toBe(3);
-    // И отвечает только он: оклик — это «который из них твой», а не «мигните все разом».
+        .poll(async () => (await flashes(page))[portrait!], 'портрет не ответил лампой')
+        .toBeGreaterThanOrEqual(3);
+
+    // А в кадре не мигнул никто: чужим кораблём с его же карточки не распоряжаются.
     const all = await flashes(page);
+    const onRaid = Object.entries(all).filter(([name, count]) => name !== portrait && count > 0);
+    expect(onRaid, 'сигнал из карточки дошёл до рейда').toHaveLength(0);
+});
+
+test('«Ход» и «Якорь» переключают огни портрета, не меняя ширины кнопки', async ({ page }) => {
+    await openChannel(page, DEMO, ALBATROS);
+    await page.locator('button[title^="Корабль «"]').first().click();
+    const card = page.getByRole('region', { name: 'Корабль' });
+    const portrait = '[class*="portraitShip"]';
+
+    // На рейде корабль стоит на якоре — с этого карточка и начинается.
+    const anchored = (await lights(page, portrait))[0].map((light) => light.kind);
     expect(
-        Object.values(all).filter((count) => count > 0),
-        'на оклик ответил не один корабль'
-    ).toHaveLength(1);
+        anchored.some((kind) => kind.startsWith('anchor')),
+        'на якоре не горят якорные огни'
+    ).toBe(true);
+
+    // Кнопка подписана действием, а не положением: пока корабль на якоре, она предлагает ход.
+    const toggle = card.getByRole('button', { name: 'Ход', exact: true });
+    const width = (await toggle.boundingBox())!.width;
+    await toggle.click();
+
+    const underway = (await lights(page, portrait))[0].map((light) => light.kind);
+    expect(
+        underway.some((kind) => kind.startsWith('masthead')),
+        'под парами не зажглись ходовые огни'
+    ).toBe(true);
+    expect(
+        underway.some((kind) => kind.startsWith('anchor')),
+        'под парами остались якорные огни'
+    ).toBe(false);
+
+    // Подпись сменилась, ширина — нет: обе подписи лежат в кнопке разом, и место занимает
+    // более длинная из них. Иначе на каждом переключении дёргалась бы и она, и соседняя.
+    const back = card.getByRole('button', { name: 'Якорь', exact: true });
+    await expect(back).toBeVisible();
+    expect((await back.boundingBox())!.width, 'кнопка сменила ширину вместе с подписью').toBe(width);
+
+    // И обратно: якорь гасит ходовые.
+    await back.click();
+    const again = (await lights(page, portrait))[0].map((light) => light.kind);
+    expect(
+        again.some((kind) => kind.startsWith('anchor')),
+        'якорь не вернул якорные огни'
+    ).toBe(true);
+});
+
+test('позывной в карточке стоит вровень с крестиком', async ({ page }) => {
+    await openChannel(page, DEMO, ALBATROS);
+    await page.locator('button[title^="Корабль «"]').first().click();
+    const card = page.getByRole('region', { name: 'Корабль' });
+
+    await expect(card).toBeVisible();
+
+    // Заголовка у шторки своего нет — его рисует содержимое, и встать вровень с крестиком
+    // оно может только по меркам, которые шторка отдаёт наружу. Сверяем середины: строка
+    // с позывным ростом с крестик и центрирована по нему.
+    //
+    // Меряем обоих одним заходом в страницу, а не двумя boundingBox подряд: шторка в этот
+    // момент ещё выезжает, и два замера пришлись бы на разные кадры выезда — крестик оказался
+    // бы ниже позывного на весь пройденный за это время путь. Взаимное положение внутри
+    // шторки от выезда не зависит: едет она целиком.
+    const gap = await card.evaluate((shade) => {
+        const middle = (node: Element): number => {
+            const rect = node.getBoundingClientRect();
+            return rect.top + rect.height / 2;
+        };
+        const close = shade.querySelector('[class*="close"] button')!;
+        const name = shade.querySelector('[class*="large"]')!;
+        return {
+            level: middle(name) - middle(close),
+            overlap: name.getBoundingClientRect().right - close.getBoundingClientRect().left,
+        };
+    });
+    expect(Math.abs(gap.level), 'позывной не на одном уровне с крестиком').toBeLessThanOrEqual(1);
+
+    // И под крестик он не заезжает: справа в строке оставлено место ровно под кнопку.
+    expect(gap.overlap, 'позывной заехал под крестик').toBeLessThanOrEqual(0);
 });
 
 test('лампа передаёт и то, что набрано поверх выделения', async ({ page }) => {

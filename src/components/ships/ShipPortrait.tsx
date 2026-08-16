@@ -46,6 +46,9 @@ const shipHeight = (kind: ShipKind): number =>
  */
 const IMAGE_BOX_ASPECT = 1 / Math.max(...SHIP_KINDS.map(shipHeight));
 
+/** Место ровно по этому силуэту: ни строчки пустого неба над мачтами. */
+const ownBoxAspect = (kind: ShipKind): number => 1 / shipHeight(kind);
+
 const percent = (share: number): string => `${(share * 100).toFixed(2)}%`;
 
 /**
@@ -69,9 +72,24 @@ interface ShipPortraitProps {
     mode: 'underway' | 'anchored';
     /** Повод мигнуть лампой: отклик на нажатие или оклик. */
     morseFeed?: MorseFeed | null;
+    /**
+     * Место под силуэт — ровно по нему, а не по самому высокому из рисунков. Нужно там, где
+     * портрет один: в карточке чужого корабля сравнивать его не с чем, а пустая полоса неба
+     * над мачтами катера в полкарточки высотой — это просто дыра, на которую вытянулась шторка.
+     * Там же, где силуэты стоят рядом (список кораблей в форме), общая высота обязательна:
+     * без неё корабли встают на разные уровни.
+     */
+    ownHeight?: boolean;
 }
 
-export default function ShipPortrait({ kind, hullNumber = '', facing, mode, morseFeed = null }: ShipPortraitProps) {
+export default function ShipPortrait({
+    kind,
+    hullNumber = '',
+    facing,
+    mode,
+    morseFeed = null,
+    ownHeight = false,
+}: ShipPortraitProps) {
     return (
         <>
             {/* Место под силуэт одно на всех, а сам силуэт в нём той ширины, какую даёт его
@@ -79,7 +97,10 @@ export default function ShipPortrait({ kind, hullNumber = '', facing, mode, mors
                 стоянка на рейде — это то, ради чего его и выбирают, а огни у каждого силуэта
                 свои и стоят по-разному. Номер на борту — того же размера и на том же месте,
                 каким он будет виден в кадре. */}
-            <span className={styles.portraitBox} style={{ aspectRatio: IMAGE_BOX_ASPECT }}>
+            <span
+                className={styles.portraitBox}
+                style={{ aspectRatio: ownHeight ? ownBoxAspect(kind) : IMAGE_BOX_ASPECT }}
+            >
                 <span className={styles.portraitShip} style={{ width: percent(shipWidth(kind)) }}>
                     <Ship
                         kind={kind}

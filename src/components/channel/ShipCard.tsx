@@ -3,6 +3,7 @@ import { useState } from 'react';
 import MemberName from '@/components/ships/MemberName';
 import Pennant from '@/components/ships/Pennant';
 import ShipPortrait, { shipSpecLine } from '@/components/ships/ShipPortrait';
+import Actions from '@/components/ui/Actions';
 import Button from '@/components/ui/Button';
 import { useSnackbar } from '@/components/ui/Snackbar';
 import { HAIL_SIGNAL } from '@/hooks/morse';
@@ -14,8 +15,6 @@ interface ShipCardProps {
     member: Member;
     /** Старший на рейде: у него вымпел рядом с позывным, как и в списке. */
     senior: boolean;
-    /** Окликнуть корабль: он отвечает лампой и здесь, и со своего места на рейде. */
-    onHail: () => void;
 }
 
 /** Что означает вымпел. То же слово, что и в списке: звание одно. */
@@ -32,22 +31,26 @@ const SENIOR_TITLE = 'Старший на рейде';
  * Портрет тот же, что в форме своего корабля (`ShipPortrait`), и это не совпадение: человек
  * уже выбирал корабль по этой картинке и знает, как её читать. Курс — настоящий, с рейда:
  * карточка показывает тот самый корабль, который стоит в кадре, а не образец из справочника.
+ * Высота места под силуэт здесь своя, по этому кораблю: сравнивать его тут не с чем, и общая
+ * на всех высота оборачивалась бы полосой пустого неба над мачтами катера.
  *
- * Оклик живёт здесь же. Раньше он был на самой аватарке, но аватарка теперь открывает
- * карточку, и место окликом занято быть не может: «который из них твой» — это вопрос
- * про корабль, и задаётся он с его карточки, где сразу видно и ответ лампой на портрете,
- * и вспышку на рейде.
+ * Две кнопки внизу — то, что с портретом можно сделать: попросить подать сигнал и переключить
+ * огни с рейдовых на ходовые. Обе живут только в карточке и до рейда не доходят: это показ
+ * корабля, а не команда ему. Чужой корабль в кадре стоит на якоре и стоит молча — распоряжаться
+ * им с его же карточки было бы странно, а увидеть, как он выглядит на ходу и как отвечает
+ * лампой, хочется ровно здесь, где он и показан крупно.
  */
-export default function ShipCard({ member, senior, onHail }: ShipCardProps) {
-    // Отклик лампой на портрете: тот же сигнал, что уходит и на рейд. Счётчик в seq — чтобы
-    // окликать можно было подряд: буква каждый раз одна и та же, и по ней двух окликов
-    // не различить.
+export default function ShipCard({ member, senior }: ShipCardProps) {
+    // Отклик лампой на портрете. Счётчик в seq — чтобы просить сигнал можно было подряд:
+    // буква каждый раз одна и та же, и по ней двух сигналов не различить.
     const [reply, setReply] = useState<MorseFeed | null>(null);
+    // Под парами или на якоре. Показ, а не состояние корабля: на рейде он как стоял на якоре,
+    // так и стоит, — поэтому и живёт это только в карточке и забывается вместе с ней.
+    const [underway, setUnderway] = useState(false);
     const notify = useSnackbar();
 
-    const handleHail = () => {
+    const handleSignal = () => {
         setReply((prev) => ({ seq: (prev?.seq ?? 0) + 1, text: HAIL_SIGNAL }));
-        onHail();
     };
 
     return (
@@ -71,23 +74,36 @@ export default function ShipCard({ member, senior, onHail }: ShipCardProps) {
             </div>
             <div className={styles.hullNumber}>Бортовой номер {member.hullNumber}</div>
 
-            {/* Корабль стоит на якоре — он и правда стоит на рейде, и огни у него якорные. */}
+            {/* По умолчанию корабль на якоре — он и правда стоит на рейде, и огни у него
+                якорные. Ходовые зажигает кнопка внизу, и только на портрете. */}
             <ShipPortrait
                 kind={member.shipKind}
                 hullNumber={member.hullNumber}
                 facing={member.place.facing}
-                mode="anchored"
+                mode={underway ? 'underway' : 'anchored'}
                 morseFeed={reply}
+                ownHeight
             />
 
             <div className={styles.kind}>{SHIP_KIND_LABELS[member.shipKind]}</div>
             <div className={styles.spec}>{shipSpecLine(member.shipKind)}</div>
 
-            <div className={styles.actions}>
-                <Button variant="secondary" onClick={handleHail}>
-                    Окликнуть
+            {/* Ряд кнопок тот же, что внизу форм: одна механика на всё приложение — как они
+                делят ширину, когда переносятся и как липнут к нижней кромке. */}
+            <Actions pinned>
+                <Button variant="secondary" onClick={handleSignal}>
+                    Сигнал
                 </Button>
-            </div>
+                {/* Подпись — действие, а не положение: пока корабль на якоре, кнопка предлагает
+                    дать ход, а под парами — отдать якорь. Обе подписи лежат в кнопке разом,
+                    чтобы переключение не меняло её ширину (см. .swap). */}
+                <Button variant="secondary" onClick={() => setUnderway((was) => !was)}>
+                    <span className={styles.swap}>
+                        <span className={underway ? styles.swapHidden : undefined}>Ход</span>
+                        <span className={underway ? undefined : styles.swapHidden}>Якорь</span>
+                    </span>
+                </Button>
+            </Actions>
         </div>
     );
 }
