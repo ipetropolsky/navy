@@ -525,17 +525,19 @@ test('лента держится низа при смене раскладки'
         .poll(async () => (await scrollState(mine)).bottom, { message: 'лента не стоит внизу' })
         .toBeLessThan(24);
 
-    // Кадр разворачивается — блок с разговором ужимается под ним, и лента едет вместе с ним.
-    await mine.getByRole('button', { name: 'Развернуть сцену' }).click();
+    // Окно из лежачего становится стоячим — разговор переезжает из панели сбоку под кадр
+    // и ужимается до трети высоты. Лента должна поехать вместе с ним, а не остаться там,
+    // где стояла в панели во весь рост.
+    await mine.setViewportSize({ width: 420, height: 600 });
     await expect
         .poll(async () => (await scrollState(mine)).bottom, { message: 'ужавшаяся лента отстала от низа' })
         .toBeLessThan(24);
 
     // И остаётся прицепленной: следующее сообщение видно, а не догадываешься о нём по счётчику.
-    await send(theirs, 'После разворота');
-    await expect(bubbles(mine).last()).toContainText('После разворота');
+    await send(theirs, 'После переезда');
+    await expect(bubbles(mine).last()).toContainText('После переезда');
     await expect
-        .poll(async () => (await scrollState(mine)).bottom, { message: 'после разворота лента отцепилась от низа' })
+        .poll(async () => (await scrollState(mine)).bottom, { message: 'после переезда лента отцепилась от низа' })
         .toBeLessThan(24);
 });
 

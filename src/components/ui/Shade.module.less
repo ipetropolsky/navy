@@ -108,8 +108,8 @@
 // поверх всего, как обычно.
 .shadeOnScene {
     position: absolute;
-    inset: auto var(--side-width, @side-width) 0 0;
-    width: ~'calc(100% - var(--side-width, @{side-width}) - @{sheet-inset})';
+    inset: auto var(--side-width) 0 0;
+    width: ~'calc(100% - var(--side-width) - @{sheet-inset})';
 }
 
 // Пока тянут, сдвиг идёт за пальцем: любой переход тут превратился бы в отставание.
@@ -160,7 +160,7 @@
 // с inset выигрывает записанный последним.
 .backdropOnScene {
     position: absolute;
-    inset: 0 var(--side-width, @side-width) 0 0;
+    inset: 0 var(--side-width) 0 0;
 }
 
 // Крестик в верхнем углу — справа от заголовка, который рисует само содержимое. Стоит он

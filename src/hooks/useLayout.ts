@@ -1,118 +1,163 @@
 import { useCallback, useEffect, useState } from 'react';
 
-import { SCENE_MIN_WIDTH, SIDE_MIN_WIDTH, SIDE_MIN_WINDOW, SIDE_SHARE } from '@/config/layout';
+import { CHAT_SHARE, SCENE_MIN_WIDTH, SHEET_TOP_GAP, SIDE_MIN_WIDTH } from '@/config/layout';
 import { sessionStore } from '@/utils/storage';
 
 /**
  * Раскладка приложения и то, что о ней помнит вкладка.
  *
- * Здесь одно место, где раскладка сверяется с окном, и несколько разных проверок в нём:
- * помещается ли боковая панель в это окно, не уже ли она своего минимума, не шире ли того,
- * что оставляет кадру его минимум. Раньше проверка была одна и жила в медиа-запросе, а ширина
- * была числом; с изменяемой шириной этого мало — окно меняется и без ведома человека
- * (повернули планшет, вытащили ноутбук из док-станции), и раскладка обязана сама съехать
- * на допустимое.
+ * Раскладок две, и выбирает между ними форма окна, а не человек: окно выше своей ширины —
+ * разговор стоит под кадром и меряется высотой; окно шире своей высоты — разговор стоит сбоку
+ * и меряется шириной. Третьего положения нет, кнопки переключения тоже: повернул телефон —
+ * раскладка сменилась сама, и спрашивать тут не о чем.
+ *
+ * Выбирает человек другое — **размер** разговора, и у каждой раскладки он свой: высота под
+ * кадром и ширина сбоку помнятся раздельно. Иначе треть высоты, выбранная на телефоне,
+ * оказывалась бы третью ширины после поворота — числом то же, местом совсем другое.
  *
  * Держится это разделением на два: **выбор** — то, что человек попросил, и **раскладка** —
  * то, что из этого выбора помещается в нынешнее окно. Выбор пишется в sessionStorage и меняется
- * только явными действиями: нажал кнопку, потянул за коридор. Окно, ставшее тесным, выбора
- * не трогает — оно лишь урезает то, что из него выходит, и стоит окну раздаться обратно,
- * панель возвращается к выбранной ширине. Иначе одно случайное сужение стирало бы выбор
+ * только явными действиями: потянул за кромку, убрал разговор кнопкой. Окно, ставшее тесным,
+ * выбора не трогает — оно лишь урезает то, что из него выходит, и стоит окну раздаться обратно,
+ * разговор возвращается к выбранному размеру. Иначе одно случайное сужение стирало бы выбор
  * насовсем, а восстановить его было бы неоткуда.
  */
 
-/** Что человек выбрал: раскладка, положение блока контента и ширина боковой панели. */
-export interface LayoutWish {
-    /** Раскладка «больше сцены»: кадр забирает окно, блоку контента остаётся сжатая мерка. */
-    expanded: boolean;
-    /** Разговор сбоку от кадра, а не под ним. */
-    side: boolean;
+/** Где стоит разговор: под кадром (вертикальное окно) или сбоку от него (горизонтальное). */
+export type LayoutMode = 'under' | 'side';
+
+/** Размер разговора в одной раскладке. */
+export interface ChatWish {
     /**
-     * Какую долю окна занимает боковая панель, 0..1.
+     * Какую долю хода занимает разговор, 0..1. Ноль значит «разговора на экране нет».
      *
      * Долей, а не пикселями: окно у одного человека меняется от монитора к ноутбуку и обратно,
-     * и панель в 400px на этих окнах — то треть экрана, то узкая щель. Доля переносится между
-     * окнами сама, а пиксели пришлось бы каждый раз доводить руками.
+     * и разговор в 400px на этих окнах — то треть экрана, то узкая щель. Доля переносится
+     * между окнами сама, а пиксели пришлось бы каждый раз доводить руками.
      */
-    sideShare: number;
+    share: number;
+    /**
+     * К какой доле разговор возвращается, когда его зовут обратно. Больше нуля всегда: убранный
+     * разговор обязан помнить, каким он был, — иначе кнопка возврата открывала бы его каждый раз
+     * умолчанием, стирая выбранный размер.
+     */
+    back: number;
+}
+
+/** Что человек выбрал: свой размер разговора на каждую из двух раскладок. */
+export interface LayoutWish {
+    under: ChatWish;
+    side: ChatWish;
+}
+
+/** Окно, по которому всё считается. Обе мерки сразу: раскладку выбирает их отношение. */
+export interface WindowShape {
+    width: number;
+    height: number;
 }
 
 /** Раскладка вместе с пределами, в которых её можно менять прямо сейчас. */
-export interface Layout extends LayoutWish {
-    /** Возможна ли боковая раскладка в этом окне вообще: кнопку переезда показывать по нему. */
-    sideFits: boolean;
-    /**
-     * Встанет ли разговор сбоку, когда кадр развернут. Не то же, что `side`: тот про раскладку,
-     * которая на экране сейчас, а этот — про ту, что получится. Знать это надо до разворота,
-     * а не после: разворот в боковую раскладку идёт двумя движениями сразу, и второе из них
-     * (переезд разговора в панель) надо начать тем же нажатием, что и первое.
-     */
-    sideOnExpand: boolean;
-    /** Ширина панели в этом окне, px: доля, приведённая к пределам. */
-    sideWidth: number;
-    /** Куда упирается потяг за коридор, px. */
-    minWidth: number;
-    maxWidth: number;
+export interface Layout {
+    mode: LayoutMode;
+    /** Есть ли разговор на экране. */
+    shown: boolean;
+    /** Сколько разговор занимает сейчас, px: высоту под кадром, ширину сбоку. */
+    size: number;
+    /** Весь ход разговора, px: от «нет вовсе» до «во весь рост». Из него считаются доли. */
+    full: number;
+    /** Каким мелким разговор соглашается быть, оставаясь на экране, px. */
+    min: number;
+    /** Куда упирается потяг, px. */
+    max: number;
 }
 
 /** Ключ в sessionStorage. Именно session: раскладка — про эту вкладку, а не про человека. */
 const STORAGE_KEY = 'navy:layout';
 
-/** Самая широкая панель, при которой кадру рядом остаётся его минимум, px. */
-export const maxSideWidth = (windowWidth: number): number => windowWidth - SCENE_MIN_WIDTH;
-
-/**
- * Помещается ли боковая раскладка в окно такой ширины. Порог тут не отдельное число, а тот же
- * ответ, что и у остальных проверок: самая узкая панель рядом с самым узким кадром.
- */
-export const sideFits = (windowWidth: number): boolean => windowWidth >= SIDE_MIN_WINDOW;
-
-/**
- * С чем приложение открывается, когда вкладке нечего вспомнить.
- *
- * Окно, в которое помещается боковая раскладка, — это десктоп, и там разговор сразу стоит
- * сбоку от развёрнутого кадра: рейд — то, ради чего сюда пришли, и показывать его в четверти
- * экрана, пока остальное занято пустым столом, незачем. На узком окне ни того, ни другого нет,
- * и умолчание остаётся прежним — кадр сжат, разговор под ним.
- */
-export const defaultWish = (windowWidth: number): LayoutWish => ({
-    expanded: sideFits(windowWidth),
-    side: true,
-    sideShare: SIDE_SHARE,
-});
-
 const clamp = (value: number, min: number, max: number): number => Math.min(Math.max(value, min), max);
 
 /**
- * Что из выбранного помещается в окно такой ширины. Единственное место, где раскладка
- * встречается с геометрией, — и проверок в нём три:
+ * Какая раскладка у окна такой формы. Единственное правило на весь выбор: окно шире своей
+ * высоты — разговор становится сбоку.
  *
- *   1. сбоку блок стоит только в развёрнутой раскладке: сбоку он во всю высоту окна,
- *      и сжатому кадру рядом с ним не остаётся ничего;
- *   2. сбоку он стоит только там, где помещается вместе с кадром;
- *   3. доля, переведённая в пиксели, зажимается между минимумом панели и тем, что оставляет
- *      кадру его минимум.
+ * Ни ширины в пикселях, ни телефона с десктопом здесь нет нарочно. Место разговору ищут там,
+ * где его больше: в лежачем окне остаётся ширина, в стоячем — высота. Порог по ширине отвечал
+ * бы на другой вопрос — «большой ли экран», — и на планшете в портрете уводил бы разговор
+ * в узкую колонку сбоку при полном экране свободной высоты.
+ */
+export const chatMode = (view: WindowShape): LayoutMode => (view.width > view.height ? 'side' : 'under');
+
+/**
+ * Весь ход разговора в этой раскладке, px.
+ *
+ * Сбоку это вся ширина окна. Под кадром — высота окна без полоски, на которую смотрит шапка:
+ * «во весь рост» у разговора значит «до низа шапки», а не «до верха окна», — кнопками из шапки
+ * он и убирается. От этого же числа считаются и доли: треть — это треть того, что под шапкой.
+ */
+export const chatRoom = (mode: LayoutMode, view: WindowShape): number =>
+    mode === 'side' ? view.width : Math.max(view.height - SHEET_TOP_GAP, 0);
+
+/**
+ * Пределы размера в этой раскладке, px.
+ *
+ * Под кадром их нет: разговор бывает и в щёлку, и во весь рост, а кадр под ним не сжимается
+ * ниже своего наименьшего роста — он просто уходит под разговор (см. .appUnder в стилях).
+ *
+ * Сбоку пределы настоящие. Снизу — мерка самого разговора: уже 300px в нём перестаёт помещаться
+ * лента. Сверху — мерка кадра: рейд про ширину, и отдавать ему меньше 600px незачем. В тесном
+ * окне потолок оказывается ниже пола, и пол сильнее: разговор уже своего минимума не бывает.
+ */
+export const chatLimits = (mode: LayoutMode, view: WindowShape): { min: number; max: number } =>
+    mode === 'side'
+        ? { min: SIDE_MIN_WIDTH, max: Math.max(SIDE_MIN_WIDTH, view.width - SCENE_MIN_WIDTH) }
+        : { min: 0, max: chatRoom('under', view) };
+
+/**
+ * С чем приложение открывается, когда вкладке нечего вспомнить: треть на обе раскладки.
+ *
+ * Треть — и не мелочь, в которой ничего не разобрать, и не то, что накрывает собой рейд.
+ * От окна она не зависит вовсе: доля на то и доля.
+ */
+export const defaultWish = (): LayoutWish => ({
+    under: { share: CHAT_SHARE, back: CHAT_SHARE },
+    side: { share: CHAT_SHARE, back: CHAT_SHARE },
+});
+
+/**
+ * Что из выбранного помещается в окно такой формы. Единственное место, где раскладка
+ * встречается с геометрией, — и делается в нём три вещи: выбирается раскладка по форме окна,
+ * доля переводится в пиксели по ходу этой раскладки, и результат зажимается её пределами.
+ *
+ * Убранный разговор (доля в нуле) остаётся убранным при любом окне: ноль не зажимается
+ * до минимума, иначе окно само возвращало бы на экран то, что с него убрали.
  *
  * Функция чистая: ни окна, ни хранилища она не знает — их знает хук ниже. Так её и проверяют.
  */
-export const allowedLayout = (wish: LayoutWish, windowWidth: number): Layout => {
-    const min = SIDE_MIN_WIDTH;
-    // Тесное окно даёт потолок ниже пола. Порядок тут важен: пол сильнее — панель уже своего
-    // минимума не бывает, а в таком окне её и не показывают (см. sideFits).
-    const max = Math.max(min, maxSideWidth(windowWidth));
+export const allowedLayout = (wish: LayoutWish, view: WindowShape): Layout => {
+    const mode = chatMode(view);
+    const full = chatRoom(mode, view);
+    const { min, max } = chatLimits(mode, view);
+    const { share } = wish[mode];
+    // Округляем до пикселя: дробный размер разговора даёт дробный кадр, а кадр рисует корабли
+    // и подписи — половина пикселя там видна размытой кромкой.
+    const size = share > 0 ? clamp(Math.round(share * full), min, max) : 0;
+    return { mode, shown: size > 0, size, full, min, max };
+};
+
+/** Годная ли это доля: число от нуля до единицы. Чужая запись и запись прошлой версии — нет. */
+const isShare = (value: unknown): value is number => typeof value === 'number' && value >= 0 && value <= 1;
+
+/** Разобрать записанный размер одной раскладки. Испорченное поле заменяется умолчанием. */
+const readSize = (saved: unknown, fallback: ChatWish): ChatWish => {
+    if (!saved || typeof saved !== 'object') {
+        return fallback;
+    }
+    const { share, back } = saved as Partial<ChatWish>;
     return {
-        expanded: wish.expanded,
-        side: wish.side && wish.expanded && sideFits(windowWidth),
-        sideShare: wish.sideShare,
-        // Округляем до пикселя: дробная ширина панели даёт дробную ширину кадра, а кадр
-        // на ней рисует корабли и подписи — половина пикселя там видна размытой кромкой.
-        sideWidth: clamp(Math.round(wish.sideShare * windowWidth), min, max),
-        sideFits: sideFits(windowWidth),
-        // Тот же ответ, что и у `side`, но без первой из трёх проверок: развёрнутость тут
-        // не спрашивается, потому что спрашивают об этом как раз перед разворотом.
-        sideOnExpand: wish.side && sideFits(windowWidth),
-        minWidth: min,
-        maxWidth: max,
+        share: isShare(share) ? share : fallback.share,
+        // Возврат в ноль — это не возврат: разговор, которому некуда возвращаться, кнопкой
+        // не открылся бы вовсе.
+        back: isShare(back) && back > 0 ? back : fallback.back,
     };
 };
 
@@ -121,22 +166,15 @@ export const allowedLayout = (wish: LayoutWish, windowWidth: number): Layout => 
  * данные, ради которых стоит показывать человеку ошибку, а чужая вкладка могла записать сюда
  * что угодно и в прошлой версии приложения.
  */
-const readWish = (windowWidth: number): LayoutWish => {
-    const fallback = defaultWish(windowWidth);
+const readWish = (): LayoutWish => {
+    const fallback = defaultWish();
     try {
         const saved: unknown = JSON.parse(sessionStore.read(STORAGE_KEY) ?? 'null');
         if (!saved || typeof saved !== 'object') {
             return fallback;
         }
-        const { expanded, side, sideShare } = saved as Partial<LayoutWish>;
-        return {
-            expanded: typeof expanded === 'boolean' ? expanded : fallback.expanded,
-            side: typeof side === 'boolean' ? side : fallback.side,
-            // Доля вне единицы — не наша запись: либо чужая, либо прошлой версии, где здесь
-            // лежали пиксели. Своё умолчание вернее чужого числа.
-            sideShare:
-                typeof sideShare === 'number' && sideShare > 0 && sideShare <= 1 ? sideShare : fallback.sideShare,
-        };
+        const { under, side } = saved as Partial<LayoutWish>;
+        return { under: readSize(under, fallback.under), side: readSize(side, fallback.side) };
     } catch {
         return fallback;
     }
@@ -146,71 +184,83 @@ const readWish = (windowWidth: number): LayoutWish => {
  *  за это отвечает сама дверь в хранилище (см. utils/storage). */
 const writeWish = (wish: LayoutWish): void => sessionStore.write(STORAGE_KEY, JSON.stringify(wish));
 
-/** Ширина окна. Меняется она и без ведома человека, и раскладка обязана это заметить. */
-const useWindowWidth = (): number => {
-    const [width, setWidth] = useState(() => window.innerWidth);
+/** Форма окна. Меняется она и без ведома человека — повернули телефон, вытащили ноутбук
+ *  из док-станции, — и раскладка обязана это заметить. */
+const useWindowShape = (): WindowShape => {
+    const [shape, setShape] = useState<WindowShape>(() => ({ width: window.innerWidth, height: window.innerHeight }));
     useEffect(() => {
-        const onResize = () => setWidth(window.innerWidth);
+        const onResize = () =>
+            setShape((was) =>
+                was.width === window.innerWidth && was.height === window.innerHeight
+                    ? was
+                    : { width: window.innerWidth, height: window.innerHeight }
+            );
         window.addEventListener('resize', onResize);
         // Между первой отрисовкой и подпиской окно могло измениться — например, пока
         // догружались шрифты и появилась полоса прокрутки.
         onResize();
         return () => window.removeEventListener('resize', onResize);
     }, []);
-    return width;
+    return shape;
 };
 
 export interface LayoutControls {
     /** Раскладка, в которой приложение стоит прямо сейчас. */
     layout: Layout;
-    /** Выбор человека: применяется и запоминается. */
-    choose: (patch: Partial<LayoutWish> | ((was: LayoutWish) => Partial<LayoutWish>)) => void;
     /**
-     * Новая ширина панели: сразу зажатая по нынешнему окну. Записывать её на каждый шаг потяга
-     * незачем — по умолчанию не записывается, и запоминает натянутое `keep` в конце.
+     * Новый размер разговора в пикселях: сразу зажатый по нынешнему окну. Записывать его
+     * на каждый шаг потяга незачем — по умолчанию не записывается, и запоминает натянутое
+     * `keep` в конце.
      */
-    resizeSide: (width: number, remember?: boolean) => void;
+    resize: (size: number, remember?: boolean) => void;
     /** Запомнить то, что натянули. */
     keep: () => void;
+    /** Убрать разговор с экрана — из обеих раскладок разом и не забывая размера каждой. */
+    hide: () => void;
+    /** Вернуть разговор туда, где его оставили: в каждой раскладке — в свой размер. */
+    show: () => void;
 }
 
 export function useLayout(): LayoutControls {
-    const windowWidth = useWindowWidth();
-    // Умолчание зависит от окна, поэтому и читается оно один раз — с тем окном, в котором
-    // вкладку открыли. Дальше окно меняется, но выбор от этого не переписывается: за то,
-    // что из выбора помещается, отвечает allowedLayout.
-    const [wish, setWish] = useState(() => readWish(window.innerWidth));
+    const view = useWindowShape();
+    const [wish, setWish] = useState(readWish);
+    const mode = chatMode(view);
 
+    // Меняется всегда размер нынешней раскладки, второй не касается никто: у высоты и ширины
+    // своя память, и правка одной из них не должна значить правку обеих.
     const apply = useCallback(
-        (patch: Partial<LayoutWish> | ((was: LayoutWish) => Partial<LayoutWish>), remember: boolean) =>
+        (patch: (was: ChatWish) => ChatWish, remember: boolean) =>
             setWish((was) => {
-                const next = { ...was, ...(typeof patch === 'function' ? patch(was) : patch) };
+                const next = { ...was, [mode]: patch(was[mode]) };
                 if (remember) {
                     writeWish(next);
                 }
                 return next;
             }),
-        []
+        [mode]
     );
 
-    const choose = useCallback<LayoutControls['choose']>((patch) => apply(patch, true), [apply]);
-
-    // Тянут панель в пикселях — за кромку, — а запоминается она долей: указатель говорит
-    // «вот сюда», и это «сюда» переводится в долю нынешнего окна.
+    // Тянут разговор в пикселях — за кромку, — а запоминается он долей: указатель говорит
+    // «вот сюда», и это «сюда» переводится в долю нынешнего хода.
     //
-    // Зажимается ширина прямо здесь, а не только при отрисовке: потяг за кромку иначе копил бы
-    // ход за пределом — увёл указатель на две сотни дальше упора, и обратно панель тронулась бы
+    // Зажимается размер прямо здесь, а не только при отрисовке: потяг за кромку иначе копил бы
+    // ход за пределом — увёл указатель на две сотни дальше упора, и обратно разговор тронулся бы
     // только через те же две сотни.
-    const resizeSide = useCallback<LayoutControls['resizeSide']>(
-        (width, remember = false) => {
-            const allowed = clamp(width, SIDE_MIN_WIDTH, Math.max(SIDE_MIN_WIDTH, maxSideWidth(windowWidth)));
-            apply({ sideShare: allowed / windowWidth }, remember);
+    //
+    // Утянутый в ноль разговор уходит с экрана, но памяти о себе не стирает: `back` остаётся
+    // тем, чем был, и кнопка вернёт разговор ровно в тот размер, в каком его убрали.
+    const resize = useCallback<LayoutControls['resize']>(
+        (size, remember = false) => {
+            const full = chatRoom(mode, view);
+            const { min, max } = chatLimits(mode, view);
+            const share = size <= 0 || full <= 0 ? 0 : clamp(size, min, max) / full;
+            apply((was) => ({ share, back: share > 0 ? share : was.back }), remember);
         },
-        [apply, windowWidth]
+        [apply, mode, view]
     );
 
-    // Записывается сам выбор, а не то, во что его урезало окно: раздастся окно — панель
-    // вернётся к выбранной ширине.
+    // Записывается сам выбор, а не то, во что его урезало окно: раздастся окно — разговор
+    // вернётся к выбранному размеру.
     const keep = useCallback(
         () =>
             setWish((was) => {
@@ -220,5 +270,22 @@ export function useLayout(): LayoutControls {
         []
     );
 
-    return { layout: allowedLayout(wish, windowWidth), choose, resizeSide, keep };
+    // Убран разговор или нет — общее на обе раскладки, в отличие от размера. Человек убирает
+    // не «разговор сбоку», а разговор вообще: если бы поворот телефона возвращал его на экран,
+    // кнопка отменялась бы сама собой. А `back` при этом у каждой раскладки свой и не трогается
+    // — вернётся разговор в тот размер, какой был выбран именно здесь.
+    const both = useCallback(
+        (patch: (was: ChatWish) => ChatWish) =>
+            setWish((was) => {
+                const next = { under: patch(was.under), side: patch(was.side) };
+                writeWish(next);
+                return next;
+            }),
+        []
+    );
+
+    const hide = useCallback(() => both((was) => ({ ...was, share: 0 })), [both]);
+    const show = useCallback(() => both((was) => ({ ...was, share: was.back })), [both]);
+
+    return { layout: allowedLayout(wish, view), resize, keep, hide, show };
 }

@@ -1,103 +1,143 @@
 import { describe, expect, it } from 'vitest';
 
-import { SCENE_MIN_WIDTH, SIDE_MIN_WIDTH, SIDE_MIN_WINDOW, SIDE_SHARE } from '@/config/layout';
-import { LayoutWish, allowedLayout, defaultWish } from '@/hooks/useLayout';
+import { CHAT_SHARE, SCENE_MIN_WIDTH, SHEET_TOP_GAP, SIDE_MIN_WIDTH } from '@/config/layout';
+import { LayoutWish, allowedLayout, chatLimits, chatMode, chatRoom, defaultWish } from '@/hooks/useLayout';
 
 /**
- * Сверка выбранной раскладки с окном. Здесь только сама проверка — без окна, без хранилища
- * и без React: она чистая функция ровно для того, чтобы её можно было прогнать по краям,
- * а не ловить в браузере, меняя размер окна руками.
+ * Сверка выбранного размера разговора с нынешним окном. Здесь только сама сверка — без окна,
+ * без хранилища и без React: всё это чистые функции ровно для того, чтобы их можно было прогнать
+ * по краям, а не ловить в браузере, меняя размер окна руками.
  */
 
-const wish = (patch: Partial<LayoutWish> = {}): LayoutWish => ({
-    expanded: true,
-    side: true,
-    sideShare: SIDE_SHARE,
-    ...patch,
+/** Окно такой-то формы. Лежачее по умолчанию: раскладку выбирает отношение сторон. */
+const view = (width: number, height: number) => ({ width, height });
+
+/** Выбор человека. По умолчанию — умолчание приложения, с точечной правкой одной из раскладок. */
+const wish = (patch: Partial<LayoutWish> = {}): LayoutWish => ({ ...defaultWish(), ...patch });
+
+describe('chatMode', () => {
+    it('в лежачем окне ставит разговор сбоку, в стоячем — под кадром', () => {
+        expect(chatMode(view(1200, 900))).toBe('side');
+        expect(chatMode(view(390, 844))).toBe('under');
+    });
+
+    it('квадратное окно считает стоячим', () => {
+        // Сбоку разговор уходит только тогда, когда ширины действительно больше. На ничьей
+        // остаётся раскладка под кадром: она работает в любом окне, а боковая — не в любом.
+        expect(chatMode(view(800, 800))).toBe('under');
+    });
+
+    it('не спрашивает про размер окна вовсе', () => {
+        // Планшет в портрете — окно немаленькое, но высокое: разговору место под кадром.
+        // Порог по ширине увёл бы его в узкую колонку сбоку при полном экране свободной высоты.
+        expect(chatMode(view(1024, 1366))).toBe('under');
+    });
 });
 
-describe('allowedLayout', () => {
-    it('в просторном окне отдаёт выбранное как есть', () => {
-        const layout = allowedLayout(wish(), 1400);
-        expect(layout.side).toBe(true);
-        expect(layout.sideWidth).toBe(Math.round(1400 * SIDE_SHARE));
-        expect(layout.sideFits).toBe(true);
+describe('chatRoom', () => {
+    it('сбоку ход разговора — вся ширина окна', () => {
+        expect(chatRoom('side', view(1200, 900))).toBe(1200);
     });
 
-    it('сбоку разговор стоит только в развёрнутой раскладке', () => {
-        // Сбоку панель во всю высоту окна, и сжатому кадру рядом с ней не остаётся ничего.
-        expect(allowedLayout(wish({ expanded: false }), 1400).side).toBe(false);
+    it('под кадром — высота без полоски под шапку', () => {
+        // «Во весь рост» у разговора значит «до низа шапки»: кнопками из шапки его и убирают.
+        expect(chatRoom('under', view(390, 844))).toBe(844 - SHEET_TOP_GAP);
     });
 
-    it('в тесном окне боковой раскладки нет, и выбор от этого не стирается', () => {
-        const chosen = wish();
-        expect(allowedLayout(chosen, SIDE_MIN_WINDOW - 1).side).toBe(false);
-        expect(allowedLayout(chosen, SIDE_MIN_WINDOW - 1).sideFits).toBe(false);
-        // Тот же выбор в просторном окне снова сбоку: урезает его окно, а не переписывает.
-        expect(allowedLayout(chosen, 1400).side).toBe(true);
+    it('в окне ниже шапки ход не уходит в минус', () => {
+        expect(chatRoom('under', view(390, 40))).toBe(0);
+    });
+});
+
+describe('chatLimits', () => {
+    it('под кадром пределов нет: разговор бывает и в щёлку, и во весь рост', () => {
+        expect(chatLimits('under', view(390, 844))).toEqual({ min: 0, max: 844 - SHEET_TOP_GAP });
     });
 
-    it('порог стоит там, где самая узкая панель встаёт рядом с самым узким кадром', () => {
-        expect(allowedLayout(wish(), SIDE_MIN_WINDOW).side).toBe(true);
-        expect(allowedLayout(wish(), SIDE_MIN_WINDOW).sideWidth).toBe(SIDE_MIN_WIDTH);
-    });
-
-    it('доля переводится в пиксели по нынешнему окну', () => {
-        // Одна и та же треть на разных окнах даёт разную панель — в этом весь смысл доли.
-        expect(allowedLayout(wish({ sideShare: 1 / 3 }), 1200).sideWidth).toBe(400);
-        expect(allowedLayout(wish({ sideShare: 1 / 3 }), 1800).sideWidth).toBe(600);
-    });
-
-    it('ширина не уходит ниже своего минимума', () => {
-        expect(allowedLayout(wish({ sideShare: 0.05 }), 1400).sideWidth).toBe(SIDE_MIN_WIDTH);
-    });
-
-    it('ширина не отнимает у кадра его минимум', () => {
-        const layout = allowedLayout(wish({ sideShare: 0.9 }), 1400);
-        expect(layout.sideWidth).toBe(1400 - SCENE_MIN_WIDTH);
-        expect(layout.maxWidth).toBe(1400 - SCENE_MIN_WIDTH);
+    it('сбоку снизу держит сам разговор, сверху — кадр', () => {
+        expect(chatLimits('side', view(1400, 900))).toEqual({
+            min: SIDE_MIN_WIDTH,
+            max: 1400 - SCENE_MIN_WIDTH,
+        });
     });
 
     it('в тесном окне потолок не проваливается под пол', () => {
-        // Кадру тут не хватает и своего минимума, и потолок вышел бы отрицательным. Панель
-        // в таком окне не показывают вовсе, но пределы обязаны остаться пригодными к счёту:
-        // на них считается и потяг, и подписи у коридора.
-        const layout = allowedLayout(wish(), 400);
-        expect(layout.maxWidth).toBe(SIDE_MIN_WIDTH);
-        expect(layout.sideWidth).toBe(SIDE_MIN_WIDTH);
-        expect(layout.side).toBe(false);
+        // Кадру тут не хватает и своего минимума, и потолок вышел бы уже разговора. Пределы
+        // обязаны остаться пригодными к счёту: на них считается и потяг, и подписи у коридора.
+        expect(chatLimits('side', view(700, 500))).toEqual({ min: SIDE_MIN_WIDTH, max: SIDE_MIN_WIDTH });
+    });
+});
+
+describe('allowedLayout', () => {
+    it('доля переводится в пиксели по нынешнему ходу', () => {
+        // Одна и та же треть на разных окнах даёт разный разговор — в этом весь смысл доли.
+        expect(allowedLayout(wish({ side: { share: 1 / 3, back: 1 / 3 } }), view(1200, 900)).size).toBe(400);
+        expect(allowedLayout(wish({ side: { share: 1 / 3, back: 1 / 3 } }), view(1800, 900)).size).toBe(600);
     });
 
-    it('говорит заранее, встанет ли разговор сбоку после разворота', () => {
-        // Ответ нужен до разворота, а не после: разворот в боковую раскладку ведёт два движения
-        // сразу, и второе — переезд разговора в панель — начинается тем же нажатием. Про
-        // нынешнюю раскладку он молчит: в свёрнутой сбоку никого нет, а ответ всё равно «да».
-        const folded = wish({ expanded: false });
-        expect(allowedLayout(folded, 1400).side).toBe(false);
-        expect(allowedLayout(folded, 1400).sideOnExpand).toBe(true);
-        // Остальные две проверки на месте: разговор выбран внизу — разворот его туда и оставит,
-        // а в тесном окне боковой раскладки нет вовсе.
-        expect(allowedLayout(wish({ expanded: false, side: false }), 1400).sideOnExpand).toBe(false);
-        expect(allowedLayout(folded, SIDE_MIN_WINDOW - 1).sideOnExpand).toBe(false);
+    it('под кадром доля считается от места под шапкой, а не от всего окна', () => {
+        const layout = allowedLayout(wish({ under: { share: 1 / 2, back: 1 / 2 } }), view(390, 864));
+        expect(layout.mode).toBe('under');
+        expect(layout.size).toBe((864 - SHEET_TOP_GAP) / 2);
     });
 
-    it('раскладку «больше сцены» окно не отменяет', () => {
-        // Разворот кадра — про высоту, а не про ширину: на телефоне он такой же законный.
-        expect(allowedLayout(wish({ expanded: true, side: false }), 320).expanded).toBe(true);
+    it('сбоку не даёт разговору стать уже своего минимума', () => {
+        expect(allowedLayout(wish({ side: { share: 0.05, back: 0.05 } }), view(1400, 900)).size).toBe(SIDE_MIN_WIDTH);
+    });
+
+    it('сбоку не даёт разговору отнять у кадра его минимум', () => {
+        const layout = allowedLayout(wish({ side: { share: 0.9, back: 0.9 } }), view(1400, 900));
+        expect(layout.size).toBe(1400 - SCENE_MIN_WIDTH);
+        expect(layout.max).toBe(1400 - SCENE_MIN_WIDTH);
+    });
+
+    it('убранный разговор остаётся убранным в любом окне', () => {
+        // Ноль не зажимается до минимума: иначе просторное окно само возвращало бы на экран то,
+        // что с него убрали.
+        const hidden = wish({ side: { share: 0, back: CHAT_SHARE }, under: { share: 0, back: CHAT_SHARE } });
+        expect(allowedLayout(hidden, view(1400, 900)).shown).toBe(false);
+        expect(allowedLayout(hidden, view(1400, 900)).size).toBe(0);
+        expect(allowedLayout(hidden, view(390, 844)).shown).toBe(false);
+    });
+
+    it('убранный разговор не возвращается сменой раскладки', () => {
+        // Убирают не «разговор сбоку», а разговор вообще: доля в нуле стоит сразу в обеих
+        // раскладках — так её и пишет `hide`. Иначе поворот телефона отменял бы нажатие кнопки.
+        const hidden = wish({ under: { share: 0, back: 0.5 }, side: { share: 0, back: 0.25 } });
+        expect(allowedLayout(hidden, view(1200, 900)).shown).toBe(false);
+        expect(allowedLayout(hidden, view(900, 1200)).shown).toBe(false);
+    });
+
+    it('размер каждой раскладки живёт своей жизнью', () => {
+        // Треть высоты, выбранная на телефоне, не должна становиться третью ширины после
+        // поворота: число то же, место совсем другое.
+        const chosen = wish({ under: { share: 0.75, back: 0.75 }, side: { share: 0.25, back: 0.25 } });
+        expect(allowedLayout(chosen, view(900, 1200)).size).toBe(Math.round((1200 - SHEET_TOP_GAP) * 0.75));
+        expect(allowedLayout(chosen, view(1200, 900)).size).toBe(300);
+    });
+
+    it('тесное окно урезает выбор, но не переписывает его', () => {
+        const chosen = wish({ side: { share: 0.6, back: 0.6 } });
+        expect(allowedLayout(chosen, view(1000, 900)).size).toBe(1000 - SCENE_MIN_WIDTH);
+        // То же самое в просторном окне — снова три пятых: урезает окно, а не выбор.
+        expect(allowedLayout(chosen, view(2000, 900)).size).toBe(1200);
+    });
+
+    it('размер всегда целый', () => {
+        // Дробный размер разговора даёт дробный кадр, а кадр рисует корабли и подписи —
+        // половина пикселя там видна размытой кромкой.
+        expect(Number.isInteger(allowedLayout(wish(), view(1357, 900)).size)).toBe(true);
     });
 });
 
 describe('defaultWish', () => {
-    it('в окне под боковую раскладку открывает кадр во всё окно и разговор сбоку', () => {
-        const layout = allowedLayout(defaultWish(1400), 1400);
-        expect(layout.expanded).toBe(true);
-        expect(layout.side).toBe(true);
-        expect(layout.sideWidth).toBe(Math.round(1400 * SIDE_SHARE));
+    it('открывает разговор третью в обеих раскладках', () => {
+        expect(allowedLayout(defaultWish(), view(1200, 900)).size).toBe(Math.round(1200 * CHAT_SHARE));
+        expect(allowedLayout(defaultWish(), view(390, 844)).size).toBe(Math.round((844 - SHEET_TOP_GAP) * CHAT_SHARE));
     });
 
-    it('в узком окне открывает как раньше: кадр сжат, разговор под ним', () => {
-        const layout = allowedLayout(defaultWish(700), 700);
-        expect(layout.expanded).toBe(false);
-        expect(layout.side).toBe(false);
+    it('открывается с разговором на экране', () => {
+        expect(allowedLayout(defaultWish(), view(1200, 900)).shown).toBe(true);
+        expect(allowedLayout(defaultWish(), view(390, 844)).shown).toBe(true);
     });
 });

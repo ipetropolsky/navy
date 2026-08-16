@@ -6,16 +6,16 @@ import { defineConfig } from 'vite';
 // который в нём же и объявлен.
 // eslint-disable-next-line no-restricted-imports
 import {
+    CHAT_OVERLAP,
     COLUMN_WIDTH,
-    COMPACT_HEIGHT,
-    CONTENT_DESKTOP_HEIGHT,
     FADE_HEIGHT,
     MOBILE_MAX_WIDTH,
+    SCENE_MIN_HEIGHT,
+    SCENE_MIN_SHARE,
     SHEET_INSET,
     SHEET_TOP_GAP,
     SHEET_WIDTH,
     SIDE_GRIP,
-    SIDE_SHARE,
 } from './src/config/layout';
 
 export default defineConfig({
@@ -28,16 +28,15 @@ export default defineConfig({
                 additionalData:
                     `@mobile-width: ${MOBILE_MAX_WIDTH}px;\n` +
                     `@column-width: ${COLUMN_WIDTH}px;\n` +
-                    `@compact-height: ${COMPACT_HEIGHT}px;\n` +
-                    `@content-desktop-height: ${CONTENT_DESKTOP_HEIGHT}px;\n` +
+                    `@scene-min-height: ${SCENE_MIN_HEIGHT}px;\n` +
+                    // Долей, а не готовой высотой: в стилях от неё берут долю окна (dvh),
+                    // и второе число — те же проценты — разошлось бы с этим при первой правке.
+                    `@scene-min-share: ${SCENE_MIN_SHARE.toFixed(4)};\n` +
+                    `@chat-overlap: ${CHAT_OVERLAP}px;\n` +
                     `@sheet-width: ${SHEET_WIDTH}px;\n` +
                     `@sheet-inset: ${SHEET_INSET}px;\n` +
                     `@sheet-top-gap: ${SHEET_TOP_GAP}px;\n` +
                     `@fade-height: ${FADE_HEIGHT}px;\n` +
-                    // Умолчание для --side-width: ту же долю, но от окна, а не от родителя —
-                    // проценты в разных местах считались бы от разного. Живёт оно ровно
-                    // до первой отрисовки, дальше ширину задаёт приложение.
-                    `@side-width: ${(SIDE_SHARE * 100).toFixed(4)}vw;\n` +
                     `@side-grip: ${SIDE_GRIP}px;\n`,
             },
         },
