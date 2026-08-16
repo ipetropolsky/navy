@@ -30,19 +30,11 @@
     display: flex;
     align-items: center;
     min-height: var(--shade-close-size);
-    margin: 0;
+    // Отступ снизу — за ушедшую приписку «куда идёте»: подпись поля говорит то же самое,
+    // а воздух между заголовком и полем нужен и без неё.
+    margin: 0 0 12px;
     padding-right: var(--shade-close-size);
     font-family: 'Roboto Slab', serif;
     font-size: var(--font-size-title);
     font-weight: 500;
-}
-
-// Приписка под заголовком: зачем спрашивают курс. Подтянута к нему тем же приёмом, что
-// и бортовой номер в карточке корабля, — возвращаем потоку нижнюю половину запаса высоты
-// заголовка (см. .hullNumber в ShipCard.module.less).
-.hint {
-    margin: ~'calc((var(--font-size-title) * var(--line-height) - var(--shade-close-size)) / 2)' 0 0;
-    padding: 4px 0 12px;
-    color: var(--color-text-muted);
-    font-size: var(--font-size-base);
 }

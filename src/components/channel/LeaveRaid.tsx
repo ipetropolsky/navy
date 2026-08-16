@@ -57,8 +57,9 @@ export default function LeaveRaid({ onConfirm, onCancel }: LeaveRaidProps) {
     return (
         <form className={styles.card} onSubmit={handleSubmit}>
             <h2 className={styles.title}>Вы уходите с рейда</h2>
-            <p className={styles.hint}>Скажите остальным, куда идёте: этим и будет подписан ваш уход в разговоре.</p>
 
+            {/* Подписи к полю хватает: «Задайте новый курс» говорит ровно то же, что говорила
+                бы объясняющая строчка над ним, и повторять её значило бы не доверять человеку. */}
             <Field label="Задайте новый курс">
                 <Input
                     value={course}

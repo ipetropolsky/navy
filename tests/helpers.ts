@@ -110,9 +110,6 @@ export const join = async (page: Page, name: string, hullNumber: string, shipKin
  */
 export const shipsButton = (page: Page) => page.locator('button[title="Корабли на связи"]');
 
-/** Она же, когда список уже открыт: значок в названии сменился на облачко разговора. */
-export const backToChatButton = (page: Page) => page.locator('button[title="Вернуться к разговору"]');
-
 export const openSheet = async (page: Page): Promise<void> => {
     await shipsButton(page).click();
     await page.waitForTimeout(300);

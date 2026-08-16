@@ -22,7 +22,6 @@ import {
     ALBATROS,
     DEMO,
     VYMPEL,
-    backToChatButton,
     bubbles,
     clickShip,
     join,
@@ -1346,7 +1345,7 @@ test('под шторкой всегда затемнение, а шапка н�
     expect(layers.shade, 'шторка накрыла шапку, которой её закрывают').toBeLessThan(layers.header);
 
     // Кнопка списка в шапке доступна и с открытой шторкой: ею список и закрывают обратно.
-    await backToChatButton(page).click();
+    await shipsButton(page).click();
     await expect(shadeRegion(page), 'кнопка шапки не закрыла шторку').toHaveCount(0);
 });
 
@@ -1588,9 +1587,10 @@ test('кнопки в шапке одного роста и над развёр�
  * всё вместе. Отдельной кнопки в шапке для этого больше нет — список это и есть «кто в этом
  * канале», и спрашивают о нём, тыча в его название.
  *
- * Заодно проверяется, чем название отвечает на наведение: цветом — ничем. Прежде оно
- * становилось акцентным и читалось ссылкой куда-то наружу, хотя открывает свою же шторку;
- * теперь отклик остался за значком и за нажатием (см. .chatTitleButton в стилях).
+ * Заодно проверяется отклик на наведение: подсвечивается вся кнопка разом — и название,
+ * и значок, — потому что нажимается она целиком. Подсветка именно подсветка, а не другой
+ * цвет: акцентным название читалось бы ссылкой куда-то наружу, хотя открывает свою же
+ * шторку (см. .chatTitleButton в стилях).
  */
 test('список кораблей открывается названием канала со значком на конце', async ({ page }) => {
     await openChannel(page, DEMO, ALBATROS);
@@ -1605,14 +1605,24 @@ test('список кораблей открывается названием к
             iconRight: icon.right,
             right: node.getBoundingClientRect().right,
             color: getComputedStyle(name).color,
+            iconOpacity: Number(getComputedStyle(node.querySelector('svg')!.parentElement!).opacity),
         };
     });
     expect(parts.iconLeft, 'значок стоит не в конце названия').toBeGreaterThanOrEqual(parts.nameRight);
     expect(parts.iconRight, 'значок вылез за пределы кнопки').toBeLessThanOrEqual(parts.right + 1);
+    expect(parts.iconOpacity, 'значок и без наведения в полный голос').toBeLessThan(1);
 
+    // Наведение оживляет обе половины кнопки: название белеет, значок доходит до полного голоса.
     await title.hover();
-    const hovered = await title.evaluate((node) => getComputedStyle(node.querySelector('span')!).color);
-    expect(hovered, 'название перекрасилось под указателем').toBe(parts.color);
+    // Подсветка приезжает переходом в 0.12s — читать её сразу значит поймать середину пути.
+    await page.waitForTimeout(300);
+    const hovered = await title.evaluate((node) => ({
+        color: getComputedStyle(node.querySelector('span')!).color,
+        iconOpacity: Number(getComputedStyle(node.querySelector('svg')!.parentElement!).opacity),
+    }));
+    expect(hovered.color, 'название не подсветилось под указателем').not.toBe(parts.color);
+    expect(hovered.color, 'название подсветилось не белым, а другим цветом').toBe('rgb(255, 255, 255)');
+    expect(hovered.iconOpacity, 'значок не подсветился под указателем').toBe(1);
 
     // Нажатие в самое начало кнопки — по названию, мимо значка: открывает список и оно.
     await title.click({ position: { x: 4, y: 10 } });
@@ -1665,10 +1675,8 @@ test('шторка и форма корабля приезжают поверх 
     await input.evaluate((node) => node.setAttribute('data-probe', 'тот же самый'));
 
     await openSheet(page);
-    // Значок в названии канала на время списка меняется на облачко разговора: тем же
-    // нажатием список и закрывают.
-    await expect(shipsButton(page), 'значок списка остался значком списка').toHaveCount(0);
-    await backToChatButton(page).click();
+    // Кнопка названия та же самая и с открытым списком — тем же нажатием список и убирают.
+    await shipsButton(page).click();
     await expect(input, 'разговор пересобрался под шторкой: поле стало другим узлом').toHaveAttribute(
         'data-probe',
         'тот же самый'
