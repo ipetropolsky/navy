@@ -4,6 +4,7 @@ import MemberName from '@/components/ships/MemberName';
 import Pennant from '@/components/ships/Pennant';
 import ShipPortrait, { shipSpecLine } from '@/components/ships/ShipPortrait';
 import Button from '@/components/ui/Button';
+import { useSnackbar } from '@/components/ui/Snackbar';
 import { HAIL_SIGNAL } from '@/hooks/morse';
 import { Member, MorseFeed, SHIP_KIND_LABELS } from '@/types/channel';
 
@@ -42,6 +43,7 @@ export default function ShipCard({ member, senior, onHail }: ShipCardProps) {
     // окликать можно было подряд: буква каждый раз одна и та же, и по ней двух окликов
     // не различить.
     const [reply, setReply] = useState<MorseFeed | null>(null);
+    const notify = useSnackbar();
 
     const handleHail = () => {
         setReply((prev) => ({ seq: (prev?.seq ?? 0) + 1, text: HAIL_SIGNAL }));
@@ -52,10 +54,19 @@ export default function ShipCard({ member, senior, onHail }: ShipCardProps) {
         <div className={styles.card}>
             <div className={styles.title}>
                 <MemberName name={member.name} color={member.color} large />
+                {/* Отвечает званием по нажатию — так же, как в списке кораблей: вымпел
+                    в карточке ничем не подписан, и спросить, что он значит, человек может
+                    только тычком. */}
                 {senior && (
-                    <span className={styles.pennant} title={SENIOR_TITLE} aria-label={SENIOR_TITLE}>
+                    <button
+                        type="button"
+                        className={styles.pennant}
+                        title={SENIOR_TITLE}
+                        aria-label={SENIOR_TITLE}
+                        onClick={() => notify(SENIOR_TITLE)}
+                    >
                         <Pennant />
-                    </span>
+                    </button>
                 )}
             </div>
             <div className={styles.hullNumber}>Бортовой номер {member.hullNumber}</div>

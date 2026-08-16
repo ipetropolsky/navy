@@ -12,7 +12,11 @@
     width: 98%;
     min-height: 0;
     overflow-y: auto;
-    padding: 0 20px ~'calc(16px + env(safe-area-inset-bottom))';
+    // Верхнее поле — под ручку шторки: область хвата у неё на 22px больше рисочки и заходит
+    // на содержимое (см. .handle в Shade.module.less). В списке кораблей под ней стоит
+    // неподвижный заголовок, и заметить это было нечем, а здесь на этой высоте вымпел
+    // старшего — нажатие доставалось ручке, и карточка вместо ответа званием бралась ехать.
+    padding: 22px 20px ~'calc(16px + env(safe-area-inset-bottom))';
     --scrollbar-bottom: 16px;
 }
 
@@ -26,8 +30,16 @@
     font-size: var(--font-size-title);
 }
 
+// Вымпел нажимается: тычок отвечает, что он значит. Кнопка без всякой кнопочности — вымпел
+// и есть всё, что от неё видно.
 .pennant {
     display: flex;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
 }
 
 .hullNumber {

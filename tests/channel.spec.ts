@@ -34,10 +34,12 @@ test('канал заводится с главной, и в него можно
     // Корабль в кадре, и канал знает, кто это.
     await expect(ships(page)).toHaveCount(1);
     await expect(page.locator('[class*="chatStatus"]')).toHaveText('1 на связи');
-    // В строчке один силуэт: позывной написан над ней, номер стоит на аватарке рядом
+    // В самой фразе один силуэт: позывной написан над ней, номер стоит на аватарке рядом
     // и на борту в кадре, — называть корабль трижды подряд незачем.
     await expect(systemLines(page)).toContainText(['Малый противолодочный корабль встал на рейд']);
-    await expect(systemLines(page).first()).not.toContainText('Буря');
+    await expect(systemLines(page).first().locator('[class*="text"]')).not.toContainText('Буря');
+    // А над фразой позывной стоит — и стоит всегда, даже над своей строчкой.
+    await expect(systemLines(page).first().locator('[class*="name_"]')).toHaveText('Буря');
 });
 
 test('реплика уходит и привязывается ответом', async ({ page }) => {
@@ -146,13 +148,14 @@ test('каждая перемена при переоснащении — сво
     await page.getByRole('button', { name: 'Настроить корабль' }).click();
     await join(page, 'Буран', '512', 'Рейдовый тральщик');
 
-    // Три перемены — три строчки, от крупного к мелкому. Корабль в них не назван: они стоят
-    // в его же цепочке, а полный титул в каждой сделал бы из них три почти одинаковых абзаца.
+    // Три перемены — три строчки, от крупного к мелкому. В каждой сказано только, что именно
+    // сменилось: новое значение и так стоит над строчкой позывным и на аватарке номером,
+    // а старое — выше в той же ленте.
     await expect(systemLines(page)).toHaveCount(before + 3);
     const added = systemLines(page);
-    await expect(added.nth(before)).toContainText('Теперь рейдовый тральщик');
-    await expect(added.nth(before + 1)).toContainText('Теперь «Буран»');
-    await expect(added.nth(before + 2)).toContainText('317 теперь 512');
+    await expect(added.nth(before)).toContainText('Сменил корабль');
+    await expect(added.nth(before + 1)).toContainText('Сменил позывной');
+    await expect(added.nth(before + 2)).toContainText('Сменил бортовой номер');
 
     // Бэкенд пишет их отдельными сообщениями, а не одной записью с перечислением: у каждой
     // свой номер и своё время, и потому на каждую можно ответить.
@@ -172,10 +175,16 @@ test('строчка о корабле стоит по его сторону л�
     await join(page, 'Альбатрос', '512');
 
     const note = systemLines(page).last();
-    // Оба номера: три цифры сами по себе ничего не значат, и «теперь 512» осталось бы
-    // новостью без предмета. Помечены тоже оба — в паре похожих чисел глазу нужна зацепка.
-    await expect(note).toContainText('317 теперь 512');
-    await expect(note.locator('strong')).toHaveText(['317', '512']);
+    // Сказано только, что сменилось: новый номер стоит на аватарке рядом, старый — выше
+    // в той же ленте, и пересказывать их строчкой незачем.
+    await expect(note).toContainText('Сменил бортовой номер');
+
+    // Позывной над строчкой стоит всегда — и над своей, и над второй подряд: фраза в ней
+    // безличная, и без имени непонятно, кто сменил. Рядом с позывным — ответный вымпел,
+    // и по нажатию он говорит, что значит.
+    await expect(note.locator('[class*="name_"]')).toHaveText('Альбатрос');
+    await note.getByRole('button', { name: 'Техническое сообщение' }).click();
+    await expect(page.getByRole('status')).toHaveText('Техническое сообщение');
 
     // Время у неё есть, как у всякого сообщения: строчка канала — такое же сообщение.
     await expect(note.locator('[class*="time"]')).toHaveText(/^\d{2}:\d{2}$/);
@@ -187,15 +196,19 @@ test('строчка о корабле стоит по его сторону л�
     const line = (await note.boundingBox())!;
     expect(Math.abs(line.x + line.width - (bubble.x + bubble.width))).toBeLessThanOrEqual(1);
 
-    // И набрана на ступеньку мельче реплики: служебное не спорит с разговором.
-    const fontSize = (locator: Locator): Promise<number> =>
-        locator.evaluate((node) => parseFloat(getComputedStyle(node).fontSize));
-    expect(await fontSize(note)).toBe((await fontSize(bubbles(page).last())) - 2);
+    // Набрана она на ступеньку мельче реплики — служебное не спорит с разговором, — но строка
+    // у неё ростом с обычную: иначе плашка ужалась бы вслед за кеглем и встала бы в ленте
+    // ступенькой ниже соседних.
+    const style = (locator: Locator, prop: 'fontSize' | 'lineHeight'): Promise<number> =>
+        locator.evaluate((node, name) => parseFloat(getComputedStyle(node)[name]), prop);
+    const reply = bubbles(page).last();
+    expect(await style(note, 'fontSize')).toBe((await style(reply, 'fontSize')) - 2);
+    expect(await style(note, 'lineHeight')).toBeCloseTo(await style(reply, 'lineHeight'), 1);
 
     // И на неё отвечают, как на реплику: нажали — и цитата встала над строкой ввода.
     await expect(async () => {
         await note.click();
-        await expect(page.locator('[class*="replyBar"]')).toContainText('317 теперь 512', { timeout: 2000 });
+        await expect(page.locator('[class*="replyBar"]')).toContainText('Сменил бортовой номер', { timeout: 2000 });
     }, 'лента так и не показала, что отвечает на строчку канала').toPass({ timeout: 20_000 });
     await send(page, 'Принял новый номер');
     await expect
@@ -298,6 +311,23 @@ test('вымпел старшего отвечает званием, а подп
     // Вымпел отвечает званием и здесь, и там: снекбар не спрашивает, видна ли подпись.
     await flag.click();
     await expect(page.locator('[class*="snackbar"]'), 'вымпел не ответил званием').toHaveText(SENIOR);
+});
+
+/**
+ * Тот же вымпел в карточке корабля. Карточка чужая по определению, поэтому и заходим
+ * не старшим: у своего корабля карточки нет вовсе. В карточке вымпел стоит без подписи
+ * словами — места для неё там нет, — и спросить, что он значит, можно только тычком.
+ */
+test('вымпел старшего в карточке корабля отвечает званием', async ({ page }) => {
+    await openChannel(page, DEMO, VYMPEL);
+
+    // Открываем карточку старшего из ленты, тычком по его аватарке.
+    await page.locator('button[title="Корабль «Альбатрос»"]').first().click();
+    const card = page.getByRole('region', { name: 'Корабль' });
+    await expect(card).toContainText('Альбатрос');
+
+    await card.getByRole('button', { name: SENIOR }).click();
+    await expect(page.locator('[class*="snackbar"]'), 'вымпел в карточке не ответил званием').toHaveText(SENIOR);
 });
 
 test('не старшему высаживать нечем, а после его ухода старшинство переходит дальше', async ({ page }) => {

@@ -1,7 +1,9 @@
 import { KeyboardEvent, MouseEvent, PointerEvent, UIEvent, useLayoutEffect, useRef } from 'react';
 
 import Avatar from '@/components/ships/Avatar';
+import CodePennant from '@/components/ships/CodePennant';
 import MemberName from '@/components/ships/MemberName';
+import { useSnackbar } from '@/components/ui/Snackbar';
 import { Member, Message } from '@/types/channel';
 
 import MessageBody from '@/components/chat/MessageBody';
@@ -47,9 +49,13 @@ const STICK_SLOP = 24;
  */
 const TAP_SLOP = 8;
 
+/** Что означает ответный вымпел у позывного. Слово одно на все служебные строчки. */
+const NOTICE_TITLE = 'Техническое сообщение';
+
 /** Лента сообщений в стиле Telegram: группировка по автору, ответы, тап по сообщению — ответить. */
 export default function MessageList({ messages, members, myId, onReply, onShowShip }: MessageListProps) {
     const listRef = useRef<HTMLDivElement>(null);
+    const notify = useSnackbar();
 
     /**
      * Прицеплена ли лента к низу. Прицеплена — низ держится у панели ввода, и новые сообщения
@@ -250,17 +256,45 @@ export default function MessageList({ messages, members, myId, onReply, onShowSh
 
                 /*
                  * Системная запись стоит на месте пузыря и живёт по тем же правилам: своя
-                 * плашка, время в углу, ответ по нажатию. Отличается она видом — мельче,
-                 * приглушена и помечена полоской, — но не устройством: это такое же
-                 * сообщение канала, и отвечать на «042 теперь 782» человек должен уметь
-                 * ровно так же, как на любую реплику.
+                 * плашка, время в углу, ответ по нажатию. Отличается она одним цветом —
+                 * ни размером, ни отступами, ни скруглениями: это такое же сообщение канала,
+                 * и выглядеть заплаткой в ленте ему незачем.
                  */
-                const plaque =
-                    message.kind === 'system'
-                        ? { own: styles.systemNoteOwn, other: styles.systemNote }
-                        : { own: styles.bubbleOwn, other: styles.bubble };
+                const system = message.kind === 'system';
+                const plaque = system
+                    ? { own: styles.systemNoteOwn, other: styles.systemNote }
+                    : { own: styles.bubbleOwn, other: styles.bubble };
 
-                const thread = message.kind === 'system' ? undefined : message.thread;
+                /*
+                 * Позывной у служебной строчки стоит всегда — и у своей, и у второй подряд
+                 * в цепочке. Фраза в ней безличная («Сменил позывной»), и без имени над ней
+                 * непонятно, кто сменил; у реплики такой беды нет — там кто говорит, видно
+                 * по стороне ленты и по аватарке.
+                 *
+                 * Рядом с позывным — ответный вымпел: он и помечает строчку служебной вместо
+                 * прежних полоски и мелкого кегля. Нажатие по нему говорит, что он значит,
+                 * и дальше пузыря не идёт: нажатие по самому пузырю — это ответ на строчку,
+                 * а вымпел не про ответ.
+                 */
+                const noticeHead = system && author && (
+                    <span className={styles.noticeHead}>
+                        <MemberName name={author.name} color={author.color} />
+                        <button
+                            type="button"
+                            className={styles.pennantButton}
+                            aria-label={NOTICE_TITLE}
+                            title={NOTICE_TITLE}
+                            onClick={(event) => {
+                                event.stopPropagation();
+                                notify(NOTICE_TITLE);
+                            }}
+                        >
+                            <CodePennant />
+                        </button>
+                    </span>
+                );
+
+                const thread = system ? undefined : message.thread;
                 const replyTo = thread
                     ? messages.find((candidate) => candidate.messageId === thread.messageId)
                     : undefined;
@@ -277,7 +311,10 @@ export default function MessageList({ messages, members, myId, onReply, onShowSh
                             onKeyDown={(event) => handleKey(event, message)}
                             title="Ответить"
                         >
-                            {!own && firstOfGroup && author && <MemberName name={author.name} color={author.color} />}
+                            {noticeHead}
+                            {!system && !own && firstOfGroup && author && (
+                                <MemberName name={author.name} color={author.color} />
+                            )}
                             {replyTo && (
                                 <span className={styles.replyCell}>
                                     <ReplyQuote
