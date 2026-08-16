@@ -69,6 +69,42 @@ const ownScroller = (target: EventTarget | null, root: HTMLElement, axis: SheetA
     return null;
 };
 
+/**
+ * Стоит ли указатель на самой букве, а не на поле вокруг неё.
+ *
+ * Нужно это одной боковой раскладке. Вдоль строки ходят два разных движения — потяг за коробку
+ * и выделение текста, — и различить их можно только по тому, с чего движение началось: с буквы
+ * значит выделяют, с поля вокруг — тянут. Вниз никто не выделяет, и там вопроса нет вовсе.
+ *
+ * Мерено по самим буквам, а не по блоку под ними: строчка характеристик корабля лежит в плашке
+ * во всю ширину формы, и «попал в блок» значило бы «попал куда угодно правее текста».
+ * Место, где выделять нечего, потягу и достаётся.
+ */
+const onLetters = (target: EventTarget | null, at: { clientX: number; clientY: number }): boolean => {
+    // Там, где выделять запрещено, спорить не о чем: подпись кнопки не выделяется и не должна.
+    if (!(target instanceof Element) || getComputedStyle(target).userSelect === 'none') {
+        return false;
+    }
+    const range = document.createRange();
+    // Только свои буквы, без вложенных блоков: до них указатель добрался бы сам — событие
+    // приходит с того места, на которое нажали, а не с его родителя.
+    const letters = [...target.childNodes].filter(
+        (node) => node.nodeType === Node.TEXT_NODE && node.textContent?.trim()
+    );
+    return letters.some((node) => {
+        range.selectNodeContents(node);
+        // Прямоугольник на каждую строку: перенесённая надпись занимает не одну полосу,
+        // и общая рамка вокруг них накрыла бы и поле справа от короткой последней строки.
+        return [...range.getClientRects()].some(
+            (line) =>
+                at.clientX >= line.left &&
+                at.clientX <= line.right &&
+                at.clientY >= line.top &&
+                at.clientY <= line.bottom
+        );
+    });
+};
+
 export interface SheetDragSettings {
     /**
      * Открыта ли коробка. Закрытая потяга под собой не помнит: незаконченное движение
@@ -160,8 +196,10 @@ export const useSheetDrag = ({ open, onClose, magnet, axis = 'y' }: SheetDragSet
         // того, как React прибрал за собой событие, и `currentTarget` в них пуст.
         const box = event.currentTarget;
         // Вторичные кнопки мыши коробку не тянут: у правой своё дело — меню. Текстовое поле
-        // тоже не тянет: движение по нему ставит курсор и выделяет набранное.
-        if (event.button !== 0 || isTextField(event.target)) {
+        // тоже не тянет: движение по нему ставит курсор и выделяет набранное. И буквы не тянут,
+        // когда коробку отодвигают вбок: вдоль строки то же движение выделяет текст, и человек,
+        // ведущий указатель по характеристикам корабля, выделяет их, а не отодвигает форму.
+        if (event.button !== 0 || isTextField(event.target) || (axis === 'x' && onLetters(event.target, event))) {
             return;
         }
         // Что мотается под пальцем, если мотается вообще. Само по себе оно потяг не отменяет:

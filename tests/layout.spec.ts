@@ -3702,10 +3702,16 @@ test('подведённая к правой кромке кромка убир�
  * из-под неё показался бы он, а не рейд.
  */
 
-/** Заголовок формы: за него её и берут — это ни поле, ни кнопка. */
-const formGrip = async (page: Page, title: string): Promise<{ x: number; y: number }> => {
+/**
+ * Заголовок формы: за него её и берут — это ни поле, ни кнопка.
+ *
+ * Сбоку берём не сами буквы, а пустое место в конце строки заголовка: там, где коробку
+ * отодвигают вбок, движение по буквам достаётся выделению текста — вдоль строки ходят оба,
+ * и различить их можно только по тому, с чего движение началось.
+ */
+const formGrip = async (page: Page, title: string, axis: 'y' | 'x' = 'y'): Promise<{ x: number; y: number }> => {
     const box = (await page.getByRole('heading', { name: title }).boundingBox())!;
-    return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+    return { x: axis === 'x' ? box.x + box.width - 8 : box.x + box.width / 2, y: box.y + box.height / 2 };
 };
 
 /**
@@ -3716,7 +3722,7 @@ const formGrip = async (page: Page, title: string): Promise<{ x: number; y: numb
  * то есть форму именно подвели, а не бросили, и приезжает она туда, куда её привели.
  */
 const lowerForm = async (page: Page, title: string, by: number, axis: 'y' | 'x' = 'y'): Promise<void> => {
-    const { x, y } = await formGrip(page, title);
+    const { x, y } = await formGrip(page, title, axis);
     await page.mouse.move(x, y);
     await page.mouse.down();
     await page.mouse.move(axis === 'x' ? x + by : x, axis === 'x' ? y : y + by, { steps: 12 });
@@ -3816,4 +3822,20 @@ test('сбоку форму отодвигают вправо, и кадр ра�
     expect((await boxOf(page, 'header')).width - frameStood, 'кадр не забрал освободившееся').toBe(120);
     // Разговор под формой отъехал вместе с ней: коробка у них одна и сбоку тоже.
     expect((await boxOf(page, 'main')).left - stood.left, 'разговор остался стоять под формой').toBe(120);
+
+    // А по самим буквам то же движение выделяет текст: вдоль строки ходят оба, и различить их
+    // можно только по тому, с чего движение началось. Характеристики корабля для того и
+    // написаны, чтобы их читали и сравнивали, — и утащить их с собой человек вправе.
+    const moved = await boxOf(page, '[class*="form_"]');
+    const spec = page.locator('[class*="kinds_"] [class*="kindSpec"]').first();
+    await spec.scrollIntoViewIfNeeded();
+    const line = (await spec.boundingBox())!;
+    await page.mouse.move(line.x + 2, line.y + line.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(line.x + line.width - 2, line.y + line.height / 2, { steps: 12 });
+    await page.mouse.up();
+
+    const picked = await page.evaluate(() => window.getSelection()?.toString().trim() ?? '');
+    expect(picked, 'протяжка по характеристикам ничего не выделила').not.toBe('');
+    expect((await boxOf(page, '[class*="form_"]')).left, 'выделение текста уехало формой').toBe(moved.left);
 });
