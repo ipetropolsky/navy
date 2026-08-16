@@ -104,6 +104,41 @@ test('протяжка по реплике выделяет текст, а не 
     await expect(page.getByPlaceholder('Сообщение')).toBeFocused();
 });
 
+/**
+ * Плашка утапливается, пока её держат, — так видно, что она нажимается. Но утопление обещает
+ * ответ, и обещание должно быть честным в обе стороны: не утапливаться там, где ответа не будет,
+ * и отжиматься сразу, как только нажатие перестало быть ответом.
+ *
+ * Обе беды достались от `:active`, которым это делалось раньше: он зажигается на всей цепочке
+ * предков (тычок по вымпелу утапливал и плашку под ним) и держится до отпускания (плашка стояла
+ * нажатой всю протяжку по тексту, хотя ответ на выделении не срабатывает).
+ */
+test('плашка утоплена только пока нажатие остаётся ответом', async ({ page }) => {
+    await openChannel(page, DEMO, ALBATROS);
+    const bubble = bubbles(page).last();
+    const box = (await bubble.boundingBox())!;
+    const middle = box.y + box.height / 2;
+
+    // Держим плашку на месте — это ответ, и она утоплена.
+    await page.mouse.move(box.x + 14, middle);
+    await page.mouse.down();
+    await expect(bubble, 'плашка не утопилась под нажатием').toHaveClass(/pressed/);
+
+    // Повели курсор — пошло выделение, ответа уже не будет, и плашка отжимается сразу,
+    // не дожидаясь конца протяжки.
+    await page.mouse.move(box.x + box.width - 14, middle, { steps: 12 });
+    await expect(bubble, 'плашка осталась нажатой на выделении').not.toHaveClass(/pressed/);
+    await page.mouse.up();
+
+    // Вымпел у служебной строчки — своя кнопка, и плашку под собой она не утапливает:
+    // нажатие по вымпелу до ответа не доходит.
+    const note = systemLines(page).last();
+    await note.getByRole('button', { name: 'Техническое сообщение' }).hover();
+    await page.mouse.down();
+    await expect(note, 'вымпел утопил плашку под собой').not.toHaveClass(/pressed/);
+    await page.mouse.up();
+});
+
 test('сообщение из соседней вкладки доезжает', async ({ context }) => {
     const mine = await context.newPage();
     const theirs = await context.newPage();
@@ -196,13 +231,14 @@ test('строчка о корабле стоит по его сторону л�
     const line = (await note.boundingBox())!;
     expect(Math.abs(line.x + line.width - (bubble.x + bubble.width))).toBeLessThanOrEqual(1);
 
-    // Набрана она на ступеньку мельче реплики — служебное не спорит с разговором, — но строка
-    // у неё ростом с обычную: иначе плашка ужалась бы вслед за кеглем и встала бы в ленте
-    // ступенькой ниже соседних.
+    // Набрана она тем же кеглем, что реплика: служебная запись — такое же сообщение канала,
+    // и мельчить её незачем. Отличают её цвет плашки и вымпел у позывного, а не размер букв.
     const style = (locator: Locator, prop: 'fontSize' | 'lineHeight'): Promise<number> =>
         locator.evaluate((node, name) => parseFloat(getComputedStyle(node)[name]), prop);
     const reply = bubbles(page).last();
-    expect(await style(note, 'fontSize')).toBe((await style(reply, 'fontSize')) - 2);
+    expect(await style(note, 'fontSize'), 'служебная строчка не того кегля, что реплика').toBe(
+        await style(reply, 'fontSize')
+    );
     expect(await style(note, 'lineHeight')).toBeCloseTo(await style(reply, 'lineHeight'), 1);
 
     // И на неё отвечают, как на реплику: нажали — и цитата встала над строкой ввода.

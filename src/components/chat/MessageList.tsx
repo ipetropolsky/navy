@@ -1,4 +1,4 @@
-import { KeyboardEvent, MouseEvent, PointerEvent, UIEvent, useLayoutEffect, useRef } from 'react';
+import { KeyboardEvent, MouseEvent, PointerEvent, UIEvent, useEffect, useLayoutEffect, useRef } from 'react';
 
 import Avatar from '@/components/ships/Avatar';
 import CodePennant from '@/components/ships/CodePennant';
@@ -130,6 +130,11 @@ export default function MessageList({ messages, members, myId, onReply, onShowSh
         lastOwnRef.current = lastOwnId;
         if (list && stuckRef.current) {
             list.scrollTop = list.scrollHeight;
+            // Отметку двигаем вместе с лентой: она означает «где лента стояла до движения
+            // человека», и оставленный в ней ноль первого же начального положения врал бы —
+            // прыжок ленты вверх (той же прокруткой в тесте или якорем) читался бы как движение
+            // вниз, и прицеп бы не отпустило.
+            topRef.current = list.scrollTop;
         }
     });
 
@@ -147,6 +152,7 @@ export default function MessageList({ messages, members, myId, onReply, onShowSh
         const observer = new ResizeObserver(() => {
             if (stuckRef.current) {
                 list.scrollTop = list.scrollHeight;
+                topRef.current = list.scrollTop;
             }
         });
         observer.observe(list);
@@ -162,9 +168,74 @@ export default function MessageList({ messages, members, myId, onReply, onShowSh
      */
     const pressRef = useRef<{ x: number; y: number; selected: string } | null>(null);
 
+    /**
+     * Какая плашка сейчас утоплена. Держим сами, а не отдаём браузеру `:active`, потому что
+     * про нажатие мы знаем больше него — и в обе стороны.
+     *
+     * Он утапливает лишнее: `:active` зажигается на всей цепочке предков, и тычок по вымпелу
+     * внутри плашки утапливал заодно и её, хотя вымпел про своё и до ответа не доходит.
+     *
+     * И держит дольше нужного: `:active` не отпустит до отпускания кнопки, а протяжка по тексту
+     * перестаёт быть ответом в тот миг, когда пошло выделение. Плашка при этом обязана отжаться
+     * сразу — иначе человек до конца протяжки видит нажатую кнопку, которая уже не сработает.
+     *
+     * Утапливаем прямо в DOM, а не состоянием: перерисовывать от нажатия в ленте нечего, зато
+     * перерисовка тут выходит боком. Прицепленная лента доводится до низа после каждой (см.
+     * `useLayoutEffect` выше), и лишний заход дёргал бы её вниз прямо из-под пальца — нажали
+     * на реплику в середине разговора, а лента ушла в конец, и отпускание пришлось уже мимо.
+     */
+    const pressedRef = useRef<HTMLElement | null>(null);
+
+    const release = (): void => {
+        pressedRef.current?.classList.remove(styles.pressed);
+        pressedRef.current = null;
+    };
+
     const handlePress = (event: PointerEvent<HTMLDivElement>): void => {
         pressRef.current = { x: event.clientX, y: event.clientY, selected: selectedText() };
+        release();
+        pressedRef.current = event.currentTarget;
+        event.currentTarget.classList.add(styles.pressed);
     };
+
+    /**
+     * Пока плашка утоплена, следим за теми же двумя приметами, по которым потом решаем, был ли
+     * это тычок (см. `handleTap`): ушли дальше `TAP_SLOP` или появилось выделение, которого
+     * до нажатия не было. Сработала любая — плашка отжимается, не дожидаясь отпускания.
+     *
+     * Слушаем окно, а не плашку: протяжка легко уводит палец за её край, и отпускают кнопку
+     * там же — событий плашки в этом случае не будет вовсе, и она осталась бы нажатой навсегда.
+     * Выделение приходит своим событием `selectionchange`: долгое нажатие на телефоне никуда
+     * курсор не ведёт и `pointermove` не шлёт, а выделение оставляет.
+     *
+     * Подписки живут всё время жизни ленты, а не только под нажатием: сторожа стоят копейки
+     * и при отжатой плашке сразу выходят, а подписка по нажатию требовала бы состояния —
+     * ровно той перерисовки, которой мы тут и избегаем.
+     */
+    useEffect(() => {
+        const watchMove = (event: globalThis.PointerEvent): void => {
+            const press = pressRef.current;
+            if (press && Math.hypot(event.clientX - press.x, event.clientY - press.y) > TAP_SLOP) {
+                release();
+            }
+        };
+        const watchSelection = (): void => {
+            const selected = selectedText();
+            if (selected !== '' && selected !== pressRef.current?.selected) {
+                release();
+            }
+        };
+        window.addEventListener('pointermove', watchMove);
+        window.addEventListener('pointerup', release);
+        window.addEventListener('pointercancel', release);
+        document.addEventListener('selectionchange', watchSelection);
+        return () => {
+            window.removeEventListener('pointermove', watchMove);
+            window.removeEventListener('pointerup', release);
+            window.removeEventListener('pointercancel', release);
+            document.removeEventListener('selectionchange', watchSelection);
+        };
+    }, []);
 
     /**
      * Тычок по плашке — ответить. Но не всякое нажатие тычок: текст в ленте можно и нужно
@@ -284,6 +355,11 @@ export default function MessageList({ messages, members, myId, onReply, onShowSh
                             className={styles.pennantButton}
                             aria-label={NOTICE_TITLE}
                             title={NOTICE_TITLE}
+                            // Нажатие по вымпелу не утапливает плашку: оно про вымпел, а не про
+                            // ответ, и плашка на него отзываться не должна. Останавливаем именно
+                            // нажатие, а не только щелчок ниже: утопление плашки заводится
+                            // с `pointerdown`, и до `onClick` она успела бы моргнуть.
+                            onPointerDown={(event) => event.stopPropagation()}
                             onClick={(event) => {
                                 event.stopPropagation();
                                 notify(NOTICE_TITLE);
