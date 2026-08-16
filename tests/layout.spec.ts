@@ -2,6 +2,7 @@ import { Page, expect, test } from '@playwright/test';
 
 import { EDGE_MARGIN } from '@/backend/placement';
 import {
+    CHAT_GRIP,
     CHAT_OVERLAP,
     CHAT_SHARE,
     COLUMN_WIDTH,
@@ -11,10 +12,10 @@ import {
     SHEET_INSET,
     SHEET_TOP_GAP,
     SHEET_WIDTH,
-    SIDE_GRIP,
     SIDE_MIN_WIDTH,
 } from '@/config/layout';
 import { MAX_MESSAGE_LENGTH, SLOT_COUNT, slotDepth, slotShare } from '@/types/channel';
+import { FLING_MS } from '@/utils/magnet';
 
 import {
     ALBATROS,
@@ -2810,7 +2811,8 @@ test('шторка встаёт на сцену рядом с разговоро
  * Окно повернули — разговор переехал сам. Кнопки на это нет и быть не должно: место разговору
  * ищут там, где его больше, и в стоячем окне это высота.
  *
- * Коридора вдоль кромки под кадром нет вовсе: тянуть там нечего, ширина у разговора вся.
+ * Коридор для потяга переезжает вместе с ним и ложится поперёк: тянут разговор в обеих
+ * раскладках, просто сбоку за ширину, а под кадром за высоту.
  */
 test('повёрнутое окно само уводит разговор под кадр', async ({ page }) => {
     await openSide(page);
@@ -2822,7 +2824,10 @@ test('повёрнутое окно само уводит разговор по�
     expect(content.width, 'разговор остался в боковой ширине').toBe(Math.min(TURNED.width, COLUMN_WIDTH));
     expect(content.height, 'под кадром разговор встал не в свою долю').toBe(chatSize(TURNED));
     expect(content.top + content.height, 'разговор не дошёл до нижней кромки окна').toBe(TURNED.height);
-    await expect(page.locator('[role="separator"]'), 'под кадром остался коридор для потяга').toHaveCount(0);
+    await expect(
+        page.getByRole('separator', { name: 'Высота разговора' }),
+        'коридор не переехал вслед за разговором'
+    ).toBeVisible();
 });
 
 /**
@@ -2943,9 +2948,9 @@ test('разговор тянут за коридор вдоль кромки, �
     expect(await sideWidth(page), 'разговор открылся не в свою ширину').toBe(SIDE_AT_WIDE);
 
     const grip = await boxOf(page, '[role="separator"]');
-    expect(grip.width, 'коридор не в свою ширину').toBe(SIDE_GRIP);
+    expect(grip.width, 'коридор не в свою ширину').toBe(CHAT_GRIP);
     expect(grip.height, 'коридор не во всю высоту разговора').toBe(WIDE.height);
-    expect(grip.left, 'коридор встал не у кромки разговора').toBeLessThan(WIDE.width - SIDE_AT_WIDE + SIDE_GRIP);
+    expect(grip.left, 'коридор встал не у кромки разговора').toBeLessThan(WIDE.width - SIDE_AT_WIDE + CHAT_GRIP);
 
     // Разговор справа: влево — шире. Тянем на столько, чтобы до упоров было далеко: здесь
     // проверяется, что он идёт за указателем ровно, а упоры проверяются ниже.
@@ -3334,4 +3339,141 @@ test('шторка уходит с экрана и там, где переход
 
     await card.getByRole('button', { name: 'Закрыть' }).click();
     await expect(card, 'шторка осталась на экране без перехода').toBeHidden({ timeout: 2000 });
+});
+
+/**
+ * Разговор под кадром — нижняя шторка.
+ *
+ * Тянут его за тот же коридор, что и сбоку, только положенный поперёк, а отпущенный он
+ * приезжает к своей точке (`CHAT_POINTS`): ноль, треть, две трети, весь рост. Между точками
+ * он стоять волен — человек ставит его туда, где ему видно и рейд, и последние реплики, —
+ * и точки только помогают попасть в привычное.
+ */
+
+/** Весь ход разговора под кадром в этом окне, px: всё, что осталось под шапкой. */
+const chatRoom = (view: { width: number; height: number }): number => view.height - SHEET_TOP_GAP;
+
+/** Высота разговора под кадром, px. */
+const chatHeight = async (page: Page): Promise<number> => (await boxOf(page, 'main')).height;
+
+/** Середина коридора: за неё разговор и берут. */
+const gripSpot = async (page: Page): Promise<{ x: number; y: number }> => {
+    const grip = await boxOf(page, '[role="separator"]');
+    return { x: grip.left + grip.width / 2, y: grip.top + grip.height / 2 };
+};
+
+/**
+ * Подвести кромку разговора на `by` пикселей вверх (вниз — отрицательное) и поставить.
+ *
+ * Перед отпусканием палец стоит дольше отрезка, на котором меряется усилие (`FLING_MS`), —
+ * то есть разговор именно подвели, а не бросили. Скорости к отпусканию не остаётся, и приезд
+ * считается от того места, куда его привели.
+ */
+const leadChat = async (page: Page, by: number): Promise<void> => {
+    const { x, y } = await gripSpot(page);
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x, y - by, { steps: 8 });
+    await page.waitForTimeout(FLING_MS * 3);
+    await page.mouse.up();
+    await page.waitForTimeout(600);
+};
+
+/**
+ * Бросить разговор вниз на `by` пикселей: короткий сильный рывок, палец отпускают на ходу.
+ *
+ * Шаги идут с паузами нарочно: усилие считается из пути и времени, а мгновенно посланные
+ * подряд события отличались бы нулём миллисекунд — скорости не вышло бы вовсе.
+ */
+const flingChatDown = async (page: Page, by: number): Promise<void> => {
+    const { x, y } = await gripSpot(page);
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await [1, 2, 3].reduce(
+        (before, step) =>
+            before.then(() => page.waitForTimeout(10)).then(() => page.mouse.move(x, y + (by * step) / 3)),
+        Promise.resolve()
+    );
+    await page.mouse.up();
+    await page.waitForTimeout(600);
+};
+
+/**
+ * Коридор под кадром — та же полоска, что и сбоку, только поперёк: вдоль верхней кромки
+ * разговора и во всю его ширину, а не во всю ширину окна. Стоит он на самом стыке, половиной
+ * на кадр и половиной на разговор.
+ */
+test('под кадром коридор лежит поперёк, вдоль верхней кромки разговора', async ({ page }) => {
+    await page.setViewportSize(PHONE);
+    await openChannel(page, DEMO, ALBATROS);
+
+    const grip = await boxOf(page, '[role="separator"]');
+    const chat = await boxOf(page, 'main');
+    expect(grip.height, 'коридор не в свою толщину').toBe(CHAT_GRIP);
+    expect(grip.width, 'коридор не во всю ширину разговора').toBe(chat.width);
+    expect(grip.top + CHAT_GRIP / 2, 'коридор встал не на кромку разговора').toBe(chat.top);
+    await expect(
+        page.getByRole('separator', { name: 'Высота разговора' }),
+        'коридор под кадром назвался шириной'
+    ).toBeVisible();
+});
+
+/**
+ * Отпущенный разговор приезжает к ближней точке, а вдали от точек остаётся там, где его
+ * оставили. Это и есть «тянется произвольно, магнитится на точки»: точки помогают попасть
+ * в привычное, но не отбирают у человека промежуточных положений.
+ */
+test('разговор под кадром тянут произвольно, а к точкам он притягивается', async ({ page }) => {
+    await page.setViewportSize(PHONE);
+    await openChannel(page, DEMO, ALBATROS);
+    const room = chatRoom(PHONE);
+    expect(await chatHeight(page), 'разговор открылся не в свою треть').toBe(chatSize(PHONE));
+
+    // Далеко от точек: 260 + 150 = 410, а соседние точки в 260 и 520 — до обеих больше,
+    // чем дотягивается притяжение (MAGNET_PULL).
+    await leadChat(page, 150);
+    expect(await chatHeight(page), 'разговор не остался там, куда его привели').toBe(chatSize(PHONE) + 150);
+
+    // А теперь рядом: 410 + 90 = 500, и до двух третей всего двадцать пикселей.
+    await leadChat(page, 90);
+    expect(await chatHeight(page), 'разговор не притянулся к двум третям').toBe(Math.round(room * 2 * CHAT_SHARE));
+
+    // Вверх до упора: выше низа шапки разговор не поднимается, и точка там как раз.
+    await leadChat(page, 400);
+    expect(await chatHeight(page), 'разговор поднялся не во весь рост').toBe(room);
+});
+
+/**
+ * Короткий сильный рывок вниз убирает разговор целиком, не цепляясь за точки по дороге.
+ *
+ * Считается приземление не от места, где палец отпустил кромку, а от того, куда разговор
+ * долетел бы по инерции (`MAGNET_THROW_MS`): отпущенный на ходу в двух сотнях от нижней кромки,
+ * он проскакивает и треть, и ноль — то есть уходит с экрана. Тот же путь, пройденный медленно,
+ * оставил бы его на ближней точке.
+ */
+test('короткий сильный свайп вниз убирает разговор, не цепляясь за точки', async ({ page }) => {
+    await page.setViewportSize(PHONE);
+    await openChannel(page, DEMO, ALBATROS);
+
+    await flingChatDown(page, 120);
+    await expect(page.getByRole('button', { name: 'Вернуть разговор' }), 'разговор не ушёл с экрана').toBeVisible();
+    await expect(page.locator('[role="separator"]'), 'у убранного разговора остался коридор').toHaveCount(0);
+
+    // Возвращается он в тот размер, в каком его убрали: рывком выбирают, где разговору быть,
+    // а не сколько он занимает.
+    await page.getByRole('button', { name: 'Вернуть разговор' }).click();
+    await page.waitForTimeout(600);
+    expect(await chatHeight(page), 'разговор вернулся не в свой размер').toBe(chatSize(PHONE));
+});
+
+/**
+ * То же самое медленно: подвели кромку к самой нижней и поставили. Разговор уходит с экрана
+ * и так — нулевая точка на то и точка, — но уходит по своей воле, а не по инерции.
+ */
+test('подведённая к нижней кромке кромка тоже убирает разговор', async ({ page }) => {
+    await page.setViewportSize(PHONE);
+    await openChannel(page, DEMO, ALBATROS);
+
+    await leadChat(page, -chatSize(PHONE) + 20);
+    await expect(page.getByRole('button', { name: 'Вернуть разговор' }), 'разговор не ушёл с экрана').toBeVisible();
 });

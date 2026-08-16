@@ -6,6 +6,7 @@ import { defineConfig } from 'vite';
 // который в нём же и объявлен.
 // eslint-disable-next-line no-restricted-imports
 import {
+    CHAT_GRIP,
     CHAT_OVERLAP,
     COLUMN_WIDTH,
     FADE_HEIGHT,
@@ -15,7 +16,6 @@ import {
     SHEET_INSET,
     SHEET_TOP_GAP,
     SHEET_WIDTH,
-    SIDE_GRIP,
 } from './src/config/layout';
 
 export default defineConfig({
@@ -37,7 +37,7 @@ export default defineConfig({
                     `@sheet-inset: ${SHEET_INSET}px;\n` +
                     `@sheet-top-gap: ${SHEET_TOP_GAP}px;\n` +
                     `@fade-height: ${FADE_HEIGHT}px;\n` +
-                    `@side-grip: ${SIDE_GRIP}px;\n`,
+                    `@chat-grip: ${CHAT_GRIP}px;\n`,
             },
         },
     },

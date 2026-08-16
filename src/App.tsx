@@ -27,6 +27,7 @@ import Shade from '@/components/ui/Shade';
 import { useSnackbar } from '@/components/ui/Snackbar';
 import TopFade from '@/components/ui/TopFade';
 import { LeaveIcon } from '@/components/ui/icons';
+import { CHAT_POINTS } from '@/config/layout';
 import { HAIL_SIGNAL, morseDuration } from '@/hooks/morse';
 import { useChannel } from '@/hooks/useChannel';
 import { useLayout } from '@/hooks/useLayout';
@@ -35,6 +36,7 @@ import { useSwipe } from '@/hooks/useSwipe';
 import { channelLink, useRoute } from '@/routing';
 import { Berth, Message, MorseFeed, ShipKind, Side, authorLook, isSameBerth, otherSide } from '@/types/channel';
 import { copyText } from '@/utils/clipboard';
+import { Fling, normalizeMagnets, settleMagnet, trackFling } from '@/utils/magnet';
 
 import styles from './App.module.less';
 
@@ -497,20 +499,30 @@ export default function App() {
     const chatNow = atEdge ? 0 : size;
 
     /**
-     * Потяг за коридор вдоль кромки разговора.
+     * Потяг за коридор вдоль кромки разговора — один на обе раскладки.
+     *
+     * Меряется всё в открытости: сколько разговора видно. Раскладка говорит только, вдоль какой
+     * оси идёт палец и в какую сторону это «шире»: сбоку разговор стоит справа, и открывает его
+     * движение влево; под кадром он лежит внизу, и открывает его движение вверх. Дальше числа
+     * одни и те же, и правило у них одно.
      *
      * Слушаем окно, а не сам коридор: он шириной в шестнадцать пикселей, и первый же шаг
      * указателя выносит палец за его кромку. Записываем начало потяга, а не считаем сдвиг
-     * от кадра к кадру: ширина по дороге упирается в пределы, и накопленный сдвиг разошёлся
+     * от кадра к кадру: размер по дороге упирается в пределы, и накопленный сдвиг разошёлся
      * бы с указателем ровно на то, что срезали упоры.
-     *
-     * Разговор стоит справа, поэтому влево — шире.
      */
-    const dragFrom = useRef<{ x: number; width: number } | null>(null);
+    const dragFrom = useRef<{ at: number; size: number; open: number; fling: Fling } | null>(null);
     const [dragging, setDragging] = useState(false);
 
+    // Где палец вдоль той оси, по которой ходит кромка. Одна и та же мерка в обеих раскладках:
+    // дальше её вычитают из начальной, и «шире» выходит само — влево сбоку, вверх под кадром.
+    const gripAxis = useCallback(
+        (event: { clientX: number; clientY: number }) => (atSide ? event.clientX : event.clientY),
+        [atSide]
+    );
+
     const handleGripDown = (event: ReactPointerEvent<HTMLDivElement>) => {
-        dragFrom.current = { x: event.clientX, width: size };
+        dragFrom.current = { at: gripAxis(event), size, open: size, fling: trackFling() };
         setDragging(true);
     };
 
@@ -521,35 +533,69 @@ export default function App() {
         const onMove = (event: PointerEvent) => {
             const from = dragFrom.current;
             if (from) {
-                resize(from.width + (from.x - event.clientX));
+                from.open = from.size + (from.at - gripAxis(event));
+                from.fling.mark(from.open, event.timeStamp);
+                resize(from.open);
             }
         };
-        const onUp = () => {
+        /**
+         * Отпустили — разговор приезжает к своей точке.
+         *
+         * Точки только под кадром: там разговор ведёт себя шторкой, и положений у него четыре
+         * (см. `CHAT_POINTS`). Сбоку он остаётся там, куда его подвели, — ширину панели
+         * доводят на глаз, и притягивать её к долям окна незачем.
+         *
+         * Считается приземление не от места, где палец встал, а от того, куда разговор долетел
+         * бы по инерции: короткий сильный рывок вниз проскакивает точки насквозь и уводит
+         * разговор с экрана целиком, а медленный подвод к трети на ней и останавливается
+         * (см. `settleMagnet`).
+         *
+         * Обрыв без отпускания — системный жест, потерянное окно — сюда же и приходит,
+         * с нулевой скоростью: разговор встаёт на ближнюю точку, а не отматывается назад.
+         * Отматывать его обратно человек не просил.
+         */
+        const onUp = (event: PointerEvent) => {
             setDragging(false);
+            const from = dragFrom.current;
+            if (!atSide && from) {
+                resize(
+                    settleMagnet({
+                        from: from.size,
+                        to: from.open,
+                        velocity: from.fling.speed(event.timeStamp),
+                        points: normalizeMagnets(CHAT_POINTS, layout.full),
+                        free: true,
+                    }),
+                    true
+                );
+                return;
+            }
             keep();
         };
         window.addEventListener('pointermove', onMove);
         window.addEventListener('pointerup', onUp);
-        // Потяг обрывают и без отпускания — системным жестом, потерей окна. Ширина при этом
-        // остаётся той, до которой дотянули: отматывать её обратно человек не просил.
         window.addEventListener('pointercancel', onUp);
         return () => {
             window.removeEventListener('pointermove', onMove);
             window.removeEventListener('pointerup', onUp);
             window.removeEventListener('pointercancel', onUp);
         };
-    }, [dragging, resize, keep]);
+    }, [dragging, resize, keep, gripAxis, atSide, layout.full]);
 
     /**
      * Тот же коридор с клавиатуры: стрелками по шагу, Home и End — до упора. Коридор объявлен
      * разделителем (role="separator") и умеет то, что разделителю положено уметь; без этого
-     * ширину разговора нельзя было бы поменять вовсе, не взяв в руки мышь.
+     * размер разговора нельзя было бы поменять вовсе, не взяв в руки мышь.
+     *
+     * Стрелки те, вдоль которых кромка и ходит: сбоку левая-правая, под кадром вверх-вниз.
+     * Точки при этом не притягивают — с клавиатуры размер доводят по шагу, и перескок
+     * к ближней трети посреди доводки отнимал бы у стрелки её же шаг.
      */
     const handleGripKey = (event: ReactKeyboardEvent<HTMLDivElement>) => {
         const step = event.shiftKey ? GRIP_STEP_BIG : GRIP_STEP;
         const to = {
-            ArrowLeft: size + step,
-            ArrowRight: size - step,
+            [atSide ? 'ArrowLeft' : 'ArrowUp']: size + step,
+            [atSide ? 'ArrowRight' : 'ArrowDown']: size - step,
             Home: layout.max,
             End: layout.min,
         }[event.key];
@@ -757,22 +803,28 @@ export default function App() {
                     </TopFade>
                 </div>
             )}
-            {/* Коридор вдоль кромки разговора: за него меняют его ширину. Стоит он рядом
-                с разговором, а не внутри, и приходится ровно на стык — половиной на кадр,
-                половиной на разговор. Внутри он лежал поверх ленты и съедал поле нажатия
+            {/* Коридор вдоль кромки разговора: за него меняют его размер. Есть он в обеих
+                раскладках — сбоку вдоль левой кромки, под кадром вдоль верхней, — и это одна
+                и та же полоска, просто повёрнутая: разговор и там и там шторка, которую тянут
+                за её кромку.
+
+                Стоит он рядом с разговором, а не внутри, и приходится ровно на стык — половиной
+                на кадр, половиной на разговор. Внутри он лежал поверх ленты и съедал поле нажатия
                 у аватарок вместе с краем самого кружка, а разговор обрезан наглухо, и высунуть
                 половину коридора наружу оттуда нечем. За кромкой он идёт своим переходом,
                 тем же и по тем же секундам, что и разговор, — см. .grip в стилях.
-                У убранного разговора коридора нет: ширины у него ноль, и тянуть не за что —
+                У убранного разговора коридора нет: размера у него ноль, и тянуть не за что —
                 вернуть его можно кнопкой в шапке. */}
-            {atSide && shown && (
+            {shown && (
                 <div
-                    className={styles.grip}
+                    className={[styles.grip, atSide ? styles.gripSide : styles.gripUnder].join(' ')}
                     onPointerDown={handleGripDown}
                     onKeyDown={handleGripKey}
                     role="separator"
-                    aria-orientation="vertical"
-                    aria-label="Ширина разговора"
+                    // Разделитель между кадром и разговором: сбоку он стоит вертикальной чертой,
+                    // под кадром лежит поперёк.
+                    aria-orientation={atSide ? 'vertical' : 'horizontal'}
+                    aria-label={atSide ? 'Ширина разговора' : 'Высота разговора'}
                     aria-valuenow={Math.round(size)}
                     aria-valuemin={layout.min}
                     aria-valuemax={layout.max}

@@ -10,7 +10,7 @@ import {
 
 import { useSlide } from '@/hooks/useSlide';
 import { isTextField } from '@/utils/keyboard';
-import { MagnetSettings, normalizeMagnets, settleMagnet } from '@/utils/magnet';
+import { MagnetSettings, normalizeMagnets, settleMagnet, trackFling } from '@/utils/magnet';
 
 import IconButton from '@/components/ui/IconButton';
 import { useShadeFloor } from '@/components/ui/ShadeStack';
@@ -37,15 +37,6 @@ const DRAG_SLOP = 4;
  * а рост ей задаёт содержимое.
  */
 const DEFAULT_MAGNET: MagnetSettings = { points: [0, '100%'] };
-
-/**
- * За какое время до отпускания меряется скорость, мс.
- *
- * Не за весь путь пальца: медленно подведённая и в последний миг брошенная шторка обязана
- * улететь, а долго тянутая и остановленная перед отпусканием — остаться. Считает поэтому
- * только последний отрезок, и если палец простоял на месте дольше него, скорости нет вовсе.
- */
-const FLING_MS = 80;
 
 /** Мотается ли этот блок сам: и разрешено, и есть что мотать. */
 const scrolls = (node: Element): boolean => {
@@ -212,8 +203,9 @@ export default function Shade({
         // Открытость на момент, когда шторку взяли: сколько её видно над нижней кромкой.
         const startOpen = height - (shift ?? 0);
         const drag = { moved: false, shift: shift ?? 0 };
-        // Последние отметки пальца — по ним и считается скорость в момент отпускания.
-        const marks: { y: number; at: number }[] = [];
+        // Чем кончилось движение пальца: по последним его отметкам и считается скорость
+        // в момент отпускания. Мерка общая со всеми, кого тянут, — см. `trackFling`.
+        const fling = trackFling();
 
         const move = (moveEvent: PointerEvent) => {
             if (moveEvent.pointerId !== event.pointerId) {
@@ -247,32 +239,15 @@ export default function Shade({
                 // текст. Дальше его не даёт набрать `user-select` (см. .shadeDragging).
                 window.getSelection()?.removeAllRanges();
             }
-            marks.push({ y: moveEvent.clientY, at: moveEvent.timeStamp });
-            if (marks.length > 5) {
-                marks.shift();
-            }
+            // Отмечаем то, куда палец увёл шторку, а не то, где он сам: скорость считается
+            // в открытости, и упереться в предел она не должна — брошенная за нижнюю точку
+            // шторка обязана долететь до конца, а не потерять на упоре весь разгон.
+            fling.mark(startOpen - (moveEvent.clientY - startY), moveEvent.timeStamp);
             // За пределы своих точек шторка не выходит ни вверх, ни вниз: выше верхней её
             // и так не видно целиком, ниже нижней — не видно вовсе.
             const opened = Math.min(Math.max(startOpen - (moveEvent.clientY - startY), lowest), highest);
             drag.shift = height - opened;
             setShift(drag.shift);
-        };
-
-        /**
-         * Скорость в момент отпускания, px/мс открытости: положительная — шторка раскрывалась.
-         *
-         * Меряется по последнему отрезку пути, а не по всему: важно, чем движение кончилось.
-         * Палец, простоявший на месте дольше отрезка, скорости не оставляет вовсе — шторку
-         * подвели и поставили, а не бросили.
-         */
-        const speed = (at: number): number => {
-            const last = marks[marks.length - 1];
-            if (!last || at - last.at > FLING_MS) {
-                return 0;
-            }
-            const first = marks.find((mark) => last.at - mark.at <= FLING_MS) ?? marks[0];
-            const spent = last.at - first.at;
-            return spent > 0 ? (first.y - last.y) / spent : 0;
         };
 
         // Отписка объявлена раньше самих обработчиков: она им и нужна — движение кончается тем,
@@ -295,7 +270,7 @@ export default function Shade({
             const settled = settleMagnet({
                 from: startOpen,
                 to: height - drag.shift,
-                velocity: speed(upEvent.timeStamp),
+                velocity: fling.speed(upEvent.timeStamp),
                 points,
                 free: magnet.free,
                 pull: magnet.pull,

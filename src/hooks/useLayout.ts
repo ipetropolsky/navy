@@ -262,25 +262,34 @@ export function useLayout(): LayoutControls {
     //
     // Утянутый в ноль разговор уходит с экрана, но памяти о себе не стирает: `back` остаётся
     // тем, чем был, и кнопка вернёт разговор ровно в тот размер, в каком его убрали.
+    //
+    // Место возврата меняет только запоминаемый размер — тот, на котором разговор встал.
+    // Кадры потяга его не трогают: палец, бросивший разговор с экрана, проходит по дороге
+    // через все размеры подряд, и последний из них — не выбор, а случайная отметка на пути.
+    // Прежде запоминался именно он: брошенный от трети разговор возвращался куда-нибудь
+    // в сотню пикселей, мимо которой палец пролетел на полном ходу.
     const resize = useCallback<LayoutControls['resize']>(
         (size, remember = false) => {
             const full = chatRoom(mode, view);
             const { min, max } = chatLimits(mode, view);
             const share = size <= 0 || full <= 0 ? 0 : clamp(size, min, max) / full;
-            apply((was) => ({ share, back: share > 0 ? share : was.back }), remember);
+            apply((was) => ({ share, back: remember && share > 0 ? share : was.back }), remember);
         },
         [apply, mode, view]
     );
 
     // Записывается сам выбор, а не то, во что его урезало окно: раздастся окно — разговор
-    // вернётся к выбранному размеру.
+    // вернётся к выбранному размеру. Натянутый размер становится и местом возврата: человек
+    // тянул кромку сюда — сюда разговор и вернётся, когда его позовут обратно.
     const keep = useCallback(
         () =>
             setWish((was) => {
-                writeWish(was);
-                return was;
+                const here = was[mode];
+                const next = { ...was, [mode]: { ...here, back: here.share > 0 ? here.share : here.back } };
+                writeWish(next);
+                return next;
             }),
-        []
+        [mode]
     );
 
     // Убран разговор или нет — общее на обе раскладки, в отличие от размера. Человек убирает
