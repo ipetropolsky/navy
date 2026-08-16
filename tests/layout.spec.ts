@@ -1374,6 +1374,55 @@ test('шторку закрывают крестиком, нажатием ми�
 });
 
 /**
+ * Вверх шторке некуда: выше она и так стоит вплотную к своему пределу, и потяг вверх обязан
+ * не делать ровно ничего — ни на потяге, ни на отпускании.
+ *
+ * Проверка покадровая и переживает отпускание нарочно. Выезд шторки прежде был отдельной
+ * анимацией по ключевым кадрам, а на время потяга её снимали вместе с переходом; отпущенная
+ * шторка получала анимацию обратно, и браузер заводил её заново — то есть шторка падала вниз
+ * и выезжала снова. Занимало это те же полсекунды, что и обычный выезд, и одиночный замер
+ * «после отпускания» мог прийтись и на начало падения, и на его конец.
+ */
+test('потяг вверх не двигает шторку', async ({ page }) => {
+    await openChannel(page, DEMO, ALBATROS);
+    await openSheet(page);
+
+    const before = await shadeBox(page);
+    const box = (await page.getByText('На связи', { exact: true }).boundingBox())!;
+    const x = box.x + box.width / 2;
+    const y = box.y + box.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x, y - Math.round(before.height * 0.5), { steps: 12 });
+
+    // Замер заводим до отпускания и ждём уже после: он идёт в браузере сам по себе,
+    // а отпускание тем временем приходит снаружи.
+    const watching = page.evaluate(
+        () =>
+            new Promise<number[]>((resolve) => {
+                const shade = document.querySelector('[class*="shade_"]')!;
+                const tops: number[] = [];
+                const deadline = performance.now() + 600;
+                const tick = () => {
+                    tops.push(shade.getBoundingClientRect().top);
+                    if (performance.now() < deadline) {
+                        requestAnimationFrame(tick);
+                    } else {
+                        resolve(tops);
+                    }
+                };
+                tick();
+            })
+    );
+    await page.mouse.up();
+    const tops = await watching;
+
+    await expect(shadeRegion(page), 'потяг вверх закрыл шторку').toHaveCount(1);
+    expect(Math.max(...tops) - Math.min(...tops), 'шторка дёрнулась на потяге вверх').toBeLessThanOrEqual(1);
+    expect(Math.round(Math.max(...tops)), 'шторка встала не на прежнее место').toBe(before.top);
+});
+
+/**
  * Прокрутка главнее потяга: список и всё, что мотается само, обязаны мотаться, а не превращать
  * движение пальца в закрытие. Колесом же шторка не двигается вовсе — прежде накрученное
  * переставляло её на соседнюю ступень, но ступеней больше нет, а закрывать список случайной
