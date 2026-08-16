@@ -1363,6 +1363,36 @@ test('позывной в карточке стоит вровень с крес
     expect(gap.overlap, 'позывной заехал под крестик').toBeLessThanOrEqual(0);
 });
 
+test('бортовой номер в карточке стоит под позывным, а не поодаль', async ({ page }) => {
+    await openChannel(page, DEMO, ALBATROS);
+    await openShipCard(page, 'Вымпел');
+    const card = page.getByRole('region', { name: 'Корабль' });
+
+    await expect(card).toBeVisible();
+
+    // Строка позывного ростом с крестик, и её нижняя половина запаса — пустое место: без
+    // поправки номер отъезжал от заголовка на полтора десятка пикселей. Меряем по буквам,
+    // а не по блокам: пустое место внутри строки заголовка блоку не видно.
+    //
+    // Одним заходом в страницу и здесь: шторка в этот момент ещё выезжает, и два замера
+    // пришлись бы на разные кадры (см. соседнюю проверку).
+    const gap = await card.evaluate((shade) => {
+        const name = shade.querySelector('[class*="large"]')!;
+        const hull = shade.querySelector('[class*="hullNumber"]')!;
+        const range = document.createRange();
+        range.selectNodeContents(name);
+        const letters = range.getBoundingClientRect();
+        range.selectNodeContents(hull);
+        return range.getBoundingClientRect().top - letters.bottom;
+    });
+
+    // Строки соседние: между буквами позывного и буквами номера — считанные пиксели.
+    // Верхняя граница взята с запасом на округление кегля, нижняя следит, чтобы номер
+    // не залез на позывной.
+    expect(gap, 'бортовой номер оторвался от позывного').toBeLessThanOrEqual(8);
+    expect(gap, 'бортовой номер налез на позывной').toBeGreaterThanOrEqual(0);
+});
+
 test('лампа передаёт и то, что набрано поверх выделения', async ({ page }) => {
     await openChannel(page, DEMO, ALBATROS);
     const mine = 'Корабль «Альбатрос»';

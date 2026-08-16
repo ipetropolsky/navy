@@ -173,6 +173,15 @@
     --font-size-base: 16px;
     --font-size-title: 18px;
     --font-size-heading: 24px;
+    // Позывной заголовком: крупнее мелкой мерки на шесть пунктов — ровно настолько, чтобы
+    // читаться заголовком, а не подписью. Своей ступеньки между small и base в наборе нет,
+    // а мест, где эта высота нужна, уже два: сам позывной (см. MemberName) и карточка корабля,
+    // которой надо знать, какой высоты выйдет строка с ним (см. ShipCard).
+    --font-size-name: ~'calc(var(--font-size-small) + 6px)';
+
+    // Межстрочное расстояние всего текста. Отдельной переменной — не ради body, а ради тех,
+    // кто считает высоту строки заранее: строка ростом в кегль на это число.
+    --line-height: 1.35;
 }
 
 html,
@@ -187,6 +196,6 @@ body {
     color: var(--color-text);
     font-family: 'Roboto', sans-serif;
     font-size: var(--font-size-base);
-    line-height: 1.35;
+    line-height: var(--line-height);
     overflow: hidden;
 }
