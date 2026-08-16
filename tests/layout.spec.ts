@@ -3021,3 +3021,82 @@ test('портрет корабля приближается по нажатию
     expect(after.ship, 'силуэт не вернулся к своему размеру').toBeCloseTo(before.ship, 0);
     expect(after.scale, 'линейка не вернулась вместе с силуэтом').toBeCloseTo(before.scale, 0);
 });
+
+/**
+ * Оборванный потяг не оставляет шторку на экране.
+ *
+ * Движение пальца обрывается чаще, чем кажется: указатель отпустили за краем окна, касание
+ * забрал браузер, вкладку увели. Отпускания шторка тогда не видит и остаётся со сдвигом
+ * от потяга и снятым на время движения переходом — а уезжает она как раз переходом и снимается
+ * с экрана по его концу. Выходило, что крестик гасил затемнение, а шторка висела на экране
+ * до перезагрузки и на следующем открытии молча подменяла корабль в себе на другой.
+ *
+ * Обрыв здесь настоящий: pointerdown и pointermove шторка получает, а pointerup не получает
+ * вовсе — ровно как при отпускании мыши за краем окна.
+ */
+test('шторка уходит с экрана и после оборванного потяга', async ({ page }) => {
+    await openChannel(page, DEMO, ALBATROS);
+    await openShipCard(page, 'Вымпел');
+    const card = page.getByRole('region', { name: 'Корабль' });
+    await expect(card).toBeVisible();
+
+    // Тянем за верхнюю кромку: своей прокрутки у неё нет, а значит потяг достаётся шторке.
+    const top = (await card.boundingBox())!.y;
+    await page.evaluate(() => {
+        const shade = document.querySelector('[aria-label="Корабль"]')!;
+        const box = shade.getBoundingClientRect();
+        const x = Math.round(box.left + box.width / 2);
+        const y = Math.round(box.top + 8);
+        const at = (offset: number, type: string) =>
+            new PointerEvent(type, {
+                bubbles: true,
+                cancelable: true,
+                pointerId: 1,
+                pointerType: 'mouse',
+                button: 0,
+                buttons: 1,
+                clientX: x,
+                clientY: y + offset,
+            });
+        shade.dispatchEvent(at(0, 'pointerdown'));
+        for (const step of [10, 40, 80]) {
+            window.dispatchEvent(at(step, 'pointermove'));
+        }
+        // Отпускания нет нарочно: указатель «ушёл» за окно.
+    });
+    await expect
+        .poll(async () => Math.round(((await card.boundingBox())?.y ?? top) - top), {
+            message: 'шторка не поехала за пальцем — тянуть было не за что',
+        })
+        .toBeGreaterThan(0);
+
+    // Крестик нажимаем с клавиатуры: обычное нажатие мышью само послало бы pointerup,
+    // которого шторка и ждёт, и оборванное движение чинилось бы им же — а чинить его должно
+    // само закрытие.
+    await card.getByRole('button', { name: 'Закрыть' }).press('Enter');
+    await expect(card, 'шторка осталась на экране после крестика').toBeHidden();
+
+    // И следующее открытие показывает тот корабль, который открыли, а не оставшийся с прошлого.
+    // Список под карточкой никуда не делся — открываем из него, второй раз его не зовём.
+    await page.getByRole('button', { name: 'Корабль «Резвый»' }).click();
+    await expect(card.getByText('Резвый'), 'в шторке остался прежний корабль').toBeVisible();
+});
+
+/**
+ * И на подстраховку: там, где перехода нет вовсе, шторка всё равно уходит.
+ *
+ * Снимают её с экрана по концу перехода, а он случается не всегда: движение бывает выключено
+ * в системе, отменено расширением или прерван сам переход. Событие тогда не приходит никогда,
+ * и шторка, снимаемая по нему, оставалась бы на экране навсегда. Здесь переходы сняты нарочно —
+ * ровно тот случай.
+ */
+test('шторка уходит с экрана и там, где переходов нет', async ({ page }) => {
+    await openChannel(page, DEMO, ALBATROS);
+    await page.addStyleTag({ content: '* { transition: none !important; }' });
+    await openShipCard(page, 'Вымпел');
+    const card = page.getByRole('region', { name: 'Корабль' });
+    await expect(card).toBeVisible();
+
+    await card.getByRole('button', { name: 'Закрыть' }).click();
+    await expect(card, 'шторка осталась на экране без перехода').toBeHidden({ timeout: 2000 });
+});

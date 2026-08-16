@@ -28,6 +28,18 @@ export const useSlide = (
         }
     }, [open]);
 
+    // Подстраховка на случай, когда конца перехода не будет вовсе: перехода нет в системе,
+    // где движение выключено, или его отменили прямо посреди ухода. Событие тогда не приходит,
+    // и блок, снимаемый по нему, оставался бы на экране навсегда. Срок взят с запасом
+    // от самого перехода (@slide-seconds, 0.28s) — на обычном уходе он и не понадобится.
+    useEffect(() => {
+        if (open) {
+            return undefined;
+        }
+        const timer = window.setTimeout(() => setMounted(false), 600);
+        return () => window.clearTimeout(timer);
+    }, [open]);
+
     const onTransitionEnd = (event: TransitionEvent<HTMLElement>) => {
         if (!open && event.target === event.currentTarget && event.propertyName === 'transform') {
             setMounted(false);

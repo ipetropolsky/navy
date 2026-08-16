@@ -3,6 +3,7 @@ import {
     MouseEvent as ReactMouseEvent,
     PointerEvent as ReactPointerEvent,
     ReactNode,
+    useEffect,
     useRef,
     useState,
 } from 'react';
@@ -163,6 +164,29 @@ export default function Shade({
     // хоть на кнопке внутри шторки. Флаг гасит этот click: без него потяг за строку списка
     // заодно нажимал бы то, с чего начали.
     const draggedRef = useRef(false);
+    // Чем оборвать незаконченный потяг снаружи. Пишется на время движения, зовётся при закрытии.
+    const dropDragRef = useRef<() => void>(() => undefined);
+
+    /**
+     * Закрытие отменяет потяг, чем бы тот ни кончился.
+     *
+     * Движение пальца обрывается чаще, чем кажется: указатель отпустили за краем окна, касание
+     * забрал браузер, вкладку увели. После такого обрыва на шторке остаётся и сдвиг, и снятый
+     * на время движения переход — и оба спорят с уходом. Сдвиг стоит в стиле самого блока
+     * и оказывается сильнее `translateY(100%)` из класса, а без перехода уход не начинается
+     * вовсе; между тем снимают шторку с экрана именно по концу этого перехода. Выходило, что
+     * затемнение гасло, а шторка оставалась висеть навсегда — и на следующем открытии молча
+     * подменяла корабль в себе на другой.
+     */
+    useEffect(() => {
+        if (open) {
+            return;
+        }
+        dropDragRef.current();
+        dropDragRef.current = () => undefined;
+        setDragging(false);
+        setShift(null);
+    }, [open]);
 
     const handlePointerDown = (event: ReactPointerEvent<HTMLElement>) => {
         const shade = shadeRef.current;
@@ -269,6 +293,7 @@ export default function Shade({
         window.addEventListener('pointermove', move);
         window.addEventListener('pointerup', up);
         window.addEventListener('pointercancel', up);
+        dropDragRef.current = stopListening;
     };
 
     /**
@@ -289,11 +314,17 @@ export default function Shade({
     }
 
     const leaving = !open;
+    // Уходящая шторка потяга под собой не помнит — и помнить не должна ни кадра. Отменяет его
+    // и эффект выше, но тот случается после отрисовки, а тут нужен тот самый первый кадр,
+    // в котором появился класс ухода: не будь на нём ни сдвига, ни снятого перехода, уход
+    // и начинается с него.
+    const held = leaving ? null : shift;
+    const heldDragging = dragging && !leaving;
     const look = [
         styles.shade,
         onScene ? styles.shadeOnScene : '',
         leaving ? styles.shadeLeaving : '',
-        dragging ? styles.shadeDragging : '',
+        heldDragging ? styles.shadeDragging : '',
     ]
         .filter(Boolean)
         .join(' ');
@@ -318,7 +349,7 @@ export default function Shade({
                         // Этаж уходит в стили переменной: и шторка, и её затемнение считают
                         // из неё свой z-index, а числа остаются в одном месте — в стилях.
                         '--shade-floor': floor,
-                        ...(dragging && shift !== null ? { opacity: Math.max(1 - shift / 200, 0) } : {}),
+                        ...(heldDragging && held !== null ? { opacity: Math.max(1 - held / 200, 0) } : {}),
                     } as CSSProperties
                 }
                 aria-label="Закрыть шторку"
@@ -329,7 +360,7 @@ export default function Shade({
                 style={
                     {
                         '--shade-floor': floor,
-                        ...(shift === null ? {} : { transform: `translateY(${shift}px)` }),
+                        ...(held === null ? {} : { transform: `translateY(${held}px)` }),
                     } as CSSProperties
                 }
                 aria-label={label}
