@@ -21,6 +21,7 @@ import { MAX_MESSAGE_LENGTH, SLOT_COUNT, slotDepth, slotShare } from '@/types/ch
 import {
     ALBATROS,
     DEMO,
+    backToChatButton,
     bubbles,
     clickShip,
     join,
@@ -31,6 +32,7 @@ import {
     send,
     shipNames,
     ships,
+    shipsButton,
 } from '@tests/helpers';
 
 /**
@@ -937,9 +939,13 @@ const contentBox = async (page: Page): Promise<{ width: number; height: number; 
     };
 };
 
-/** Ширина кнопки в шапке: на укрупнённой раскладке круг больше. */
+/**
+ * Ширина кнопки в шапке: на укрупнённой раскладке круг больше. Берётся первая попавшаяся —
+ * они там все одного роста и растут разом (это отдельно проверено ниже), а подпись у той,
+ * что переключает раскладку, меняется вместе с самой раскладкой.
+ */
 const buttonWidth = async (page: Page): Promise<number> => {
-    const box = await page.getByRole('button', { name: 'Корабли на связи' }).boundingBox();
+    const box = await page.locator('[class*="headerActions"] button').first().boundingBox();
     return Math.round(box!.width);
 };
 
@@ -1277,12 +1283,14 @@ test('шторка ростом по содержимому и не выше о�
     const short = await shadeBox(page);
     expect(short.top + short.height, 'шторка не дошла до нижней кромки окна').toBe(window.height);
     expect(short.height, 'короткий список растянулся до потолка').toBeLessThan(window.height - SHEET_TOP_GAP);
-    // Список кончается там же, где и шторка: пустого поля под последней строкой нет.
+    // Список кончается там же, где и шторка: пустого поля под ним нет. Кончается он полосой
+    // кнопок — координаты рейда и выход, — и вниз она доходит до самой кромки шторки: своё
+    // поле она унесла внутрь, к кнопкам (см. ui/Actions).
+    const band = (await page.locator('[class*="shade_"] [class*="actions_"]').boundingBox())!;
+    expect(short.top + short.height - (band.y + band.height), 'под списком осталось пустое поле').toBeLessThan(8);
     const rows = page.locator('[class*="row_"], [class*="rowActive"]');
     const lastRow = (await rows.last().boundingBox())!;
-    expect(short.top + short.height - (lastRow.y + lastRow.height), 'под списком осталось пустое поле').toBeLessThan(
-        60
-    );
+    expect(band.y - (lastRow.y + lastRow.height), 'между списком и полосой кнопок провал').toBeLessThan(60);
 
     // Длинный список упирается в потолок и мотается внутри себя.
     await growSheetList(page);
@@ -1336,7 +1344,7 @@ test('под шторкой всегда затемнение, а шапка н�
     expect(layers.shade, 'шторка накрыла шапку, которой её закрывают').toBeLessThan(layers.header);
 
     // Кнопка списка в шапке доступна и с открытой шторкой: ею список и закрывают обратно.
-    await page.getByRole('button', { name: 'Вернуться к разговору' }).click();
+    await backToChatButton(page).click();
     await expect(shadeRegion(page), 'кнопка шапки не закрыла шторку').toHaveCount(0);
 });
 
@@ -1556,23 +1564,83 @@ test('кнопки в шапке одного роста и над развёр�
     await page.setViewportSize({ width: COLUMN_WIDTH, height: 900 });
     await openChannel(page, DEMO, ALBATROS);
 
-    const small = await headerButton(page, 'Корабли на связи');
-    expect(await headerButton(page, 'Развернуть сцену'), 'в свёрнутой шапке кнопки разного роста').toEqual(small);
+    const small = await headerButton(page, 'Развернуть сцену');
 
     await page.getByRole('button', { name: 'Развернуть сцену' }).click();
     await page.waitForTimeout(600);
 
-    const big = await headerButton(page, 'Корабли на связи');
+    const big = await headerButton(page, 'Свернуть сцену');
     expect(big.size, 'над развёрнутым кадром кнопки не выросли').toBeGreaterThan(small.size);
     expect(big.icon, 'значок в выросшей кнопке остался прежним').toBeGreaterThan(small.icon);
-    expect(await headerButton(page, 'Свернуть сцену'), 'кнопка кадра отстала от остальных').toEqual(big);
 
-    // И выход с рейда — та самая кнопка, что отставала. Она встаёт в шапку на место списка,
-    // когда открыта форма своего корабля, и добавлена позже остальных: свойства на укрупнение
-    // ей тогда не досталось.
+    // И выход с рейда — та самая кнопка, что отставала. Она встаёт в шапку, когда открыта
+    // форма своего корабля, и добавлена позже остальных: свойства на укрупнение ей тогда
+    // не досталось.
     await openSheet(page);
     await page.getByRole('button', { name: 'Настроить корабль' }).click();
     expect(await headerButton(page, 'Уйти с рейда'), 'кнопка выхода отстала от остальных').toEqual(big);
+});
+
+/**
+ * Список кораблей открывают названием канала: значок стоит в конце названия, и нажимается
+ * всё вместе. Отдельной кнопки в шапке для этого больше нет — список это и есть «кто в этом
+ * канале», и спрашивают о нём, тыча в его название.
+ *
+ * Заодно проверяется, чем название отвечает на наведение: цветом — ничем. Прежде оно
+ * становилось акцентным и читалось ссылкой куда-то наружу, хотя открывает свою же шторку;
+ * теперь отклик остался за значком и за нажатием (см. .chatTitleButton в стилях).
+ */
+test('список кораблей открывается названием канала со значком на конце', async ({ page }) => {
+    await openChannel(page, DEMO, ALBATROS);
+    const title = shipsButton(page);
+
+    const parts = await title.evaluate((node) => {
+        const name = node.querySelector('span')!;
+        const icon = node.querySelector('svg')!.getBoundingClientRect();
+        return {
+            nameRight: name.getBoundingClientRect().right,
+            iconLeft: icon.left,
+            iconRight: icon.right,
+            right: node.getBoundingClientRect().right,
+            color: getComputedStyle(name).color,
+        };
+    });
+    expect(parts.iconLeft, 'значок стоит не в конце названия').toBeGreaterThanOrEqual(parts.nameRight);
+    expect(parts.iconRight, 'значок вылез за пределы кнопки').toBeLessThanOrEqual(parts.right + 1);
+
+    await title.hover();
+    const hovered = await title.evaluate((node) => getComputedStyle(node.querySelector('span')!).color);
+    expect(hovered, 'название перекрасилось под указателем').toBe(parts.color);
+
+    // Нажатие в самое начало кнопки — по названию, мимо значка: открывает список и оно.
+    await title.click({ position: { x: 4, y: 10 } });
+    await expect(
+        page.getByRole('region', { name: MEMBERS_SHADE }),
+        'список не открылся нажатием на название'
+    ).toBeVisible();
+});
+
+/**
+ * Внизу списка — то, что делают с рейдом целиком: зовут остальных и уходят сами. Подпись
+ * у координат на узком списке короче: «Координаты рейда» со значком отнимают там половину
+ * полосы у соседней кнопки, а рейд и так один — тот, чей список открыт.
+ *
+ * Меряется при этом сам список, а не окно (@container в стилях): он живёт в шторке, а шторка
+ * бывает уже окна — например в боковой раскладке.
+ */
+test('внизу списка кораблей — координаты рейда и выход, а на узком списке подпись короче', async ({ page }) => {
+    await openChannel(page, DEMO, ALBATROS);
+    await openSheet(page);
+
+    const shade = page.getByRole('region', { name: MEMBERS_SHADE });
+    await expect(shade.getByRole('button', { name: 'Координаты рейда' }), 'нет координат рейда').toBeVisible();
+    await expect(shade.getByRole('button', { name: 'Уйти с рейда' }), 'нет выхода с рейда').toBeVisible();
+
+    await page.setViewportSize({ width: 375, height: 800 });
+    await expect(
+        shade.getByRole('button', { name: 'Координаты' }),
+        'на узком списке подпись не укоротилась'
+    ).toBeVisible();
 });
 
 /**
@@ -1595,12 +1663,10 @@ test('шторка и форма корабля приезжают поверх 
     await input.evaluate((node) => node.setAttribute('data-probe', 'тот же самый'));
 
     await openSheet(page);
-    // Кнопка в шапке на время списка меняется на облачко разговора: она же и возвращает назад.
-    await expect(
-        page.getByRole('button', { name: 'Корабли на связи' }),
-        'кнопка списка осталась кнопкой списка'
-    ).toHaveCount(0);
-    await page.getByRole('button', { name: 'Вернуться к разговору' }).click();
+    // Значок в названии канала на время списка меняется на облачко разговора: тем же
+    // нажатием список и закрывают.
+    await expect(shipsButton(page), 'значок списка остался значком списка').toHaveCount(0);
+    await backToChatButton(page).click();
     await expect(input, 'разговор пересобрался под шторкой: поле стало другим узлом').toHaveAttribute(
         'data-probe',
         'тот же самый'
@@ -1610,10 +1676,14 @@ test('шторка и форма корабля приезжают поверх 
     await openSheet(page);
     await page.getByRole('button', { name: 'Настроить корабль' }).click();
     await expect(page.getByRole('button', { name: 'Готово' }), 'форма корабля не выехала').toBeVisible();
-    // Пока форма открыта, в шапке на месте списка стоит выход с рейда: это второе, что делают
-    // с собственным кораблём.
-    await expect(page.getByRole('button', { name: 'Уйти с рейда' }), 'в шапке не появился выход с рейда').toBeVisible();
-    await expect(page.getByRole('button', { name: 'Корабли на связи' }), 'кнопка списка осталась').toHaveCount(0);
+    // Пока форма открыта, в шапке стоит выход с рейда: это второе, что делают с собственным
+    // кораблём. Ищется он в самой шапке: та же подпись стоит и на кнопке внизу списка.
+    await expect(
+        page.getByRole('banner').getByRole('button', { name: 'Уйти с рейда' }),
+        'в шапке не появился выход с рейда'
+    ).toBeVisible();
+    // А названием канала из формы возвращаются к списку — из него форму и открыли.
+    await expect(shipsButton(page), 'из формы нечем вернуться к списку').toBeVisible();
 
     await page.getByRole('button', { name: 'Отмена' }).click();
     await expect(input, 'разговор пересобрался под формой: поле стало другим узлом').toHaveAttribute(
@@ -1979,7 +2049,10 @@ const headerSize = (page: Page) =>
     page.evaluate(() => {
         const letters = (selector: string) => parseFloat(getComputedStyle(document.querySelector(selector)!).fontSize);
         return {
-            title: letters('[class*="chatTitle"]'),
+            // Название в канале — само слово внутри кнопки: у кнопки вокруг него свой кегль
+            // не задан, буквы живут в ней (см. .chatTitleName). Второй селектор — для мест,
+            // где канала нет и название стоит простой строчкой.
+            title: letters('[class*="chatTitleName"], [class*="chatTitle_"]'),
             status: letters('[class*="chatStatus"]'),
             padding: getComputedStyle(document.querySelector('[class*="headerBar"]')!).padding,
             button: Math.round(

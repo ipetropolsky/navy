@@ -16,6 +16,7 @@ import {
     openShipForm,
     readState,
     ships,
+    shipsButton,
 } from '@tests/helpers';
 
 /**
@@ -64,13 +65,15 @@ const shipFormSubmit = (page: Page) =>
         .locator('button[type=submit]');
 
 /**
- * Уйти с рейда. Выход живёт в шапке и только при открытой форме своего корабля: пока она
- * открыта, значок списка подменён выходом.
+ * Уйти с рейда. Выход есть в двух местах — кнопкой внизу списка кораблей и в шапке, пока
+ * открыта форма своего корабля. Здесь идём вторым: он короче и никого ни о чём не спрашивает.
  */
 const leaveRaid = async (page: Page): Promise<void> => {
-    await page.getByRole('button', { name: 'Корабли на связи' }).click();
+    await shipsButton(page).click();
     await page.getByRole('button', { name: 'Настроить корабль' }).click();
-    await page.getByRole('button', { name: 'Уйти с рейда' }).click();
+    // Именно та, что в шапке: та же подпись стоит и на кнопке внизу списка кораблей,
+    // а список в этот момент ещё уезжает вниз, оставаясь в разметке.
+    await page.getByRole('banner').getByRole('button', { name: 'Уйти с рейда' }).click();
 };
 
 /** Огни каждого корабля в кадре: чем является каждый и где он стоит по вертикали. */
@@ -174,7 +177,7 @@ test('курс выбирается в форме, и корабль встаё�
     expect(joined.place.enterFrom, 'заход должен быть с противоположного борта, носом вперёд').toBe('left');
 
     // Переоснащение открывается с тем курсом, которым корабль стоит, — а не с новой монеткой.
-    await page.getByLabel('Корабли на связи').click();
+    await shipsButton(page).click();
     await page.getByRole('button', { name: 'Настроить корабль' }).click();
     await expect(page.getByLabel('Курс вправо')).toHaveAttribute('aria-pressed', 'true');
 
@@ -1484,7 +1487,7 @@ test('на соседний коридор своей линии корабль 
     const scene = (await page.locator('[class*="scene"]').first().boundingBox())!;
     const before = (await ships(page).first().boundingBox())!;
 
-    await page.getByLabel('Корабли на связи').click();
+    await shipsButton(page).click();
     await page.getByRole('button', { name: 'Настроить корабль' }).click();
     await page.locator('[data-berth="8-left"]').click();
     await page.getByRole('button', { name: 'Готово' }).click();

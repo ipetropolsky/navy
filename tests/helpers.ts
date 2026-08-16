@@ -102,13 +102,19 @@ export const join = async (page: Page, name: string, hullNumber: string, shipKin
 };
 
 /**
- * Открыть шторку со списком кораблей.
+ * Открыть шторку со списком кораблей — нажатием на название канала в шапке: значок списка
+ * стоит в конце названия, и нажимаются они вместе.
  *
- * Именно кнопку, а не «что угодно с такой подписью»: та же подпись стоит и на самой шторке,
- * и только что закрытая ещё какое-то время едет вниз, оставаясь в разметке.
+ * Ищется кнопка по подсказке, а не по подписи: подпись у неё — само название канала, разное
+ * от канала к каналу, а та же подпись «Корабли на связи» стоит и на самой шторке.
  */
+export const shipsButton = (page: Page) => page.locator('button[title="Корабли на связи"]');
+
+/** Она же, когда список уже открыт: значок в названии сменился на облачко разговора. */
+export const backToChatButton = (page: Page) => page.locator('button[title="Вернуться к разговору"]');
+
 export const openSheet = async (page: Page): Promise<void> => {
-    await page.getByRole('button', { name: 'Корабли на связи' }).click();
+    await shipsButton(page).click();
     await page.waitForTimeout(300);
 };
 

@@ -26,6 +26,7 @@ import Panel from '@/components/ui/Panel';
 import Shade from '@/components/ui/Shade';
 import { useSnackbar } from '@/components/ui/Snackbar';
 import TopFade from '@/components/ui/TopFade';
+import { LeaveIcon } from '@/components/ui/icons';
 import { HAIL_SIGNAL, morseDuration } from '@/hooks/morse';
 import { useChannel } from '@/hooks/useChannel';
 import { useLayout } from '@/hooks/useLayout';
@@ -224,6 +225,10 @@ export default function App() {
           }
         : undefined;
     const inChat = Boolean(channel && me);
+    // Виден ли сейчас список кораблей. Не то же, что sheetOpen: под открытой формой своего
+    // корабля список не показывают (см. Shade со списком ниже), и значок в названии канала
+    // должен обещать то же, что и случится.
+    const shipsShown = sheetOpen && !editing;
     // Место на рейде выбирают в форме корабля и только в ней: это её поле, просто вынесенное
     // на воду. На главной канала ещё нет, вставать некуда и не в чем — там рейд пустой
     // и ничего не предлагает.
@@ -381,12 +386,27 @@ export default function App() {
             );
     };
 
+    // Координаты рейда — ссылка на канал. Показывать её негде, она длинная, поэтому уходит
+    // прямо в буфер, а ответом служит снекбар. Живёт это в списке кораблей: позвать ещё
+    // кого-то — то же самое действие, что и посмотреть, кто уже пришёл.
     const handleCopyLink = () => {
         if (channel) {
             void copyText(channelLink(channel.channel.slug)).then((done) =>
-                notify(done ? 'Ссылка на канал скопирована' : 'Не вышло скопировать ссылку')
+                notify(done ? 'Координаты скопированы' : 'Не вышло скопировать координаты')
             );
         }
+    };
+
+    // Список кораблей открывается названием канала. Пока открыта форма своего корабля,
+    // списка не видно (он бы её накрыл), и то же нажатие возвращает от формы к списку —
+    // из него форму и открыли.
+    const handleShips = () => {
+        if (editing) {
+            setEditing(false);
+            setSheetOpen(true);
+            return;
+        }
+        setSheetOpen((open) => !open);
     };
 
     const handleLeave = () => {
@@ -688,68 +708,60 @@ export default function App() {
                 </div>
                 <div className={[styles.headerBar, expanded ? styles.headerBarExpanded : ''].filter(Boolean).join(' ')}>
                     <div className={styles.headerInfo}>
-                        {/* Название канала — это и кнопка «позвать остальных»: по нажатию
-                            ссылка уходит в буфер. Показывать сам адрес негде, он длинный. */}
-                        {channel ? (
+                        {/* Название канала — это и кнопка «кто на связи»: по нажатию открывается
+                            список кораблей. Значок стоит в конце названия, а не отдельной кнопкой
+                            справа: список — это и есть «кто в этом канале», и спрашивают о нём,
+                            тыча в его название. Нажимается всё вместе, название со значком.
+
+                            Кнопкой название становится только у своих: список показывают тем,
+                            кто уже на рейде, а гостю на входе открывать нечего — ему остаётся
+                            то же название простой строчкой. Её же видно и на главной, где
+                            канала нет вовсе: там на этом месте название сервиса. */}
+                        {inChat && channel ? (
                             <button
                                 type="button"
                                 className={styles.chatTitleButton}
-                                onClick={handleCopyLink}
-                                title="Скопировать ссылку на канал"
+                                onClick={handleShips}
+                                title={shipsShown ? 'Вернуться к разговору' : 'Корабли на связи'}
                             >
-                                {channel.channel.title}
-                            </button>
-                        ) : (
-                            <div className={styles.chatTitle}>Кильватер</div>
-                        )}
-                        <div className={styles.chatStatus}>{loading ? 'связь…' : status()}</div>
-                    </div>
-                    {/* Кнопки идут вплотную: это один блок действий, а не два разных. */}
-                    <div className={styles.headerActions}>
-                        {inChat &&
-                            (editing ? (
-                                // Пока открыта форма, на месте списка кораблей — выход с рейда:
-                                // это второе, что делают с собственным кораблём, и место ему
-                                // рядом с его настройками. Список в этот момент не нужен —
-                                // разговор всё равно накрыт формой.
-                                <IconButton onClick={handleLeave} aria-label="Уйти с рейда">
-                                    <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
-                                        <path
-                                            d="M14 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8M13 12H21M18 8l4 4-4 4"
-                                            stroke="currentColor"
-                                            strokeWidth="2"
-                                            strokeLinecap="round"
-                                            strokeLinejoin="round"
-                                            fill="none"
-                                        />
-                                    </svg>
-                                </IconButton>
-                            ) : (
-                                // Кнопка переключает, а не только открывает, и меняет значок:
-                                // пока список открыт, на ней облачко разговора — иначе непонятно,
-                                // чем вернуться назад. Нажатие мимо списка делает то же самое,
-                                // но по нему надо догадаться.
-                                <IconButton
-                                    onClick={() => setSheetOpen((open) => !open)}
-                                    aria-label={sheetOpen ? 'Вернуться к разговору' : 'Корабли на связи'}
-                                >
-                                    {sheetOpen ? (
-                                        <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+                                <span className={styles.chatTitleName}>{channel.channel.title}</span>
+                                {/* Значок меняется вместе с тем, что случится по нажатию:
+                                        пока список открыт, на нём облачко разговора — иначе
+                                        непонятно, чем вернуться назад. */}
+                                <span className={styles.chatTitleIcon}>
+                                    {shipsShown ? (
+                                        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
                                             <path
                                                 d="M20 3H4a2 2 0 0 0-2 2v9.5a2 2 0 0 0 2 2h2.5V21l4.5-4.5H20a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z"
                                                 fill="currentColor"
                                             />
                                         </svg>
                                     ) : (
-                                        <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+                                        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
                                             <path
                                                 d="M9 11a3.2 3.2 0 1 0 0-6.4A3.2 3.2 0 0 0 9 11zm7 .4a2.7 2.7 0 1 0 0-5.4 2.7 2.7 0 0 0 0 5.4zM9 13c-3 0-6 1.5-6 3.6V19h12v-2.4C15 14.5 12 13 9 13zm7 .8c-.5 0-1 .05-1.5.16 1.1.86 1.8 1.96 1.8 3.24V19H22v-2c0-1.8-2.6-3.2-6-3.2z"
                                                 fill="currentColor"
                                             />
                                         </svg>
                                     )}
-                                </IconButton>
-                            ))}
+                                </span>
+                            </button>
+                        ) : (
+                            <div className={styles.chatTitle}>{channel?.channel.title ?? 'Кильватер'}</div>
+                        )}
+                        <div className={styles.chatStatus}>{loading ? 'связь…' : status()}</div>
+                    </div>
+                    {/* Кнопки идут вплотную: это один блок действий, а не два разных. */}
+                    <div className={styles.headerActions}>
+                        {/* Пока открыта форма своего корабля, в шапке стоит выход с рейда:
+                            это второе, что делают с собственным кораблём, и место ему рядом
+                            с его настройками. В остальное время в шапке кнопки списка нет —
+                            список открывают названием канала слева. */}
+                        {inChat && editing && (
+                            <IconButton onClick={handleLeave} aria-label="Уйти с рейда">
+                                <LeaveIcon size={24} />
+                            </IconButton>
+                        )}
                         {/* Куда поставить разговор — вниз под кадр или сбоку от него.
                             Кнопка есть только в развёрнутой раскладке: в свёрнутой сбоку
                             стоять нечему, там сжат сам кадр. На узком окне её нет вовсе —
@@ -898,6 +910,10 @@ export default function App() {
                     // Карточка чужого корабля — та же, что и по щелчку по нему в кадре. Здесь
                     // она ложится поверх списка и закрывается обратно в него.
                     onShowShip={handleShowShip}
+                    // Позвать ещё кого-то и уйти самому — два действия про рейд целиком,
+                    // а не про корабль в строчке. Оба стоят полосой внизу списка.
+                    onCopyLink={handleCopyLink}
+                    onLeave={handleLeave}
                 />
             </Shade>
             {/* Карточка чужого корабля — такой же шторкой. Второй шторкой, а не содержимым

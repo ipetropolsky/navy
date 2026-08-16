@@ -3,8 +3,11 @@ import { KeyboardEvent, MouseEvent, PointerEvent, useRef } from 'react';
 import Avatar from '@/components/ships/Avatar';
 import MemberName from '@/components/ships/MemberName';
 import Pennant from '@/components/ships/Pennant';
+import Actions from '@/components/ui/Actions';
+import Button from '@/components/ui/Button';
 import IconButton from '@/components/ui/IconButton';
 import { useSnackbar } from '@/components/ui/Snackbar';
+import { LeaveIcon, LinkIcon } from '@/components/ui/icons';
 import { Member, SHIP_KIND_LABELS } from '@/types/channel';
 import { Press, isTap, startPress } from '@/utils/tap';
 
@@ -27,6 +30,10 @@ interface MembersListProps {
     onHail: (memberId: string) => void;
     /** Показать карточку чужого корабля: тем же движением, что и щелчок по нему в кадре. */
     onShowShip: (memberId: string) => void;
+    /** Координаты рейда: ссылка на канал уходит в буфер, а ответом служит снекбар. */
+    onCopyLink: () => void;
+    /** Уйти с рейда. */
+    onLeave: () => void;
 }
 
 /**
@@ -43,10 +50,15 @@ interface MembersListProps {
  * хуже — она накрывает собой ровно тот кадр, в котором корабль и надо было увидеть.
  *
  * Значок действия стоит у всех на одном месте — справа в строке. В своей это «настроить
- * корабль», в чужих у старшего на рейде — «высадить». Отдельной полосы кнопок под списком
- * нет: собранные внизу, они спрашивали бы корабль второй раз, уже выбранный строчкой.
- * Второе действие со своим кораблём — уйти с рейда — живёт в шапке и появляется там же,
- * где открылась форма.
+ * корабль», в чужих у старшего на рейде — «высадить». Действий с кораблём в полосе внизу
+ * нет и не будет: собранные внизу, они спрашивали бы корабль второй раз, уже выбранный
+ * строчкой.
+ *
+ * Полоса внизу — про рейд целиком, а не про корабль в списке: позвать ещё кого-то
+ * («Координаты» — ссылка на канал уходит в буфер) и уйти самому. Оба ответа на один
+ * и тот же вопрос «кто здесь»: посмотрев, кто уже пришёл, зовут остальных или уходят.
+ * Прежде координаты копировались нажатием на название канала в шапке, а выход стоял
+ * там же значком — обоим не хватало подписи, по которой видно, что случится.
  *
  * Вымпел стоит всегда и всегда отвечает званием — тычком на снекбар, наведением на подсказку.
  * Словами звание подписано там, где на подпись есть ширина: бэдж справа в строке прячется,
@@ -65,6 +77,8 @@ export default function MembersList({
     onKick,
     onHail,
     onShowShip,
+    onCopyLink,
+    onLeave,
 }: MembersListProps) {
     const notify = useSnackbar();
     const iAmSenior = Boolean(myId) && myId === seniorId;
@@ -211,6 +225,27 @@ export default function MembersList({
                     </div>
                 );
             })}
+
+            {/* Ряд кнопок тот же, что внизу форм и карточки корабля: одна механика на всё
+                приложение — как они делят ширину и когда переносятся. Прилипший, потому что
+                список длинный: с десятком кораблей выход уезжает под обрез, и человек листает
+                до конца, чтобы его найти. */}
+            <Actions pinned>
+                <Button variant="secondary" onClick={onCopyLink}>
+                    <LinkIcon />
+                    {/* На широком списке слово целиком: «Координаты рейда». Узкому хватает
+                        первого — второе слово там только отнимает место у соседней кнопки,
+                        а рейд и так один, тот самый, чей список открыт. Решает это ширина
+                        самого списка, а не окна (@container, см. стили). */}
+                    <span>
+                        Координаты<span className={styles.wide}> рейда</span>
+                    </span>
+                </Button>
+                <Button variant="danger" onClick={onLeave}>
+                    <LeaveIcon />
+                    <span>Уйти с рейда</span>
+                </Button>
+            </Actions>
         </div>
     );
 }

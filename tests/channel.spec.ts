@@ -13,6 +13,7 @@ import {
     readState,
     send,
     ships,
+    shipsButton,
     systemLines,
 } from '@tests/helpers';
 
@@ -157,11 +158,12 @@ test('уход с рейда отмечается в ленте и возвра�
     await openChannel(page, DEMO, ALBATROS);
     await expect(ships(page)).toHaveCount(3);
 
-    // Уход — из формы своего корабля: пока она открыта, значок списка в шапке подменён
-    // выходом с рейда. Это второе, что делают с собственным кораблём, и место ему там же.
+    // Уход — из формы своего корабля: пока она открыта, в шапке стоит выход с рейда.
+    // Это второе, что делают с собственным кораблём, и место ему там же. Берём тот, что
+    // в шапке: та же подпись стоит и на кнопке внизу списка кораблей.
     await openSheet(page);
     await page.getByRole('button', { name: 'Настроить корабль' }).click();
-    await page.getByRole('button', { name: 'Уйти с рейда' }).click();
+    await page.getByRole('banner').getByRole('button', { name: 'Уйти с рейда' }).click();
 
     // Вкладка возвращается к форме — тупика нет, встать в строй можно снова.
     await expect(page.getByPlaceholder('Гром')).toBeVisible();
@@ -175,12 +177,38 @@ test('уход с рейда отмечается в ленте и возвра�
     });
 });
 
+/**
+ * Координаты рейда — ссылка на канал, которой зовут остальных. Показывать её негде, она
+ * длинная, поэтому уходит прямо в буфер, а ответом служит снекбар: без него нажатие
+ * не отвечало бы ничем.
+ *
+ * Живёт кнопка внизу списка кораблей — там же, где смотрят, кто уже пришёл. Прежде ссылка
+ * копировалась нажатием на название канала в шапке, и догадаться об этом было нечем.
+ *
+ * Разрешение на буфер выдаётся здесь же: без него браузер отказывает в записи, и проверять
+ * пришлось бы не то, что скопировалось, а то, как приложение сообщает об отказе.
+ */
+test.describe(() => {
+    test.use({ permissions: ['clipboard-read', 'clipboard-write'] });
+
+    test('координаты рейда копируются из списка кораблей', async ({ page }) => {
+        await openChannel(page, DEMO, ALBATROS);
+        await openSheet(page);
+
+        await page.getByRole('button', { name: /^Координаты/ }).click();
+        await expect(page.getByRole('status'), 'о скопированном не сказали').toHaveText('Координаты скопированы');
+
+        const copied = await page.evaluate(() => navigator.clipboard.readText());
+        expect(copied, 'в буфер ушла не ссылка на этот канал').toBe(`${new URL(page.url()).origin}/?channel=${DEMO}`);
+    });
+});
+
 test('каждая перемена при переоснащении — своё сообщение', async ({ page }) => {
     await openChannel(page, DEMO, ALBATROS);
     const before = await systemLines(page).count();
 
     // Меняем разом всё: силуэт, позывной и бортовой номер.
-    await page.getByLabel('Корабли на связи').click();
+    await shipsButton(page).click();
     await page.getByRole('button', { name: 'Настроить корабль' }).click();
     await join(page, 'Буран', '512', 'Рейдовый тральщик');
 
@@ -206,7 +234,7 @@ test('строчка о корабле стоит по его сторону л�
     await expect(bubbles(page).last()).toContainText('Курс норд');
 
     // Меняем один бортовой номер: тип и позывной остаются прежними.
-    await page.getByLabel('Корабли на связи').click();
+    await shipsButton(page).click();
     await page.getByRole('button', { name: 'Настроить корабль' }).click();
     await join(page, 'Альбатрос', '512');
 
@@ -305,7 +333,7 @@ test('старший на рейде отмечен бэджем и высажи
     await openChannel(page, DEMO, ALBATROS);
     await expect(ships(page)).toHaveCount(3);
 
-    await page.getByLabel('Корабли на связи').click();
+    await shipsButton(page).click();
     await expect(page.getByText(SENIOR)).toHaveCount(1);
 
     // Высадка — из строчки того, кого высаживают: свою кнопку старший в списке не находит.
@@ -371,7 +399,7 @@ test('вымпел старшего в карточке корабля отве�
 
 test('не старшему высаживать нечем, а после его ухода старшинство переходит дальше', async ({ page }) => {
     await openChannel(page, DEMO, VYMPEL);
-    await page.getByLabel('Корабли на связи').click();
+    await shipsButton(page).click();
     await expect(page.getByLabel(/^Высадить/)).toHaveCount(0);
 
     // Старший ушёл — канал не остаётся без него: старшинство берёт тот, кто дольше всех
@@ -379,7 +407,7 @@ test('не старшему высаживать нечем, а после ег�
     await openChannel(page, DEMO, ALBATROS);
     await openSheet(page);
     await page.getByRole('button', { name: 'Настроить корабль' }).click();
-    await page.getByRole('button', { name: 'Уйти с рейда' }).click();
+    await page.getByRole('banner').getByRole('button', { name: 'Уйти с рейда' }).click();
     await expect(page.getByPlaceholder('Гром')).toBeVisible();
 
     const state = await readState(page);
@@ -387,7 +415,7 @@ test('не старшему высаживать нечем, а после ег�
 
     // И это видно в списке: бэдж переехал на нового старшего, а с ним и кнопки высадки.
     await openChannel(page, DEMO, VYMPEL);
-    await page.getByLabel('Корабли на связи').click();
+    await shipsButton(page).click();
     await expect(page.getByLabel(/^Высадить/)).toHaveCount(1);
 });
 

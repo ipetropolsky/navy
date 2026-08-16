@@ -7,6 +7,7 @@ import IconButton from '@/components/ui/IconButton';
 import Input from '@/components/ui/Input';
 import Panel from '@/components/ui/Panel';
 import { useSnackbar } from '@/components/ui/Snackbar';
+import { LinkIcon } from '@/components/ui/icons';
 import { channelLink } from '@/routing';
 import { copyText } from '@/utils/clipboard';
 import { SLUG_MAX_LENGTH, isValidSlug, slugify, slugifyInput } from '@/utils/slug';
@@ -140,15 +141,7 @@ export default function CreateChannel({ onCreate, demoHref, onOpenDemo }: Create
                             aria-label="Скопировать ссылку на канал"
                             title="Скопировать ссылку на канал"
                         >
-                            <svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true">
-                                <path
-                                    d="M10.5 13.5a3.6 3.6 0 0 0 5.1 0l2.6-2.6a3.6 3.6 0 0 0-5.1-5.1l-1 1M13.5 10.5a3.6 3.6 0 0 0-5.1 0l-2.6 2.6a3.6 3.6 0 0 0 5.1 5.1l1-1"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="1.8"
-                                    strokeLinecap="round"
-                                />
-                            </svg>
+                            <LinkIcon size={19} />
                         </IconButton>
                     }
                 />
