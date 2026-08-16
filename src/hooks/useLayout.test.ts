@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import { CHAT_SHARE, SCENE_MIN_WIDTH, SHEET_TOP_GAP, SIDE_MIN_WIDTH } from '@/config/layout';
-import { LayoutWish, allowedLayout, chatLimits, chatMode, chatRoom, defaultWish } from '@/hooks/useLayout';
+import { LayoutWish, allowedLayout, chatLimits, chatMagnets, chatMode, chatRoom, defaultWish } from '@/hooks/useLayout';
+import { MAGNET_GAP } from '@/utils/magnet';
 
 /**
  * Сверка выбранного размера разговора с нынешним окном. Здесь только сама сверка — без окна,
@@ -127,6 +128,50 @@ describe('allowedLayout', () => {
         // Дробный размер разговора даёт дробный кадр, а кадр рисует корабли и подписи —
         // половина пикселя там видна размытой кромкой.
         expect(Number.isInteger(allowedLayout(wish(), view(1357, 900)).size)).toBe(true);
+    });
+});
+
+describe('chatMagnets', () => {
+    /** Точки той раскладки, в которую попадает окно такой формы. */
+    const points = (width: number, height: number) => chatMagnets(allowedLayout(defaultWish(), view(width, height)));
+
+    it('под кадром это ровно четыре записанные доли хода', () => {
+        // Ход тут — окно без полоски под шапку, и доли считаются от него: 780 = 844 − 64.
+        expect(points(390, 844)).toEqual([0, 260, 520, 780]);
+    });
+
+    it('сбоку доли за пределом прижимаются к упору, а не пропадают', () => {
+        // Окно 1200: треть — 400, а вот две трети (800) и весь ход (1200) кадру не оставили бы
+        // и шестисот. Обе встают на упор, и точек остаётся три: убрать, треть, до упора.
+        expect(points(1200, 900)).toEqual([0, 400, 600]);
+    });
+
+    it('сбоку широкому окну хватает и трёх долей, и всех четырёх', () => {
+        // Окно 2400: упор — 1800, и под ним умещаются обе доли. Точек четыре, как и записано.
+        expect(points(2400, 1000)).toEqual([0, 800, 1600, 1800]);
+    });
+
+    it('сошедшиеся у упора точки не остаются обеими', () => {
+        // Окно 950: упор — 350, треть — 317. Между ними 33px, а различить человек может
+        // не ближе `MAGNET_GAP`; ближняя к упору и уходит.
+        const settled = points(950, 700);
+        expect(settled).toEqual([0, 350]);
+        expect(Math.min(...settled.slice(1).map((point, index) => point - settled[index]))).toBeGreaterThanOrEqual(
+            MAGNET_GAP
+        );
+    });
+
+    it('ноль остаётся нулём и там, где у размера есть свой минимум', () => {
+        // Сбоку разговор уже 300px не бывает, но это про разговор на экране. Ноль — его
+        // отсутствие, и без этой точки убрать разговор потягом было бы нечем.
+        expect(points(1200, 900)[0]).toBe(0);
+        expect(points(390, 844)[0]).toBe(0);
+    });
+
+    it('в тесном окне остаются хотя бы две точки', () => {
+        // Кадру тут не хватает и своего минимума: упор совпал с полом, и все три доли встали
+        // на одно число. Убрать и вернуть — то немногое, что должно работать всегда.
+        expect(points(700, 500)).toEqual([0, SIDE_MIN_WIDTH]);
     });
 });
 

@@ -2923,15 +2923,22 @@ test('повёрнутое окно не поджимает разговор, а
 /** Ширина бокового разговора: справа он всегда упирается в кромку окна. */
 const sideWidth = async (page: Page): Promise<number> => (await boxOf(page, 'main')).width;
 
-/** Потянуть коридор на `by` пикселей вправо (влево — отрицательное). */
+/**
+ * Подвести коридор на `by` пикселей вправо (влево — отрицательное) и поставить.
+ *
+ * Палец перед отпусканием стоит дольше отрезка, на котором меряется усилие (`FLING_MS`):
+ * коридор именно подводят, а не бросают. Сбоку у разговора тоже есть точки, и брошенный
+ * он улетал бы к ближней из них — а здесь проверяется, что кромка идёт за указателем.
+ */
 const dragGrip = async (page: Page, by: number): Promise<void> => {
     const grip = await boxOf(page, '[role="separator"]');
     const y = grip.top + grip.height / 2;
     await page.mouse.move(grip.left + grip.width / 2, y);
     await page.mouse.down();
     await page.mouse.move(grip.left + grip.width / 2 + by, y, { steps: 8 });
+    await page.waitForTimeout(FLING_MS * 3);
     await page.mouse.up();
-    await page.waitForTimeout(200);
+    await page.waitForTimeout(400);
 };
 
 /**
@@ -2985,9 +2992,11 @@ test('разговор тянут за коридор вдоль кромки, �
  */
 test('сузившееся окно урезает разговор, но выбора не переписывает', async ({ page }) => {
     await openSide(page);
-    await dragGrip(page, -300);
+    // Две сотни, а не три: от трёхсот кромка встала бы в тридцати пикселях от упора, и точка
+    // притянула бы её к себе — проверялось бы уже не окно, а магнит.
+    await dragGrip(page, -200);
     const chosen = await sideWidth(page);
-    expect(chosen, 'разговор не пошёл за указателем').toBe(SIDE_AT_WIDE + 300);
+    expect(chosen, 'разговор не пошёл за указателем').toBe(SIDE_AT_WIDE + 200);
 
     // Окно уже — разговор урезан ровно на столько, чтобы кадру остался его минимум.
     await page.setViewportSize({ width: 1000, height: 900 });
@@ -3598,4 +3607,73 @@ test('приезд разговора к точке раздаёт кадр бе
         Math.round(chatRoom(PHONE) * 2 * CHAT_SHARE),
         0
     );
+});
+
+/**
+ * Сбоку у разговора те же четыре точки, что и под кадром, только ход у него другой и пределы
+ * настоящие: уже трёхсот он не бывает, а кадру обязан оставить шестьсот. Доля, вышедшая за
+ * упор, к нему и прижимается — «две трети ширины» на окне в 1200 значит «до упора», — и точек
+ * там остаётся три: убрать, треть, упор (см. `chatMagnets` в hooks/useLayout).
+ */
+
+/** Ширина разговора сбоку, px. */
+const chatWidth = async (page: Page): Promise<number> => (await boxOf(page, 'main')).width;
+
+/**
+ * Подвести кромку разговора сбоку на `by` пикселей вширь (уже — отрицательное) и поставить.
+ * Разговор стоит справа, поэтому «шире» — это влево; в остальном всё то же, что и под кадром.
+ */
+const leadSide = async (page: Page, by: number): Promise<void> => {
+    const { x, y } = await gripSpot(page);
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x - by, y, { steps: 8 });
+    await page.waitForTimeout(FLING_MS * 3);
+    await page.mouse.up();
+    await page.waitForTimeout(600);
+};
+
+test('разговор сбоку притягивается к точкам, а между ними стоит где поставили', async ({ page }) => {
+    await page.setViewportSize(LYING);
+    await openChannel(page, DEMO, ALBATROS);
+
+    const third = Math.round(LYING.width * CHAT_SHARE);
+    expect(await chatWidth(page), 'разговор открылся не третью ширины').toBe(third);
+
+    // Подвели почти к трети — приехал на треть: тридцать пикселей это ближе `MAGNET_PULL`.
+    await leadSide(page, -30);
+    expect(await chatWidth(page), 'разговор не вернулся на треть').toBe(third);
+
+    // Подвели на сотню шире — там до точек далеко в обе стороны, и разговор остался на месте.
+    await leadSide(page, 100);
+    expect(await chatWidth(page), 'разговор не удержался между точками').toBe(third + 100);
+
+    // Дальше к упору: две трети ширины кадру не оставили бы и шестисот, и точка стоит
+    // на самом упоре.
+    await leadSide(page, 200);
+    expect(await chatWidth(page), 'разговор встал не на упор').toBe(LYING.width - SCENE_MIN_WIDTH);
+});
+
+/**
+ * Ноль — такая же точка и сбоку: подведённая к правой кромке окна, кромка разговора уводит его
+ * с экрана целиком. Пределы ширины про эту точку ничего не говорят — уже 300px не бывает
+ * разговор на экране, а тут его нет вовсе.
+ *
+ * Про усилие проверки здесь нет нарочно: мерка у него общая на обе раскладки (`trackFling`),
+ * и проверена она там, где ход длиннее, — под кадром.
+ */
+test('подведённая к правой кромке кромка убирает разговор сбоку', async ({ page }) => {
+    await page.setViewportSize(LYING);
+    await openChannel(page, DEMO, ALBATROS);
+
+    // Ведём кромку к самому краю окна: разговору там остаётся ноль, и точка стоит ровно на нём.
+    await leadSide(page, -(Math.round(LYING.width * CHAT_SHARE) - 1));
+    await expect(page.getByRole('button', { name: 'Вернуть разговор' }), 'разговор не ушёл с экрана').toBeVisible();
+    await expect(page.locator('[role="separator"]'), 'у убранного разговора остался коридор').toHaveCount(0);
+
+    // Возвращается он в тот размер, в каком его убрали: кромкой выбирают, быть ли разговору
+    // на экране, а не сколько он занимает.
+    await page.getByRole('button', { name: 'Вернуть разговор' }).click();
+    await page.waitForTimeout(600);
+    expect(await chatWidth(page), 'разговор вернулся не в свой размер').toBe(Math.round(LYING.width * CHAT_SHARE));
 });

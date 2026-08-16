@@ -27,16 +27,15 @@ import Shade from '@/components/ui/Shade';
 import { useSnackbar } from '@/components/ui/Snackbar';
 import TopFade from '@/components/ui/TopFade';
 import { LeaveIcon } from '@/components/ui/icons';
-import { CHAT_POINTS } from '@/config/layout';
 import { HAIL_SIGNAL, morseDuration } from '@/hooks/morse';
 import { useChannel } from '@/hooks/useChannel';
-import { useLayout } from '@/hooks/useLayout';
+import { chatMagnets, useLayout } from '@/hooks/useLayout';
 import { useSlide } from '@/hooks/useSlide';
 import { useSwipe } from '@/hooks/useSwipe';
 import { channelLink, useRoute } from '@/routing';
 import { Berth, Message, MorseFeed, ShipKind, Side, authorLook, isSameBerth, otherSide } from '@/types/channel';
 import { copyText } from '@/utils/clipboard';
-import { Fling, normalizeMagnets, settleMagnet, trackFling } from '@/utils/magnet';
+import { Fling, settleMagnet, trackFling } from '@/utils/magnet';
 
 import styles from './App.module.less';
 
@@ -541,9 +540,9 @@ export default function App() {
         /**
          * Отпустили — разговор приезжает к своей точке.
          *
-         * Точки только под кадром: там разговор ведёт себя шторкой, и положений у него четыре
-         * (см. `CHAT_POINTS`). Сбоку он остаётся там, куда его подвели, — ширину панели
-         * доводят на глаз, и притягивать её к долям окна незачем.
+         * Точки в обеих раскладках одни и те же, и считает их раскладка (`chatMagnets`): сбоку
+         * они прижаты её пределами, и там, где кадру нельзя отдать меньше шестисот, «две трети»
+         * и «весь ход» сходятся в один упор.
          *
          * Считается приземление не от места, где палец встал, а от того, куда разговор долетел
          * бы по инерции: короткий сильный рывок вниз проскакивает точки насквозь и уводит
@@ -557,20 +556,20 @@ export default function App() {
         const onUp = (event: PointerEvent) => {
             setDragging(false);
             const from = dragFrom.current;
-            if (!atSide && from) {
-                resize(
-                    settleMagnet({
-                        from: from.size,
-                        to: from.open,
-                        velocity: from.fling.speed(event.timeStamp),
-                        points: normalizeMagnets(CHAT_POINTS, layout.full),
-                        free: true,
-                    }),
-                    true
-                );
+            if (!from) {
+                keep();
                 return;
             }
-            keep();
+            resize(
+                settleMagnet({
+                    from: from.size,
+                    to: from.open,
+                    velocity: from.fling.speed(event.timeStamp),
+                    points: chatMagnets(layout),
+                    free: true,
+                }),
+                true
+            );
         };
         window.addEventListener('pointermove', onMove);
         window.addEventListener('pointerup', onUp);
@@ -580,7 +579,7 @@ export default function App() {
             window.removeEventListener('pointerup', onUp);
             window.removeEventListener('pointercancel', onUp);
         };
-    }, [dragging, resize, keep, gripAxis, atSide, layout.full]);
+    }, [dragging, resize, keep, gripAxis, layout]);
 
     /**
      * Тот же коридор с клавиатуры: стрелками по шагу, Home и End — до упора. Коридор объявлен

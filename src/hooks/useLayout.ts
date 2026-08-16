@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
-import { CHAT_SHARE, SCENE_MIN_WIDTH, SHEET_TOP_GAP, SIDE_MIN_WIDTH } from '@/config/layout';
+import { CHAT_POINTS, CHAT_SHARE, SCENE_MIN_WIDTH, SHEET_TOP_GAP, SIDE_MIN_WIDTH } from '@/config/layout';
+import { normalizeMagnets } from '@/utils/magnet';
 import { sessionStore } from '@/utils/storage';
 
 /**
@@ -121,6 +122,31 @@ export const chatLimits = (mode: LayoutMode, view: WindowShape): { min: number; 
     mode === 'side'
         ? { min: SIDE_MIN_WIDTH, max: Math.max(SIDE_MIN_WIDTH, view.width - SCENE_MIN_WIDTH) }
         : { min: 0, max: chatRoom('under', view) };
+
+/**
+ * Точки, к которым разговор притягивается, когда его отпустили, px.
+ *
+ * Точки одни и те же в обеих раскладках (`CHAT_POINTS`): ноль, треть, две трети, весь ход.
+ * Разница только в том, что сбоку у размера есть настоящие пределы, и доля, вышедшая за них,
+ * не выбрасывается, а прижимается к упору: «две трети ширины» на окне в 1200 значит «до упора»,
+ * то есть 600, — а не «такого положения нет». Разошедшись меньше чем на `MAGNET_GAP`, сошедшиеся
+ * так точки убирает сам `normalizeMagnets`, и сбоку их обычно остаётся три: убрать, треть, упор.
+ *
+ * Ноль пределами не зажимается ни в одной раскладке: это не размер разговора, а его отсутствие,
+ * и `SIDE_MIN_WIDTH` про него ничего не говорит — в 300px не помещается лента, а тут её нет
+ * вовсе. Без этой точки разговор сбоку нечем было бы убрать потягом.
+ *
+ * Под кадром пределов нет (`min` = 0, `max` = весь ход), и зажимать там нечего: точки выходят
+ * ровно теми же, какими записаны.
+ */
+export const chatMagnets = ({ full, min, max }: Layout): number[] =>
+    normalizeMagnets(
+        CHAT_POINTS.map((point) => {
+            const pixels = typeof point === 'number' ? point : (parseFloat(point) / 100) * full;
+            return pixels <= 0 ? 0 : clamp(pixels, min, max);
+        }),
+        full
+    );
 
 /**
  * С чем приложение открывается, когда вкладке нечего вспомнить: треть на обе раскладки.
