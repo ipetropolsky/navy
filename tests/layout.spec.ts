@@ -16,7 +16,7 @@ import {
     SIDE_MIN_WINDOW,
     SIDE_SHARE,
 } from '@/config/layout';
-import { SLOT_COUNT, slotDepth, slotShare } from '@/types/channel';
+import { MAX_MESSAGE_LENGTH, SLOT_COUNT, slotDepth, slotShare } from '@/types/channel';
 
 import {
     ALBATROS,
@@ -2798,4 +2798,67 @@ test('разговор переезжает вбок и на главной, г�
     await page.getByRole('button', { name: 'Разговор под кадром' }).click();
     await page.waitForTimeout(600);
     expect((await boxOf(page, 'main')).width, 'форма не вернулась под кадр').toBe(COLUMN_WIDTH);
+});
+
+/**
+ * Снекбар отвечает на то, что человек только что нажал, — а нажимает он и из шторки: вымпел
+ * старшего в списке кораблей и в карточке отзывается именно уведомлением. Этаж у снекбара
+ * был ниже шторки, и ответ на нажатие уходил под неё: нажал — и ничего не случилось.
+ */
+test('уведомление видно поверх шторки, из которой его вызвали', async ({ page }) => {
+    await openChannel(page, DEMO, ALBATROS);
+    await openSheet(page);
+    await page.getByRole('button', { name: 'Старший на рейде' }).first().click();
+
+    const snackbar = page.getByRole('status');
+    await expect(snackbar, 'уведомления нет вовсе').toHaveText('Старший на рейде');
+
+    // Сравниваем этажи, а не спрашиваем браузер, что лежит сверху: снекбар сквозной
+    // для указателя (`pointer-events: none`), и в hit-тесте его не видно вовсе.
+    const floors = await page.evaluate(() => {
+        const floor = (selector: string) => {
+            const node = document.querySelector(selector)!;
+            const box = node.getBoundingClientRect();
+            return { level: Number(getComputedStyle(node).zIndex), box };
+        };
+        const snack = floor('[role="status"]');
+        const shade = floor('[class*="shade_"]');
+        const across = Math.min(snack.box.right, shade.box.right) - Math.max(snack.box.left, shade.box.left);
+        const down = Math.min(snack.box.bottom, shade.box.bottom) - Math.max(snack.box.top, shade.box.top);
+        return { snack: snack.level, shade: shade.level, overlap: across > 0 && down > 0 };
+    });
+
+    expect(floors.overlap, 'снекбар и шторка не пересекаются — проверять нечего').toBe(true);
+    expect(floors.snack, 'снекбар лежит не выше шторки').toBeGreaterThan(floors.shade);
+});
+
+/**
+ * Снекбар шириной по своей строчке, а не по половине окна. Прижат он одним краем
+ * (`left: 50%`), и без явного `width: max-content` браузер отмерял бы ему ширину по остатку
+ * от этого края — то есть ровно половину экрана. На телефоне из-за этого короткое
+ * уведомление ломалось надвое на пустом месте: места вокруг вдоволь, а строчка в две.
+ */
+test('уведомление на телефоне стоит в одну строку, пока помещается в экран', async ({ page }) => {
+    await page.setViewportSize({ width: 360, height: 740 });
+    await openChannel(page, DEMO, ALBATROS);
+
+    // Уведомление берём подлиннее: короткое влезало бы и в половину окна, и проверка
+    // проходила бы при любой ширине. Отказ по длине — как раз такое: в экран помещается
+    // с запасом, в половину экрана — нет.
+    await page.getByPlaceholder('Сообщение').fill('а'.repeat(MAX_MESSAGE_LENGTH + 1));
+    await page.keyboard.press('Enter');
+
+    const snackbar = page.getByRole('status');
+    await expect(snackbar, 'уведомления нет вовсе').toBeVisible();
+
+    // Строк считаем не по высоте, а по строчным коробкам: диапазон по содержимому отдаёт
+    // по прямоугольнику на строку, и двойной перенос от одинарного так не отличить иначе.
+    const written = await snackbar.evaluate((node) => {
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        return { lines: range.getClientRects().length, width: node.getBoundingClientRect().width };
+    });
+
+    expect(written.lines, 'короткое уведомление сломалось на две строки').toBe(1);
+    expect(written.width, 'уведомление растянулось на весь экран').toBeLessThan(360 * 0.92 + 1);
 });
