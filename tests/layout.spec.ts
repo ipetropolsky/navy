@@ -2499,6 +2499,64 @@ test('разворот с выбранной панелью расхлопыва
 });
 
 /**
+ * Место под панель бронируется первым же кадром разворота — и потому кадр идёт к своему
+ * размеру по прямой, не заглядывая по дороге туда, где ему стоять не придётся.
+ *
+ * Прежде разворот в боковую раскладку кончался отскоком: кадр раздавался во всю ширину окна,
+ * и в тот миг, когда панель занимала своё место, отскакивал назад на её ширину — на треть
+ * окна одним кадром. Ловится это только покадрово: и до, и после отскока раскладка одна и та же.
+ *
+ * Меряем обе мерки кадра. Ширина: она в этом развороте не растёт, а убывает — колонка шире
+ * того, что остаётся рядом с панелью, — и всякий кадр шире исходной колонки и есть тот самый
+ * перелёт. Высота: она идёт вверх и обязана дойти до окна одним движением, а не в два приёма
+ * с остановкой на «окно минус разговор».
+ */
+test('разворот с выбранной панелью бронирует ей место, а не отдаёт его кадру', async ({ page }) => {
+    await openSide(page);
+    await page.getByRole('button', { name: 'Свернуть сцену' }).click();
+    await page.waitForTimeout(600);
+
+    const frames = await page.evaluate(async () => {
+        const header = document.querySelector('header')!;
+        const taken: { width: number; height: number }[] = [];
+        document.querySelector<HTMLButtonElement>('button[aria-label="Развернуть сцену"]')!.click();
+        const started = performance.now();
+        await new Promise<void>((resolve) => {
+            const tick = (): void => {
+                const rect = header.getBoundingClientRect();
+                taken.push({ width: rect.width, height: rect.height });
+                if (performance.now() - started < 800) {
+                    requestAnimationFrame(tick);
+                } else {
+                    resolve();
+                }
+            };
+            requestAnimationFrame(tick);
+        });
+        return taken;
+    });
+
+    const widths = frames.map((frame) => frame.width);
+    const heights = frames.map((frame) => frame.height);
+    expect(widths[0], 'замер начался не со свёрнутой колонки').toBe(COLUMN_WIDTH);
+    expect(widths[widths.length - 1], 'кадру достался не остаток окна').toBe(WIDE - SIDE_AT_WIDE);
+    expect(heights[heights.length - 1], 'кадр не дорос до окна').toBe(900);
+
+    // Допуск в полпикселя — на дробную ширину и округление разметки, а не на движение:
+    // перелёт, который ловит проверка, был во всю ширину панели.
+    const SLACK = 0.5;
+    expect(Math.max(...widths), 'кадр по дороге раздавался шире, чем ему положено').toBeLessThan(COLUMN_WIDTH + SLACK);
+    expect(
+        widths.every((width, i) => i === 0 || width <= widths[i - 1] + SLACK),
+        'ширина кадра шла с возвратом'
+    ).toBe(true);
+    expect(
+        heights.every((height, i) => i === 0 || height >= heights[i - 1] - SLACK),
+        'высота кадра шла с возвратом'
+    ).toBe(true);
+});
+
+/**
  * Узкое окно: боковой раскладки нет вовсе. Кнопки переезда нет — нажимать её было бы враньём,
  * правила на этой ширине не применяются, — а разговор, застигнутый сужением окна сбоку,
  * оказывается там же, где и был бы всегда: под кадром и во всю ширину колонки.
