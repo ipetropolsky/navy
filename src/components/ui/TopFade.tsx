@@ -104,7 +104,7 @@ export default function TopFade({ className, children }: TopFadeProps) {
             onScrollCapture={handleScrollCapture}
         >
             {/* Полоска лежит поверх содержимого и ничего под собой не ловит: и нажатие,
-                и потяг за шторку проходят сквозь неё насквозь. */}
+                и свайп за шторку проходят сквозь неё насквозь. */}
             <div className={styles.fade} style={{ opacity: fade }} aria-hidden="true" />
             {children}
         </div>
