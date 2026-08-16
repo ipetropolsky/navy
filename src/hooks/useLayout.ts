@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 
 import { CHAT_POINTS, CHAT_SHARE, SCENE_MIN_WIDTH, SHEET_TOP_GAP, SIDE_MIN_WIDTH } from '@/config/layout';
 import { normalizeMagnets } from '@/utils/magnet';
@@ -223,23 +224,91 @@ const readWish = (): LayoutWish => {
  *  за это отвечает сама дверь в хранилище (см. utils/storage). */
 const writeWish = (wish: LayoutWish): void => sessionStore.write(STORAGE_KEY, JSON.stringify(wish));
 
+/**
+ * Отметка «окно прямо сейчас меняет размер». Висит на самом `<html>`, а правило по ней —
+ * в App.module.less: пока отметка стоит, все переходы раскладки сняты (`--chat-move: 0s`).
+ *
+ * Зачем она. Высота сцены считается от `100dvh` и переходит во времени, а `100dvh` меняет
+ * не разговор, а само окно — и меняет разом. Переход же ведёт кадр к новому росту полсекунды,
+ * и всё это время кадр отмерен по окну, которого уже нет: на повороте телефона это было видно
+ * отдельным движением поверх переезда разговора (замер: сцена шла 604 → 700 после того,
+ * как окно уже стало 700 высотой). Переход нужен там, где высоту меняет разговор, и не нужен
+ * там, где её меняет окно, — вот отметка и разводит эти два случая.
+ *
+ * На `<html>`, а не на самом приложении, нарочно: ставится она **синхронно**, прямо в обработчике
+ * resize, — только так она успевает к пересчёту стилей того же кадра, в котором сменился `dvh`.
+ * Опоздай она хоть на кадр, толку от неё не было бы вовсе: переход, уже пущенный браузером,
+ * сменой секунд не останавливается. А className приложения пишет React, и ближайшая же его
+ * отрисовка стёрла бы класс, поставленный руками, — на повороте она случается сразу же.
+ */
+const RESIZING_MARK = 'window-resizing';
+
 /** Форма окна. Меняется она и без ведома человека — повернули телефон, вытащили ноутбук
  *  из док-станции, — и раскладка обязана это заметить. */
 const useWindowShape = (): WindowShape => {
     const [shape, setShape] = useState<WindowShape>(() => ({ width: window.innerWidth, height: window.innerHeight }));
+    // То же окно, но доступное обработчику без пересоздания подписки. Отметка ставится только
+    // на настоящую перемену: resize приходит и от появившейся полосы прокрутки, и от клавиатуры
+    // на телефоне, а снимать переходы там, где ничего не сдвинулось, незачем.
+    const seen = useRef(shape);
     useEffect(() => {
-        const onResize = () =>
-            setShape((was) =>
-                was.width === window.innerWidth && was.height === window.innerHeight
-                    ? was
-                    : { width: window.innerWidth, height: window.innerHeight }
-            );
+        /**
+         * Окно стало другим — раскладка обязана стать другой в том же кадре.
+         *
+         * Отсюда `flushSync`: обычная отрисовка встала бы в очередь и дошла бы до разметки
+         * только следующим кадром, а `100dvh` браузер меняет прямо сейчас. Один кадр между ними
+         * — это кадр, в котором высота окна уже новая, а размер разговора ещё старый, и кадр
+         * в нём отмерен наполовину по одному окну, наполовину по другому. Событие resize
+         * приходит до того, как браузер пересчитает стили, — успевает и то, и другое.
+         *
+         * `now` отделяет живое событие от единственного захода при подписке: там отрисовка
+         * и так идёт, и `flushSync` посреди неё React справедливо не даёт.
+         */
+        const look = (now: boolean) => {
+            if (seen.current.width === window.innerWidth && seen.current.height === window.innerHeight) {
+                return;
+            }
+            const next = { width: window.innerWidth, height: window.innerHeight };
+            seen.current = next;
+            if (!now) {
+                setShape(next);
+                return;
+            }
+            document.documentElement.classList.add(RESIZING_MARK);
+            flushSync(() => setShape(next));
+        };
+        const onResize = () => look(true);
         window.addEventListener('resize', onResize);
         // Между первой отрисовкой и подпиской окно могло измениться — например, пока
         // догружались шрифты и появилась полоса прокрутки.
-        onResize();
-        return () => window.removeEventListener('resize', onResize);
+        look(false);
+        return () => {
+            window.removeEventListener('resize', onResize);
+            document.documentElement.classList.remove(RESIZING_MARK);
+        };
     }, []);
+
+    // Снимается отметка через два кадра после того, как новое окно дошло до разметки.
+    //
+    // Два, а не один: первый заход случается ещё в том самом кадре, где сменилось окно, —
+    // кадровые заявки выполняются после события resize, а стили в этом кадре ещё не считаны,
+    // и снятая тут отметка пустила бы переход ровно на те перемены, ради которых её ставили.
+    // Второй заход — уже после того, как этот кадр нарисован, и трогаться в нём нечему:
+    // всё стоит на новых местах.
+    //
+    // Отсчёт заводится заново на каждую перемену окна, так что тянущий за угол окна указатель
+    // отметку не теряет: она держится всё время, пока окно едет, и снимается, когда оно встало.
+    useEffect(() => {
+        let after = 0;
+        const first = requestAnimationFrame(() => {
+            after = requestAnimationFrame(() => document.documentElement.classList.remove(RESIZING_MARK));
+        });
+        return () => {
+            cancelAnimationFrame(first);
+            cancelAnimationFrame(after);
+        };
+    }, [shape]);
+
     return shape;
 };
 

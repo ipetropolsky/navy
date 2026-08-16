@@ -1259,6 +1259,106 @@ test('уход разговора растекается, а не прыгает
     check(back, false);
 });
 
+/**
+ * Какой рост положен кадру в окне такой формы, px. Та же выкладка, что и в стилях: всё окно
+ * без разговора, плюс полоска заезда под него, но не ниже наименьшего кадра и не выше окна.
+ */
+const frameHeight = (view: { width: number; height: number }): number =>
+    Math.min(
+        view.height,
+        Math.max(Math.max(SCENE_MIN_HEIGHT, SCENE_MIN_SHARE * view.height), view.height - chatSize(view) + CHAT_OVERLAP)
+    );
+
+/** Окно того же стоячего вида, но ниже: раскладка та же, а все мерки другие. */
+const SHRUNK = { width: STANDING.width, height: 700 };
+
+/** Покадровый замер живёт в окне страницы: заводят его одним заходом, читают другим. */
+declare global {
+    interface Window {
+        __film: { frame: number; window: number }[];
+    }
+}
+
+/**
+ * Полсекунды на движение — это про перемены от разговора: убрали его кнопкой, потянули
+ * за кромку, вернули из-за кромки после поворота. Само окно к этому отношения не имеет: свои
+ * мерки оно меняет разом, и вести к ним кадр полсекунды значит полсекунды держать кадр
+ * отмеренным по окну, которого уже нет. Видно это было на повороте отдельным движением поверх
+ * переезда разговора — замер: сцена шла 604 → 700 после того, как окно уже стало 700 высотой.
+ *
+ * Проверяем поэтому не «плавно ли», а «когда»: на каждом кадре, где окно уже новое, кадр обязан
+ * стоять в новом росте. Кадров этих десятки — переход, останься он, растянулся бы на все.
+ *
+ * И тут же обратное: снятие переходов держится ровно на смену окна и не остаётся насовсем —
+ * кнопка после этого убирает разговор всё тем же движением, что и до.
+ */
+test('кадр встаёт в новый рост вместе с окном, а не едет к нему следом', async ({ page }) => {
+    await page.setViewportSize(STANDING);
+    await openChannel(page, DEMO, ALBATROS);
+
+    // Замер идёт покадрово и изнутри страницы: снаружи каждый заход стоит миллисекунд, и весь
+    // переход в полсекунды прошёл бы между двумя замерами незамеченным.
+    //
+    // Заводится он отдельным заходом и складывает кадры в окно: дожидаться его результата
+    // нельзя — окно меняют снаружи, и ждущая проверка не дошла бы до смены окна вовсе.
+    await page.evaluate(() => {
+        window.__film = [];
+        const since = performance.now();
+        const tick = (): void => {
+            window.__film.push({
+                frame: document.querySelector('header')!.getBoundingClientRect().height,
+                window: window.innerHeight,
+            });
+            if (performance.now() - since < 1200) {
+                requestAnimationFrame(tick);
+            }
+        };
+        requestAnimationFrame(tick);
+    });
+    // Несколько кадров до смены окна: по ним видно, что замер идёт и что до перемены кадр
+    // стоял в прежнем росте, — иначе проверка прошла бы и на пустом замере.
+    await page.waitForTimeout(100);
+    await page.setViewportSize(SHRUNK);
+    await page.waitForTimeout(900);
+    const film = await page.evaluate(() => window.__film);
+
+    const before = film.filter((shot) => shot.window === STANDING.height);
+    const after = film.filter((shot) => shot.window === SHRUNK.height);
+    expect(before.length, 'замер начался уже после смены окна').toBeGreaterThan(0);
+    expect(after.length, 'кадров после смены окна не набралось').toBeGreaterThan(10);
+
+    // Допуск в пиксель — на дробную высоту и округление разметки, а не на движение: отставший
+    // кадр расходился с новым окном на сотню с лишним.
+    const off = (shot: { frame: number }, want: number): boolean => Math.abs(shot.frame - want) > 1;
+    expect(before.filter((shot) => off(shot, frameHeight(STANDING))).length, 'кадр не в своём росте до замера').toBe(0);
+    expect(
+        after.filter((shot) => off(shot, frameHeight(SHRUNK))).map((shot) => Math.round(shot.frame)),
+        'кадр ехал к новому росту вслед за окном'
+    ).toEqual([]);
+
+    // Разговор при этом остался прежней долей нового окна: окно урезало кадр, а выбора не
+    // тронуло.
+    expect((await contentBox(page)).height, 'разговор не пересчитался под новое окно').toBe(chatSize(SHRUNK));
+
+    const moving = await page.evaluate(async () => {
+        const taken: number[] = [];
+        document.querySelector<HTMLElement>('[aria-label="Убрать разговор"]')!.click();
+        await new Promise<void>((resolve) => {
+            const tick = (): void => {
+                taken.push(Math.round(document.querySelector('header')!.getBoundingClientRect().height));
+                if (taken.length < 20) {
+                    requestAnimationFrame(tick);
+                } else {
+                    resolve();
+                }
+            };
+            requestAnimationFrame(tick);
+        });
+        return taken;
+    });
+    expect(new Set(moving).size, 'кадр отдал разговору место прыжком, а не движением').toBeGreaterThan(5);
+});
+
 /** То же число, что @haze-height в стилях сцены: рост полоски дымки над водой, px. */
 const HAZE_HEIGHT = 72;
 
