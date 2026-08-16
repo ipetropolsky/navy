@@ -108,7 +108,8 @@ export type ChannelErrorCode =
     | 'hull-taken'
     | 'member-not-found'
     | 'not-senior'
-    | 'message-too-long';
+    | 'message-too-long'
+    | 'course-too-long';
 
 export class ChannelError extends Error {
     constructor(
@@ -145,7 +146,14 @@ export interface ChannelBackend {
 
     join(request: ChannelAddress & { member: MemberDraft }): Promise<{ member: Member }>;
     updateMember(request: MemberAddress & { member: MemberDraft }): Promise<{ member: Member }>;
-    leave(request: MemberAddress): Promise<void>;
+    /**
+     * Сняться с рейда. Вместе с уходом приходит новый курс — куда корабль пошёл: канал
+     * не должен терять корабли молча, и в ленте об уходе говорится его же словами.
+     *
+     * Курс необязателен нарочно: уйти можно и не сказав ничего — так уходили до того, как
+     * курс стали спрашивать, и записи тех уходов остаются законными.
+     */
+    leave(request: MemberAddress & { course?: string }): Promise<void>;
     /**
      * Высадить чужой корабль с рейда. Адресует запрос тот, кто высаживает, — и это должен быть
      * старший на рейде (`channel.owner`), иначе `not-senior`. Кого высаживают, идёт ссылкой

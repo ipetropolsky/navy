@@ -1,0 +1,48 @@
+// Прощание с рейдом в шторке. Поля — здесь, а не у шторки: она только показывает, а отступы
+// содержимого его собственное дело. Нижнее поле с вырезом экрана, как у списка кораблей
+// и карточки: полоса кнопок иначе прилипала бы к нижней кромке телефона.
+//
+// Своя прокрутка — на случай поднятой клавиатуры: на телефоне под ней от шторки остаётся
+// полоска, и заголовок с полем должны в ней мотаться, а не оказаться за обрезом.
+.card {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    // Карточка поднята под самую рисочку ручки: заголовок должен стоять вровень с крестиком,
+    // а крестик сидит выше, чем начинается поток шторки (см. --shade-close-top
+    // и --shade-handle-reach в Shade.module.less). Поднимается вся карточка, а не один
+    // заголовок: отрицательное поле у первой строки внутри прокручиваемого блока просто
+    // срезалось бы его верхней кромкой.
+    margin-top: ~'calc(var(--shade-close-top) - var(--shade-handle-reach))';
+    padding: 0 20px ~'calc(16px + env(safe-area-inset-bottom))';
+    --scrollbar-bottom: 16px;
+    // Поля для полосы кнопок внизу: свои боковые и нижнее она гасит отрицательным margin,
+    // чтобы дойти фоном до краёв карточки, и возвращает своими padding (см. ui/Actions).
+    --actions-side: 20px;
+    --actions-pad: ~'calc(16px + env(safe-area-inset-bottom))';
+}
+
+// Заголовок ростом с крестик и центрирован по нему: они стоят на одной линии, как в любой
+// шапке. Справа оставлено место под сам крестик — иначе заголовок уходил бы под него.
+.title {
+    display: flex;
+    align-items: center;
+    min-height: var(--shade-close-size);
+    margin: 0;
+    padding-right: var(--shade-close-size);
+    font-family: 'Roboto Slab', serif;
+    font-size: var(--font-size-title);
+    font-weight: 500;
+}
+
+// Приписка под заголовком: зачем спрашивают курс. Подтянута к нему тем же приёмом, что
+// и бортовой номер в карточке корабля, — возвращаем потоку нижнюю половину запаса высоты
+// заголовка (см. .hullNumber в ShipCard.module.less).
+.hint {
+    margin: ~'calc((var(--font-size-title) * var(--line-height) - var(--shade-close-size)) / 2)' 0 0;
+    padding: 4px 0 12px;
+    color: var(--color-text-muted);
+    font-size: var(--font-size-base);
+}

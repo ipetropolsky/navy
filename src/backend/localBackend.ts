@@ -1,4 +1,13 @@
-import { Channel, MAX_MESSAGE_LENGTH, Member, Message, ShipNotice, isSameBerth } from '@/types/channel';
+import {
+    Channel,
+    MAX_COURSE_LENGTH,
+    MAX_MESSAGE_LENGTH,
+    Member,
+    Message,
+    ShipNotice,
+    isSameBerth,
+} from '@/types/channel';
+import { limitMessage, overLimit } from '@/utils/limit';
 import { isValidSlug } from '@/utils/slug';
 import { localStore } from '@/utils/storage';
 
@@ -392,12 +401,26 @@ export function createLocalBackend(): ChannelBackend {
             return delay({ member: updated });
         },
 
-        leave: async ({ channelId, memberId }) => {
+        leave: async ({ channelId, memberId, course = '' }) => {
+            // Длину курса проверяет бэкенд, а не только шторка ухода: интерфейсов может стать
+            // больше одного, и правило должно жить там, где данные, а не там, где поле ввода.
+            const newCourse = course.trim();
+            if (overLimit(newCourse, MAX_COURSE_LENGTH)) {
+                throw new ChannelError('course-too-long', limitMessage(newCourse, MAX_COURSE_LENGTH));
+            }
             // Кем корабль был, узнаём до того, как вычеркнем его: после вычёркивания
             // называть в строчке будет нечего.
             const gone = await dropMember(channelId, memberId);
             if (gone) {
-                await postNotice(channelId, memberId, { event: 'left', before: shipTitle(gone) }, Date.now());
+                // Курса может и не быть — тогда поля в записи нет вовсе, а не пустая строка:
+                // «не сказал» и «сказал пустое» в хранилище одно и то же, и хранить это
+                // двумя разными способами значит однажды сложить строчку про пустой курс.
+                await postNotice(
+                    channelId,
+                    memberId,
+                    { event: 'left', before: shipTitle(gone), ...(newCourse ? { course: newCourse } : {}) },
+                    Date.now()
+                );
             }
             return delay(undefined);
         },
@@ -425,11 +448,8 @@ export function createLocalBackend(): ChannelBackend {
         sendMessage: async ({ channelId, memberId, message: draft }) => {
             // Длину проверяет бэкенд, а не только форма: интерфейсов может стать больше одного,
             // и правило должно жить там, где данные, а не там, где поле ввода.
-            if (draft.text.length > MAX_MESSAGE_LENGTH) {
-                throw new ChannelError(
-                    'message-too-long',
-                    `Максимум ${MAX_MESSAGE_LENGTH} символов, у вас ${draft.text.length}`
-                );
+            if (overLimit(draft.text, MAX_MESSAGE_LENGTH)) {
+                throw new ChannelError('message-too-long', limitMessage(draft.text, MAX_MESSAGE_LENGTH));
             }
             const message: Message = {
                 messageId: randomId('msg'),

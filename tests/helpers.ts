@@ -119,6 +119,21 @@ export const openSheet = async (page: Page): Promise<void> => {
 };
 
 /**
+ * Уйти с рейда: кнопка внизу списка кораблей, а следом — новый курс в шторке прощания.
+ *
+ * Курс обязателен: молча с рейда не уходят, и без набранного курса подтверждение недоступно.
+ * Дорог к выходу две — эта и кнопка в шапке, пока открыта форма своего корабля, — но шторка
+ * прощания у них одна, и проверкам, которым нужен сам уход, а не путь к нему, хватает короткой.
+ */
+export const leaveRaid = async (page: Page, course = 'В Кронштадт'): Promise<void> => {
+    await openSheet(page);
+    await page.getByRole('button', { name: 'Уйти с рейда' }).click();
+    await page.getByLabel('Задайте новый курс').fill(course);
+    await page.getByRole('button', { name: 'Курс верный' }).click();
+    await page.waitForTimeout(WRITE_MS);
+};
+
+/**
  * Открыть карточку чужого корабля из списка кораблей — тычком по его строчке.
  *
  * Из ленты карточку больше не открыть: аватарка там окликает. Дорога к карточке две — кадр
@@ -173,6 +188,8 @@ interface StoredMessage {
         before: StoredShipTitle;
         after?: StoredShipTitle;
         changed?: string;
+        /** Новый курс уходящего: он приходит вместе с уходом и хранится вместе с ним. */
+        course?: string;
     };
     thread?: { messageId: string };
 }

@@ -9,6 +9,7 @@ import {
     berths,
     clickShip,
     join,
+    leaveRaid,
     openChannel,
     openNewChannel,
     openSheet,
@@ -63,18 +64,6 @@ const shipFormSubmit = (page: Page) =>
         .locator('form')
         .filter({ has: page.getByPlaceholder('Гром') })
         .locator('button[type=submit]');
-
-/**
- * Уйти с рейда. Выход есть в двух местах — кнопкой внизу списка кораблей и в шапке, пока
- * открыта форма своего корабля. Здесь идём вторым: он короче и никого ни о чём не спрашивает.
- */
-const leaveRaid = async (page: Page): Promise<void> => {
-    await shipsButton(page).click();
-    await page.getByRole('button', { name: 'Настроить корабль' }).click();
-    // Именно та, что в шапке: та же подпись стоит и на кнопке внизу списка кораблей,
-    // а список в этот момент ещё уезжает вниз, оставаясь в разметке.
-    await page.getByRole('banner').getByRole('button', { name: 'Уйти с рейда' }).click();
-};
 
 /** Огни каждого корабля в кадре: чем является каждый и где он стоит по вертикали. */
 const lights = (page: Page, within = '[class*="shipSlot"]'): Promise<{ kind: string; top: number }[][]> =>

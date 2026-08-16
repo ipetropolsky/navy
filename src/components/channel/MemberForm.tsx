@@ -20,10 +20,18 @@ import {
     Side,
     isValidHullNumber,
 } from '@/types/channel';
+import { limitMessage, overLimit } from '@/utils/limit';
 import { Press, isTap, startPress } from '@/utils/tap';
 import { isTouch } from '@/utils/viewport';
 
 import styles from './MemberForm.module.less';
+
+/**
+ * Предел длины позывного. Он стоит над репликой в ленте и подписью у корабля в кадре,
+ * и длинный расползся бы на всю строку. Мягкий, как и все пределы: набранное сверх него
+ * не обрезается, а поле краснеет и отвечает снекбаром (см. `@/utils/limit`).
+ */
+const NAME_MAX_LENGTH = 20;
 
 interface MemberFormProps {
     /** Вход в канал или переоснащение уже стоящего в строю корабля. */
@@ -150,6 +158,12 @@ export default function MemberForm({
         if (!canSubmit || busy) {
             return;
         }
+        // Перебор длины кнопку не гасит: недоступная кнопка молчит, а тут надо сказать,
+        // насколько перебрали. Правило и слова общие со строкой сообщения (`@/utils/limit`).
+        if (overLimit(name, NAME_MAX_LENGTH)) {
+            notify(limitMessage(name, NAME_MAX_LENGTH));
+            return;
+        }
         setBusy(true);
         try {
             await onSubmit({ name: name.trim(), hullNumber, shipKind, color, facing });
@@ -187,7 +201,7 @@ export default function MemberForm({
                 <Input
                     value={name}
                     half
-                    maxLength={20}
+                    maxLength={NAME_MAX_LENGTH}
                     placeholder="Гром"
                     autoComplete="off"
                     // Пальцем — значит клавиатура экранная, и фокус выкинул бы её поверх формы.

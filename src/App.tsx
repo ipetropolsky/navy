@@ -15,6 +15,7 @@ import { ChannelDraft, ChannelError, MemberDraft, backend, freeBerths, suggestBe
 import { DEMO_CHANNEL_SLUG } from '@/backend/seed';
 import SeaScene from '@/components/SeaScene/SeaScene';
 import CreateChannel from '@/components/channel/CreateChannel';
+import LeaveRaid from '@/components/channel/LeaveRaid';
 import MemberForm from '@/components/channel/MemberForm';
 import MembersList from '@/components/channel/MembersList';
 import ShipCard from '@/components/channel/ShipCard';
@@ -33,7 +34,7 @@ import { useLayout } from '@/hooks/useLayout';
 import { useSlide } from '@/hooks/useSlide';
 import { useSwipe } from '@/hooks/useSwipe';
 import { channelLink, useRoute } from '@/routing';
-import { Berth, MAX_MESSAGE_LENGTH, Message, MorseFeed, ShipKind, Side, isSameBerth, otherSide } from '@/types/channel';
+import { Berth, Message, MorseFeed, ShipKind, Side, isSameBerth, otherSide } from '@/types/channel';
 import { copyText } from '@/utils/clipboard';
 
 import styles from './App.module.less';
@@ -117,6 +118,9 @@ export default function App() {
     // Чей корабль показан карточкой. Своей карточки нет: свой корабль настраивают, а не
     // разглядывают, и по нему открывается форма.
     const [shownId, setShownId] = useState<string | null>(null);
+    // Спрашивают ли сейчас новый курс: шторка прощания с рейдом. Уход — единственное
+    // действие, после которого ничего не остаётся, и курс как раз то, что остаётся.
+    const [leaving, setLeaving] = useState(false);
     const notify = useSnackbar();
 
     // Раскладка целиком: развёрнут ли кадр, стоит ли разговор сбоку и какой он ширины. Всё
@@ -409,9 +413,29 @@ export default function App() {
         setSheetOpen((open) => !open);
     };
 
+    // Уход с рейда спрашивает новый курс — куда корабль пошёл. Молча корабль не пропадает:
+    // остальным виден только опустевший рейд, и курс — единственное, что от ушедшего
+    // остаётся (см. components/channel/LeaveRaid).
+    //
+    // Форму своего корабля при этом закрываем: выход есть и в ней, а спрашивать курс поверх
+    // настроек корабля, который через секунду уйдёт, незачем.
     const handleLeave = () => {
         setEditing(false);
-        void channelState.leave();
+        setLeaving(true);
+    };
+
+    const handleLeaveConfirm = (course: string) => {
+        void channelState
+            .leave(course)
+            .then(() => {
+                setLeaving(false);
+                setSheetOpen(false);
+            })
+            // Отказ бэкенда (например, курс длиннее предела) оставляет шторку открытой:
+            // набранное не потеряно, и сказанное снекбаром можно исправить на месте.
+            .catch((failure: unknown) =>
+                notify(failure instanceof ChannelError ? failure.message : 'Не вышло уйти с рейда')
+            );
     };
 
     const status = (): string => {
@@ -478,7 +502,9 @@ export default function App() {
                         replyToAuthor={replyToAuthor}
                         onCancelReply={() => setReplyTo(null)}
                         onSend={handleSend}
-                        onTooLong={(length) => notify(`Максимум ${MAX_MESSAGE_LENGTH} символов, у вас ${length}`)}
+                        // Фразу об отказе складывает само поле по общей мерке длины
+                        // (`@/utils/limit`), нам остаётся её показать.
+                        onTooLong={notify}
                         onTyped={channelState.reportTyping}
                     />
                 </>
@@ -933,6 +959,20 @@ export default function App() {
                         senior={shownCard.memberId === channel?.channel.owner?.memberId}
                     />
                 )}
+            </Shade>
+            {/* Прощание с рейдом — тоже шторка и тоже поверх (cover): уходят из списка
+                кораблей, и передумавший ждёт вернуться ровно в него, а не на пустой рейд.
+
+                Закрывается она сама, как только корабль снялся: с уходом кончается inChat,
+                а вместе с ним — и всё, что показывают своему кораблю. */}
+            <Shade
+                open={leaving && inChat}
+                onClose={() => setLeaving(false)}
+                label="Вы уходите с рейда"
+                onScene={atSide}
+                cover
+            >
+                <LeaveRaid onConfirm={handleLeaveConfirm} onCancel={() => setLeaving(false)} />
             </Shade>
         </div>
     );

@@ -3,6 +3,7 @@ import { SyntheticEvent, useEffect, useRef, useState } from 'react';
 import IconButton from '@/components/ui/IconButton';
 import Input from '@/components/ui/Input';
 import { MAX_MESSAGE_LENGTH, Member, Message } from '@/types/channel';
+import { limitMessage, overLimit } from '@/utils/limit';
 
 import MessageBody from '@/components/chat/MessageBody';
 import ReplyQuote from '@/components/chat/ReplyQuote';
@@ -14,8 +15,11 @@ interface ComposerProps {
     replyToAuthor: Member | null;
     onCancelReply: () => void;
     onSend: (text: string) => void;
-    /** Набрано больше, чем можно отправить. Показать это — дело того, кто нас позвал. */
-    onTooLong: (length: number) => void;
+    /**
+     * Набрано больше, чем можно отправить: готовая фраза о том, насколько именно.
+     * Показать её — дело того, кто нас позвал: снекбар живёт снаружи.
+     */
+    onTooLong: (message: string) => void;
     /** Вызывается на каждое изменение текста: добавленные символы (или '\b' при удалении). */
     onTyped: (chars: string) => void;
 }
@@ -83,9 +87,9 @@ export default function Composer({ replyTo, replyToAuthor, onCancelReply, onSend
     };
 
     const text = value.trim();
-    // Длинное не обрезаем: обрезать чужой текст нельзя. Рамкой показываем, что отправить
-    // это нельзя, а по нажатию говорим, насколько именно перебрали.
-    const tooLong = text.length > MAX_MESSAGE_LENGTH;
+    // Длинное не обрезаем: обрезать чужой текст нельзя. Рамку красит само поле по тому же
+    // пределу (см. maxLength ниже и ui/Input), а по нажатию говорим, насколько перебрали.
+    const tooLong = overLimit(text, MAX_MESSAGE_LENGTH);
 
     const handleSubmit = (event: SyntheticEvent) => {
         event.preventDefault();
@@ -93,7 +97,7 @@ export default function Composer({ replyTo, replyToAuthor, onCancelReply, onSend
             return;
         }
         if (tooLong) {
-            onTooLong(text.length);
+            onTooLong(limitMessage(text, MAX_MESSAGE_LENGTH));
             return;
         }
         onSend(text);
@@ -123,7 +127,7 @@ export default function Composer({ replyTo, replyToAuthor, onCancelReply, onSend
                 <Input
                     ref={inputRef}
                     value={value}
-                    invalid={tooLong}
+                    maxLength={MAX_MESSAGE_LENGTH}
                     placeholder="Сообщение"
                     autoComplete="off"
                     onChange={(event) => handleChange(event.target.value)}

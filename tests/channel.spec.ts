@@ -6,6 +6,7 @@ import {
     VYMPEL,
     bubbles,
     join,
+    leaveRaid,
     openChannel,
     openNewChannel,
     openSheet,
@@ -158,23 +159,54 @@ test('уход с рейда отмечается в ленте и возвра�
     await openChannel(page, DEMO, ALBATROS);
     await expect(ships(page)).toHaveCount(3);
 
-    // Уход — из формы своего корабля: пока она открыта, в шапке стоит выход с рейда.
-    // Это второе, что делают с собственным кораблём, и место ему там же. Берём тот, что
-    // в шапке: та же подпись стоит и на кнопке внизу списка кораблей.
-    await openSheet(page);
-    await page.getByRole('button', { name: 'Настроить корабль' }).click();
-    await page.getByRole('banner').getByRole('button', { name: 'Уйти с рейда' }).click();
+    // Уход — кнопкой внизу списка кораблей, а следом новый курс: молча с рейда не уходят.
+    await leaveRaid(page, 'В Кронштадт, на зимовку');
 
     // Вкладка возвращается к форме — тупика нет, встать в строй можно снова.
     await expect(page.getByPlaceholder('Гром')).toBeVisible();
     const state = await readState(page);
     expect(state.channels['ch-demo'].members.map((member) => member.memberId)).not.toContain(ALBATROS);
-    // Бэкенд пишет данными, а не фразой: каким корабль был на момент ухода. Как это сказать
-    // словами, решает лента — и её слова проверяются выше, по самой строчке на экране.
+    // Бэкенд пишет данными, а не фразой: каким корабль был на момент ухода и что он сказал
+    // на прощание. Как это сказать словами, решает лента — её слова проверены выше.
     expect(state.channels['ch-demo'].messages.at(-1)!.notice).toEqual({
         event: 'left',
         before: { shipKind: 'pr1400', name: 'Альбатрос', hullNumber: '317' },
+        course: 'В Кронштадт, на зимовку',
     });
+
+    // А словами курс читают оставшиеся: у самого ушедшего на месте разговора теперь форма,
+    // и своё прощание он не видит — оно и написано не ему.
+    await openChannel(page, DEMO, VYMPEL);
+    await expect(systemLines(page).last()).toContainText('Уходит с рейда. Новый курс: В Кронштадт, на зимовку');
+});
+
+/**
+ * Уход спрашивает новый курс — и спрашивает всерьёз: поле обязательное, а пока оно пустое,
+ * уходить нечем. Это единственное действие в канале, после которого от корабля ничего
+ * не остаётся, и курс как раз то, что остаётся.
+ *
+ * Второй выход из шторки — «Полный назад»: передумавший возвращается в список, из которого
+ * и уходил, а корабль остаётся на рейде.
+ */
+test('уход спрашивает курс, и без него не уйти, а «Полный назад» оставляет на рейде', async ({ page }) => {
+    await openChannel(page, DEMO, ALBATROS);
+    await openSheet(page);
+    await page.getByRole('button', { name: 'Уйти с рейда' }).click();
+
+    const shade = page.getByRole('region', { name: 'Вы уходите с рейда' });
+    await expect(shade, 'шторка прощания не открылась').toBeVisible();
+    const confirm = shade.getByRole('button', { name: 'Курс верный' });
+    await expect(confirm, 'уйти можно и не сказав куда').toBeDisabled();
+
+    // Курс набран — уходить есть чем.
+    await page.getByLabel('Задайте новый курс').fill('В Кронштадт');
+    await expect(confirm).toBeEnabled();
+
+    // Но передумали: «Полный назад» возвращает в список кораблей, и корабль на месте.
+    await shade.getByRole('button', { name: 'Полный назад' }).click();
+    await expect(shade, 'шторка прощания не закрылась').toBeHidden();
+    await expect(page.getByRole('button', { name: 'Корабль «Альбатрос»' }), 'корабль ушёл с рейда').toBeVisible();
+    await expect(ships(page)).toHaveCount(3);
 });
 
 /**
@@ -405,9 +437,7 @@ test('не старшему высаживать нечем, а после ег�
     // Старший ушёл — канал не остаётся без него: старшинство берёт тот, кто дольше всех
     // из оставшихся. Иначе высаживать было бы уже некому.
     await openChannel(page, DEMO, ALBATROS);
-    await openSheet(page);
-    await page.getByRole('button', { name: 'Настроить корабль' }).click();
-    await page.getByRole('banner').getByRole('button', { name: 'Уйти с рейда' }).click();
+    await leaveRaid(page);
     await expect(page.getByPlaceholder('Гром')).toBeVisible();
 
     const state = await readState(page);

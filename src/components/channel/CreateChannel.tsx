@@ -10,10 +10,18 @@ import { useSnackbar } from '@/components/ui/Snackbar';
 import { LinkIcon } from '@/components/ui/icons';
 import { channelLink } from '@/routing';
 import { copyText } from '@/utils/clipboard';
+import { limitMessage, overLimit } from '@/utils/limit';
 import { SLUG_MAX_LENGTH, isValidSlug, slugify, slugifyInput } from '@/utils/slug';
 import { isTouch } from '@/utils/viewport';
 
 import styles from './CreateChannel.module.less';
+
+/**
+ * Предел длины названия канала. Оно стоит в шапке одной строкой, и длинное там всё равно
+ * не помещается. Мягкий, как и все пределы: набранное сверх него не обрезается, а поле
+ * краснеет и отвечает снекбаром (см. `@/utils/limit`).
+ */
+const TITLE_MAX_LENGTH = 40;
 
 interface CreateChannelProps {
     onCreate: (draft: ChannelDraft) => Promise<void>;
@@ -61,6 +69,12 @@ export default function CreateChannel({ onCreate, demoHref, onOpenDemo }: Create
 
     const handleSubmit = async () => {
         if (!canSubmit || busy) {
+            return;
+        }
+        // Перебор длины кнопку не гасит: недоступная кнопка молчит, а тут надо сказать,
+        // насколько перебрали. Правило и слова общие со строкой сообщения (`@/utils/limit`).
+        if (overLimit(title, TITLE_MAX_LENGTH)) {
+            notify(limitMessage(title, TITLE_MAX_LENGTH));
             return;
         }
         setBusy(true);
@@ -112,7 +126,7 @@ export default function CreateChannel({ onCreate, demoHref, onOpenDemo }: Create
                 <Input
                     value={title}
                     half
-                    maxLength={40}
+                    maxLength={TITLE_MAX_LENGTH}
                     placeholder="Эскадра «Полночь»"
                     autoComplete="off"
                     // Пальцем — значит клавиатура экранная, и фокус выкинул бы её поверх формы.
