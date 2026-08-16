@@ -1527,3 +1527,57 @@ test('на соседний коридор своей линии корабль 
     const [moved] = Object.values(state.channels).find((one) => one.channel.slug === 'perehod')!.members;
     expect(`${moved.place.slot}-${moved.place.corridor}`, 'корабль встал не на выбранное место').toBe('8-left');
 });
+
+/**
+ * Качка — единственное движение в кадре, которое не кончается: корабль на якоре ходит вверх-вниз
+ * и переваливается носом, пока стоит. Ломается такое молча — анимация может не завестись вовсе
+ * или замереть на кадре, — и увидеть это можно только покадрово.
+ *
+ * Замер идёт ровно полцикла волны. За это время корабль обязан пройти путь в размах туда
+ * и обратно — то есть двойную амплитуду: вверх-вниз по кривой волны укладывается ровно
+ * в половину цикла, откуда бы ни начали. Меньше — где-то замерло, больше — цикл идёт быстрее
+ * своей мерки.
+ */
+test('корабль качается сам и не замирает', async ({ page }) => {
+    await openChannel(page, DEMO, ALBATROS);
+    await expect(page.locator('[data-motion]'), 'корабли так и не встали на места').toHaveCount(0, {
+        timeout: SAIL_TIMEOUT,
+    });
+
+    // Полцикла волны: WAVE_SECONDS в компоненте сцены — 10 секунд.
+    const swing = await page.evaluate(async () => {
+        const rock = document.querySelector('[class*="shipLane"] [class*="shipRock"]')!;
+        // Размах приходит инлайном от компонента: он свой у каждой дальности — дальние
+        // качаются меньше ближних.
+        const heave = parseFloat(getComputedStyle(rock).getPropertyValue('--heave'));
+        const seen: number[] = [];
+        await new Promise<void>((resolve) => {
+            const started = performance.now();
+            const tick = (): void => {
+                // Вторым числом в translate идёт подъём: по горизонтали качка корабль не носит.
+                seen.push(parseFloat(getComputedStyle(rock).translate.split(' ')[1] ?? '0'));
+                if (performance.now() - started < 5000) {
+                    requestAnimationFrame(tick);
+                } else {
+                    resolve();
+                }
+            };
+            requestAnimationFrame(tick);
+        });
+        const steps = seen.slice(1).map((value, at) => value - seen[at]);
+        return {
+            heave,
+            frames: seen.length,
+            travel: steps.reduce((sum, step) => sum + Math.abs(step), 0),
+            biggest: Math.max(...steps.map(Math.abs)),
+        };
+    });
+
+    expect(swing.frames, 'кадров не набралось — мерить нечего').toBeGreaterThan(60);
+    expect(swing.heave, 'размах качки не задан').toBeGreaterThan(0);
+    // Допуск на то, что в самой верхней и нижней точке между кадрами теряются доли пикселя.
+    expect(swing.travel, 'качка замерла или идёт не весь цикл').toBeGreaterThan(swing.heave * 1.7);
+    expect(swing.travel, 'качка проходит больше своего размаха за полцикла').toBeLessThan(swing.heave * 2.3);
+    // И идёт она плавно: рывком тут был бы шаг в добрую долю размаха за один кадр.
+    expect(swing.biggest, 'качка дёрнулась вместо плавного хода').toBeLessThan(swing.heave / 4);
+});
