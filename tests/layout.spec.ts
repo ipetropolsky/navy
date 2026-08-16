@@ -1254,19 +1254,45 @@ const growSheetList = (page: Page): Promise<void> =>
         }
     }, SHEET_LIST);
 
-/** Потянуть от точки вниз на `by` пикселей и отпустить. */
+/**
+ * Потянуть от точки вниз на `by` пикселей и отпустить.
+ *
+ * Перед отпусканием палец замирает: шторка считает не только пройденный путь, но и скорость
+ * в последний миг (см. `@/utils/magnet`), и брошенная на ходу она улетит дальше, чем её увели.
+ * Проверкам про путь эта прибавка мешает — курсор в Playwright ходит рывками и с непредсказуемой
+ * скоростью, — поэтому по умолчанию движение здесь заканчивается остановкой. Кому нужен
+ * как раз рывок, тот берёт `flingAt` ниже.
+ */
 const dragAt = async (page: Page, x: number, y: number, by: number): Promise<void> => {
     await page.mouse.move(x, y);
     await page.mouse.down();
     // Шагами, а не прыжком: перетаскивание считается по pointermove, и одного события
     // хватило бы шторке, но не браузеру — он на прыжок курсора отвечает не всегда.
     await page.mouse.move(x, y + by, { steps: 12 });
+    // Дольше, чем окно замера скорости: отпущенная после остановки шторка идёт только туда,
+    // куда её довели.
+    await page.waitForTimeout(200);
     await page.mouse.up();
 };
 
 /** Потянуть за середину блока: за ручку, за заголовок — за что дали. */
 const dragBox = (page: Page, box: { x: number; y: number; width: number; height: number }, by: number) =>
     dragAt(page, box.x + box.width / 2, box.y + box.height / 2, by);
+
+/**
+ * Короткий рывок вниз: палец уходит недалеко, но быстро, и отпускается на ходу.
+ *
+ * Одним движением, без шагов: так `pointermove` приходит один и с настоящей разницей во времени
+ * от нажатия — то есть с настоящей скоростью, а не с той, что накопилась бы за дюжину шагов
+ * по паре пикселей.
+ */
+const flingAt = async (page: Page, x: number, y: number, by: number): Promise<void> => {
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x, y + Math.round(by / 2));
+    await page.mouse.move(x, y + by);
+    await page.mouse.up();
+};
 
 /**
  * Рост шторки задаёт её содержимое, а не мерка: короткий список показан коротким блоком,
@@ -1354,10 +1380,15 @@ test('под шторкой всегда затемнение, а шапка н�
  * место, у которого нет своей прокрутки и которое не текстовое поле, — попадать пальцем
  * в полоску шириной в палец занятие для тех, кому некуда спешить.
  *
- * Потяг закрывает не всякий: утянул больше трети высоты — закрылась, меньше — вернулась.
- * Короткий рывок вниз бывает и промахом.
+ * Потяг закрывает не всякий: увёл больше трети высоты — закрылась, меньше — вернулась.
+ * Недоведённое движение бывает и промахом, и шторка на своём положении держится.
+ *
+ * А вот короткий, но резкий рывок закрывает и с четверти пути: шторка считает не только
+ * пройденное, но и скорость в последний миг — усилие проносит её мимо точек, за которые она
+ * иначе зацепилась бы (см. `@/utils/magnet`). Так её и закрывают одним движением, не отводя
+ * палец до самого низа экрана.
  */
-test('шторку закрывают крестиком, нажатием мимо и потягом вниз, а коротким рывком — нет', async ({ page }) => {
+test('шторку закрывают крестиком, нажатием мимо, потягом вниз и коротким рывком', async ({ page }) => {
     await openChannel(page, DEMO, ALBATROS);
 
     await openSheet(page);
@@ -1374,13 +1405,19 @@ test('шторку закрывают крестиком, нажатием ми�
     const before = await shadeBox(page);
     const title = page.getByText('На связи', { exact: true });
     await dragBox(page, (await title.boundingBox())!, Math.round(before.height * 0.2));
-    await expect(shadeRegion(page), 'короткий рывок закрыл шторку').toHaveCount(1);
+    await expect(shadeRegion(page), 'недоведённый потяг закрыл шторку').toHaveCount(1);
     await expect
-        .poll(async () => (await shadeBox(page)).top, { message: 'шторка не вернулась на место после рывка' })
+        .poll(async () => (await shadeBox(page)).top, { message: 'шторка не вернулась на место после потяга' })
         .toBe(before.top);
 
     await dragBox(page, (await title.boundingBox())!, Math.round(before.height * 0.6));
     await expect(shadeRegion(page), 'потяг вниз не закрыл шторку').toHaveCount(0);
+
+    // Тот же путь, что и в первый раз, но пройденный рывком и отпущенный на ходу.
+    await openSheet(page);
+    const box = (await title.boundingBox())!;
+    await flingAt(page, box.x + box.width / 2, box.y + box.height / 2, Math.round(before.height * 0.2));
+    await expect(shadeRegion(page), 'короткий рывок не закрыл шторку').toHaveCount(0);
 });
 
 /**

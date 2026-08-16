@@ -9,6 +9,7 @@ import {
 
 import { useSlide } from '@/hooks/useSlide';
 import { isTextField } from '@/utils/keyboard';
+import { MagnetSettings, normalizeMagnets, settleMagnet } from '@/utils/magnet';
 
 import IconButton from '@/components/ui/IconButton';
 import { useShadeFloor } from '@/components/ui/ShadeStack';
@@ -25,10 +26,25 @@ import styles from './Shade.module.less';
 const DRAG_SLOP = 4;
 
 /**
- * Какую долю своей высоты надо утянуть вниз, чтобы шторка закрылась. Меньше — вернётся
- * на место: короткий рывок вниз бывает и промахом.
+ * Магнит по умолчанию: два положения, закрыто и раскрыто по содержимому, и ничего между ними.
+ *
+ * Так живут все шторки, кроме разговора: список кораблей, карточка чужого корабля, прощание
+ * с рейдом. Показывать их наполовину незачем — в них читают и нажимают, а не подглядывают, —
+ * и «произвольное положение» им поэтому не разрешено (`free` по умолчанию выключено).
+ *
+ * Сотая доля от полной высоты и есть «по содержимому»: ход шторки меряется её же ростом,
+ * а рост ей задаёт содержимое.
  */
-const DISMISS_SHARE = 0.35;
+const DEFAULT_MAGNET: MagnetSettings = { points: [0, '100%'] };
+
+/**
+ * За какое время до отпускания меряется скорость, мс.
+ *
+ * Не за весь путь пальца: медленно подведённая и в последний миг брошенная шторка обязана
+ * улететь, а долго тянутая и остановленная перед отпусканием — остаться. Считает поэтому
+ * только последний отрезок, и если палец простоял на месте дольше него, скорости нет вовсе.
+ */
+const FLING_MS = 80;
 
 /** Мотается ли этот блок сам: и разрешено, и есть что мотать. */
 const scrolls = (node: Element): boolean => {
@@ -81,6 +97,15 @@ interface ShadeProps {
      * Подробности — в `ShadeStack`.
      */
     cover?: boolean;
+    /**
+     * Где шторке позволено останавливаться (см. `@/utils/magnet`). По умолчанию — только
+     * закрытой или раскрытой по содержимому.
+     *
+     * Настройка приходит снаружи, а не считается внутри, потому что это свойство разговора
+     * между людьми, а не свойство блока: список кораблей показывают целиком, а разговор
+     * человек сам решает, насколько ему открыть.
+     */
+    magnet?: MagnetSettings;
     children: ReactNode;
 }
 
@@ -93,9 +118,14 @@ interface ShadeProps {
  * не разметка, а `ShadeStack`: в разметке шторки написаны одна за другой, и порядок этот —
  * тот, в котором о них рассказано, а не тот, в котором их открывали.
  *
- * Устроена она просто: открыта или закрыта, третьего положения нет. Ростом шторка ровно
- * по своему содержимому и не выше окна за вычетом шапки — то есть короткий список показан
- * коротким блоком, а длинный мотается внутри сам.
+ * Где ей позволено останавливаться, решает магнит (`@/utils/magnet`): по умолчанию положений
+ * два — закрыта или раскрыта по содержимому, — и все нынешние шторки живут так. Шторка
+ * с другими точками останавливается на них, а если ей разрешено произвольное положение,
+ * то и между ними; отпущенная, она приезжает к своей точке обычным переходом, а не рывком.
+ *
+ * Ростом шторка ровно по своему содержимому и не выше окна за вычетом шапки — то есть короткий
+ * список показан коротким блоком, а длинный мотается внутри сам. Ход у неё меряется этим же
+ * ростом: раскрыта она тогда, когда видна целиком.
  *
  * Поверх, а не вместо: разговор под ней остаётся собранным, со своим местом прокрутки
  * и набранным в поле. Под шторкой всегда затемнение — под ней ничего не выбирают, а сцена
@@ -108,15 +138,27 @@ interface ShadeProps {
  * Едет она сдвигом, а не высотой: высоту ей задаёт содержимое, и разводить её во времени
  * значило бы перекладывать содержимое на каждом кадре выезда.
  */
-export default function Shade({ open, onClose, label, onScene = false, cover = false, children }: ShadeProps) {
+export default function Shade({
+    open,
+    onClose,
+    label,
+    onScene = false,
+    cover = false,
+    magnet = DEFAULT_MAGNET,
+    children,
+}: ShadeProps) {
     const shadeRef = useRef<HTMLElement>(null);
     const { mounted, onTransitionEnd } = useSlide(open);
     // Этаж в стопке: открытая позже лежит выше открытой раньше, а не так, как их написали
     // в разметке. Считает его ShadeStack, он же и закрывает нижние, если эта не `cover`.
     const floor = useShadeFloor(mounted, onClose, cover);
-    // Сдвиг вниз, пока шторку тянут, px. Стоит inline-стилем и идёт за пальцем без перехода;
-    // отпустили — стиль убираем, и шторка сама возвращается на место или уезжает совсем.
+    // Сдвиг вниз от раскрытого положения, px. Пока тянут — идёт за пальцем без перехода;
+    // отпустили — остаётся тем, на чём шторка встала, и она приезжает туда переходом.
+    // `null` — «на своём месте по стилям»: раскрыта целиком или как раз уезжает.
     const [shift, setShift] = useState<number | null>(null);
+    // Тянут ли прямо сейчас. Отдельно от сдвига: сдвиг остаётся и после отпускания, если шторка
+    // встала не на верхнюю точку, а вот переход снимается ровно на время движения пальца.
+    const [dragging, setDragging] = useState(false);
     // Перетаскивание кончается тем же click, что и нажатие, — и кончается им где угодно,
     // хоть на кнопке внутри шторки. Флаг гасит этот click: без него потяг за строку списка
     // заодно нажимал бы то, с чего начали.
@@ -130,8 +172,18 @@ export default function Shade({ open, onClose, label, onScene = false, cover = f
             return;
         }
         const startY = event.clientY;
+        // Ход шторки — её собственный рост: она приезжает снизу, и раскрыта ровно тогда, когда
+        // видна целиком. Точки считаются от него же — и заново на каждый потяг: содержимое
+        // могло вырасти, а окно смениться.
         const height = shade.getBoundingClientRect().height;
-        const drag = { moved: false, shift: 0 };
+        const points = normalizeMagnets(magnet.points ?? [], height, magnet.gap);
+        const lowest = points.length ? points[0] : 0;
+        const highest = points.length ? points[points.length - 1] : height;
+        // Открытость на момент, когда шторку взяли: сколько её видно над нижней кромкой.
+        const startOpen = height - (shift ?? 0);
+        const drag = { moved: false, shift: shift ?? 0 };
+        // Последние отметки пальца — по ним и считается скорость в момент отпускания.
+        const marks: { y: number; at: number }[] = [];
 
         const move = (moveEvent: PointerEvent) => {
             if (moveEvent.pointerId !== event.pointerId) {
@@ -142,13 +194,37 @@ export default function Shade({ open, onClose, label, onScene = false, cover = f
                     return;
                 }
                 drag.moved = true;
+                setDragging(true);
                 // Выделение, начатое этим же движением, снимаем: тянут шторку, а не выделяют
                 // текст. Дальше его не даёт набрать `user-select` (см. .shadeDragging).
                 window.getSelection()?.removeAllRanges();
             }
-            // Вверх шторке некуда: выше она и так стоит вплотную к своему пределу.
-            drag.shift = Math.max(moveEvent.clientY - startY, 0);
+            marks.push({ y: moveEvent.clientY, at: moveEvent.timeStamp });
+            if (marks.length > 5) {
+                marks.shift();
+            }
+            // За пределы своих точек шторка не выходит ни вверх, ни вниз: выше верхней её
+            // и так не видно целиком, ниже нижней — не видно вовсе.
+            const opened = Math.min(Math.max(startOpen - (moveEvent.clientY - startY), lowest), highest);
+            drag.shift = height - opened;
             setShift(drag.shift);
+        };
+
+        /**
+         * Скорость в момент отпускания, px/мс открытости: положительная — шторка раскрывалась.
+         *
+         * Меряется по последнему отрезку пути, а не по всему: важно, чем движение кончилось.
+         * Палец, простоявший на месте дольше отрезка, скорости не оставляет вовсе — шторку
+         * подвели и поставили, а не бросили.
+         */
+        const speed = (at: number): number => {
+            const last = marks[marks.length - 1];
+            if (!last || at - last.at > FLING_MS) {
+                return 0;
+            }
+            const first = marks.find((mark) => last.at - mark.at <= FLING_MS) ?? marks[0];
+            const spent = last.at - first.at;
+            return spent > 0 ? (first.y - last.y) / spent : 0;
         };
 
         // Отписка объявлена раньше самих обработчиков: она им и нужна — движение кончается тем,
@@ -161,16 +237,29 @@ export default function Shade({ open, onClose, label, onScene = false, cover = f
             window.removeEventListener('pointercancel', up);
         };
 
-        const up = () => {
+        const up = (upEvent: PointerEvent) => {
             stopListening();
-            setShift(null);
+            setDragging(false);
             if (!drag.moved) {
                 return;
             }
             draggedRef.current = true;
-            if (drag.shift > height * DISMISS_SHARE) {
+            const settled = settleMagnet({
+                from: startOpen,
+                to: height - drag.shift,
+                velocity: speed(upEvent.timeStamp),
+                points,
+                free: magnet.free,
+                pull: magnet.pull,
+            });
+            // Закрытой шторки на экране не бывает: съехавшую в ноль убирают совсем, и уезжает
+            // она обычным уходом — сдвиг с неё поэтому снимаем, иначе он спорил бы с ним.
+            if (settled <= 0) {
+                setShift(null);
                 onClose();
+                return;
             }
+            setShift(settled >= height ? null : height - settled);
         };
 
         // Слушаем окно, а не саму шторку: первый же шаг вниз выносит палец за её кромку,
@@ -204,7 +293,7 @@ export default function Shade({ open, onClose, label, onScene = false, cover = f
         styles.shade,
         onScene ? styles.shadeOnScene : '',
         leaving ? styles.shadeLeaving : '',
-        shift === null ? '' : styles.shadeDragging,
+        dragging ? styles.shadeDragging : '',
     ]
         .filter(Boolean)
         .join(' ');
@@ -229,7 +318,7 @@ export default function Shade({ open, onClose, label, onScene = false, cover = f
                         // Этаж уходит в стили переменной: и шторка, и её затемнение считают
                         // из неё свой z-index, а числа остаются в одном месте — в стилях.
                         '--shade-floor': floor,
-                        ...(shift === null ? {} : { opacity: Math.max(1 - shift / 200, 0) }),
+                        ...(dragging && shift !== null ? { opacity: Math.max(1 - shift / 200, 0) } : {}),
                     } as CSSProperties
                 }
                 aria-label="Закрыть шторку"
