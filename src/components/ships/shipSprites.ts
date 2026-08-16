@@ -72,11 +72,11 @@ export const SHIP_SPRITES: Record<ShipKind, ShipSprite> = {
         hullNumber: { x: 242, y: 342 },
         lights: {
             signal: { x: 594, y: 14 },
-            masthead: { x: 410, y: 200 },
-            mastheadAft: { x: 594, y: 53 },
+            masthead: { x: 556, y: 170 },
+            mastheadAft: { x: 594, y: 95 },
             side: { x: 408, y: 228 },
             stern: { x: 1055, y: 302 },
-            anchorFore: { x: 594, y: 77 },
+            anchorFore: { x: 594, y: 115 },
             anchorAft: { x: 1070, y: 297 },
         },
     },
@@ -87,11 +87,11 @@ export const SHIP_SPRITES: Record<ShipKind, ShipSprite> = {
         hullNumber: { x: 242, y: 337 },
         lights: {
             signal: { x: 598, y: 10 },
-            masthead: { x: 338, y: 229 },
-            mastheadAft: { x: 598, y: 49 },
+            masthead: { x: 566, y: 165 },
+            mastheadAft: { x: 598, y: 90 },
             side: { x: 371, y: 262 },
             stern: { x: 1055, y: 308 },
-            anchorFore: { x: 598, y: 72 },
+            anchorFore: { x: 598, y: 120 },
             anchorAft: { x: 1022, y: 274 },
         },
     },
@@ -102,11 +102,11 @@ export const SHIP_SPRITES: Record<ShipKind, ShipSprite> = {
         hullNumber: { x: 242, y: 335 },
         lights: {
             signal: { x: 575, y: 23 },
-            masthead: { x: 374, y: 205 },
-            mastheadAft: { x: 575, y: 62 },
+            masthead: { x: 536, y: 175 },
+            mastheadAft: { x: 575, y: 102 },
             side: { x: 407, y: 240 },
             stern: { x: 1058, y: 300 },
-            anchorFore: { x: 575, y: 85 },
+            anchorFore: { x: 575, y: 120 },
             anchorAft: { x: 905, y: 248 },
         },
     },
@@ -121,7 +121,7 @@ export const SHIP_SPRITES: Record<ShipKind, ShipSprite> = {
             mastheadAft: { x: 554, y: 89 },
             side: { x: 385, y: 238 },
             stern: { x: 1055, y: 285 },
-            anchorFore: { x: 554, y: 110 },
+            anchorFore: { x: 554, y: 135 },
             anchorAft: { x: 1022, y: 271 },
         },
     },
@@ -132,11 +132,11 @@ export const SHIP_SPRITES: Record<ShipKind, ShipSprite> = {
         hullNumber: { x: 242, y: 310 },
         lights: {
             signal: { x: 518, y: 6 },
-            masthead: { x: 439, y: 187 },
+            masthead: { x: 500, y: 120 },
             mastheadAft: { x: 518, y: 42 },
             side: { x: 472, y: 212 },
             stern: { x: 1055, y: 257 },
-            anchorFore: { x: 518, y: 63 },
+            anchorFore: { x: 518, y: 95 },
             anchorAft: { x: 1040, y: 262 },
         },
     },
@@ -147,11 +147,11 @@ export const SHIP_SPRITES: Record<ShipKind, ShipSprite> = {
         hullNumber: { x: 242, y: 488 },
         lights: {
             signal: { x: 536, y: 32 },
-            masthead: { x: 304, y: 321 },
+            masthead: { x: 530, y: 215 },
             mastheadAft: { x: 536, y: 86 },
             side: { x: 337, y: 384 },
             stern: { x: 1060, y: 455 },
-            anchorFore: { x: 536, y: 119 },
+            anchorFore: { x: 536, y: 140 },
             anchorAft: { x: 1030, y: 440 },
         },
     },
@@ -166,7 +166,7 @@ export const SHIP_SPRITES: Record<ShipKind, ShipSprite> = {
             mastheadAft: { x: 686, y: 94 },
             side: { x: 447, y: 268 },
             stern: { x: 1055, y: 354 },
-            anchorFore: { x: 686, y: 121 },
+            anchorFore: { x: 686, y: 135 },
             anchorAft: { x: 1022, y: 336 },
         },
     },
@@ -179,3 +179,17 @@ export const SHIP_SPRITES: Record<ShipKind, ShipSprite> = {
 export const TWO_LIGHTS_FROM_METRES = 50;
 
 export const hasTwoLights = (kind: ShipKind): boolean => SHIP_SPECS[kind].length >= TWO_LIGHTS_FROM_METRES;
+
+/**
+ * Насколько разносить огни, горящие разом, — в долях ширины корабля.
+ *
+ * Огонь на экране не точка: вокруг лампочки лежит пятно света шириной в десятую ширины корабля,
+ * растворяющееся к 62 % радиуса, — то есть видимое свечение расходится примерно на три процента
+ * ширины в каждую сторону. Два огня ближе шести процентов сливаются в одно пятно, и правило,
+ * которое ими написано, с дальней линии читаться перестаёт: топовый над бортовым выглядит одной
+ * кляксой неопределённого цвета, а не «белый выше, зелёный ниже».
+ *
+ * Мерка одна на обе оси: спрайт вписан по ширине без искажения, и вертикальный пиксель на экране
+ * стоит ровно столько же, сколько горизонтальный.
+ */
+export const MIN_LIGHT_GAP = 0.06;
