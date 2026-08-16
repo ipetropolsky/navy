@@ -2587,22 +2587,25 @@ test('длинная форма мотается сама, а кнопки де�
 });
 
 /**
- * Уход разговора не отрывает его от нижней кромки окна. Своя высота у него тут была, и вставала
- * она в конечное значение первым же кадром, пока кадр над ней только трогался с места: блок
- * подскакивал вверх на разницу высот (замер: 244px при окне 844) и потом полперехода сползал
- * обратно. Теперь разговор стоит от нижней кромки вверх на свой размер, и меняется у него
- * только этот размер.
+ * Убранный разговор уезжает за кромку окна целиком и своим размером — как уходит всякая
+ * шторка, — а не сминается до нуля.
  *
- * Меряется низ на каждом кадре движения: он обязан стоять на кромке окна всё время, в обе
- * стороны. Высота при этом обязана меняться — иначе проверка прошла бы и на неподвижном блоке.
+ * Прежде ехала высота, и разговор на глазах превращался в кашу: лента с полем ввода сжимались
+ * в полоску, а вернувшись, раскладывались обратно. Ещё раньше, до общей нижней привязки, блок
+ * вдобавок подскакивал вверх на разницу высот (замер: 244px при окне 844) и полперехода
+ * сползал обратно.
+ *
+ * Меряется покадрово и то и другое: высота обязана стоять на месте всё движение, а верх —
+ * пройти от своего места до самой кромки окна. Одного без другого мало: неподвижный блок
+ * прошёл бы проверку на высоту, а сминающийся — проверку на движение.
  */
-const bottomsWhileSwitching = (page: Page, button: string) =>
+const boxWhileSwitching = (page: Page, button: string) =>
     page.evaluate(async (label) => {
         const main = document.querySelector('main')!;
-        const taken: { bottom: number; height: number }[] = [];
+        const taken: { top: number; height: number }[] = [];
         const probe = (): void => {
             const box = main.getBoundingClientRect();
-            taken.push({ bottom: Math.round(box.bottom), height: Math.round(box.height) });
+            taken.push({ top: Math.round(box.top), height: Math.round(box.height) });
         };
         document.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!.click();
         await new Promise<void>((resolve) => {
@@ -2619,21 +2622,26 @@ const bottomsWhileSwitching = (page: Page, button: string) =>
         return taken;
     }, button);
 
-test('разговор не отрывается от нижней кромки, пока уходит и возвращается', async ({ page }) => {
+test('разговор уезжает за кромку целиком, а не сминается до нуля', async ({ page }) => {
     const window = { width: MOBILE_MAX_WIDTH - 90, height: 844 };
     await page.setViewportSize(window);
     await openChannel(page, DEMO, ALBATROS);
 
-    const check = (frames: { bottom: number; height: number }[], button: string): void => {
-        const bottoms = [...new Set(frames.map((frame) => frame.bottom))];
-        expect(bottoms, `«${button}»: блок отрывался от нижней кромки`).toEqual([window.height]);
+    const check = (frames: { top: number; height: number }[], button: string): void => {
+        const heights = [...new Set(frames.map((frame) => frame.height))];
+        expect(heights, `«${button}»: разговор менял высоту, а не уезжал`).toHaveLength(1);
 
-        const heights = frames.map((frame) => frame.height);
-        expect(Math.max(...heights) - Math.min(...heights), `«${button}»: блок не менял высоту`).toBeGreaterThan(100);
+        const tops = frames.map((frame) => frame.top);
+        expect(Math.max(...tops) - Math.min(...tops), `«${button}»: разговор не двинулся`).toBeGreaterThan(100);
+        // Ниже кромки окна он не опускается: уехал ровно на себя самого, не дальше.
+        expect(Math.max(...tops), `«${button}»: разговор уехал дальше кромки окна`).toBeLessThanOrEqual(window.height);
+        expect(Math.min(...tops), `«${button}»: разговор поднялся выше своего места`).toBeGreaterThanOrEqual(
+            window.height - heights[0]
+        );
     };
 
-    check(await bottomsWhileSwitching(page, 'Убрать разговор'), 'Убрать разговор');
-    check(await bottomsWhileSwitching(page, 'Вернуть разговор'), 'Вернуть разговор');
+    check(await boxWhileSwitching(page, 'Убрать разговор'), 'Убрать разговор');
+    check(await boxWhileSwitching(page, 'Вернуть разговор'), 'Вернуть разговор');
 });
 
 /**
@@ -2732,6 +2740,31 @@ test('на широком окне разговор встаёт сбоку во
         WIDE.width - SIDE_AT_WIDE + CHAT_OVERLAP
     );
     expect(frame.height, 'кадр не во всю высоту окна').toBe(WIDE.height);
+});
+
+/**
+ * Сбоку разговор уходит вбок — по своей стороне, а не вниз. Правило то же, что и под кадром:
+ * коробка уезжает за кромку окна целиком и своим размером. Меняется только сторона, и стоит
+ * она на двух классах в селекторе (`.appSide .contentGone`): одноклассовый спор боковая
+ * раскладка проиграла бы — уходящее правило записано ниже.
+ */
+test('сбоку разговор уезжает за правую кромку, не теряя ширины', async ({ page }) => {
+    await openSide(page);
+
+    await page.getByRole('button', { name: 'Убрать разговор' }).click();
+    await page.waitForTimeout(700);
+
+    const gone = await boxOf(page, 'main');
+    expect(gone.width, 'уехавший разговор потерял ширину').toBe(SIDE_AT_WIDE);
+    expect(gone.left, 'разговор уехал не ровно за правую кромку окна').toBe(WIDE.width);
+    expect(gone.height, 'уехавший разговор потерял высоту').toBe(WIDE.height);
+
+    // Кадру при этом досталось всё окно: занятого места больше нет.
+    expect((await boxOf(page, 'header')).width, 'кадр не забрал освободившуюся ширину').toBe(WIDE.width);
+
+    await page.getByRole('button', { name: 'Вернуть разговор' }).click();
+    await page.waitForTimeout(700);
+    expect((await boxOf(page, 'main')).left, 'разговор вернулся не на своё место').toBe(WIDE.width - SIDE_AT_WIDE);
 });
 
 /**
