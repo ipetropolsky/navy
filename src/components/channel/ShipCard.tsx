@@ -51,7 +51,7 @@ export default function ShipCard({ member, senior, onHail }: ShipCardProps) {
     return (
         <div className={styles.card}>
             <div className={styles.title}>
-                <MemberName name={member.name} color={member.color} />
+                <MemberName name={member.name} color={member.color} large />
                 {senior && (
                     <span className={styles.pennant} title={SENIOR_TITLE} aria-label={SENIOR_TITLE}>
                         <Pennant />
