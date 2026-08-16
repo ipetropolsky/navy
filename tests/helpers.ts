@@ -113,7 +113,12 @@ export const leaveRaid = async (page: Page, course = 'В Кронштадт'): P
  */
 export const openShipCard = async (page: Page, name: string): Promise<void> => {
     await openSheet(page);
-    await page.getByRole('button', { name: `Корабль «${name}»` }).click();
+    // Строчку берём внутри самой шторки: тем же именем подписан и корабль в кадре, и на узком
+    // окне первым из двух в разметке оказывается он — то есть тычок уходил бы на рейд.
+    await page
+        .getByRole('region', { name: 'Корабли на связи' })
+        .getByRole('button', { name: `Корабль «${name}»` })
+        .click();
     await page.waitForTimeout(300);
 };
 
