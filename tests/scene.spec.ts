@@ -820,7 +820,9 @@ test('разметка гаснет вместе с флотом, а не кад
     await openShipForm(page);
     // Ждём, пока флот договорит своё: замер идёт по долям пути, и начинать его посреди
     // предыдущего движения нельзя — доли считались бы от полпути.
-    const hull = page.locator('[class*="shipBody"]').first();
+    // Смотрим на сам корпус: в призрак уходит он, а не весь корабль — огни на нём горят
+    // по-прежнему (см. GHOST в Ship).
+    const hull = page.locator('[class*="shipRock"] img').first();
     await expect
         .poll(() => hull.evaluate((one) => Number.parseFloat(getComputedStyle(one).opacity)), {
             message: 'флот так и не ушёл в призрак',
@@ -836,7 +838,7 @@ test('разметка гаснет вместе с флотом, а не кад
     // единицы» такое пропускал — ноль тоже меньше единицы, — и поймать это можно только тем,
     // что слой проходит через середину, а не перескакивает её.
     const frames = await page.evaluate(async () => {
-        const ship = document.querySelector('[class*="shipBody"]')!;
+        const ship = document.querySelector('[class*="shipRock"] img')!;
         const out: { ms: number; field: number; ship: number }[] = [];
         const step = (): Promise<void> => new Promise((resolve) => requestAnimationFrame(() => resolve()));
         const cancel = [...document.querySelectorAll('button')].find((one) => one.textContent === 'Отмена');
@@ -937,10 +939,28 @@ test('пока выбирают место, призраками становя�
 
     // Свой корабль высветляется наравне с чужими: место под ним закрыто им же, и, останься
     // он плотным, единственной невидимой стоянкой на рейде была бы как раз его собственная.
-    const solid = await page
-        .locator('[class*="shipBody"]')
-        .evaluateAll((bodies) => bodies.filter((body) => getComputedStyle(body).filter === 'none').length);
-    expect(solid, 'кто-то из кораблей остался плотным').toBe(0);
+    //
+    // Опознаём призрака по saturate: дымка дальности даёт корпусу яркость всегда, а цвет
+    // из него выбирает только высветление. Берём корабли из кадра, а не со всей страницы:
+    // в открытой форме нарисован ещё один — тот, которого выбирают, — и он плотный.
+    const hulls = await page
+        .locator('[class*="shipRock"] img')
+        .evaluateAll((bodies) => bodies.map((body) => getComputedStyle(body).filter));
+    expect(hulls.length, 'кораблей в кадре не нашлось, проверять нечего').toBeGreaterThan(0);
+    expect(
+        hulls.every((filter) => filter.includes('saturate')),
+        'кто-то из кораблей остался плотным'
+    ).toBe(true);
+
+    // Огни на призраке горят в полную силу: по ним и видно, что на месте кто-то стоит.
+    const lights = await page
+        .locator('[class*="shipRock"] [data-light]')
+        .evaluateAll((marks) => marks.map((mark) => getComputedStyle(mark).opacity));
+    expect(lights.length, 'огней в кадре не нашлось, проверять нечего').toBeGreaterThan(0);
+    expect(
+        lights.every((opacity) => Number.parseFloat(opacity) === 1),
+        'огни погасли вместе с корпусом'
+    ).toBe(true);
 
     // Высветляется корпус, а не тень: тень тёмная, и то же осветление вывернуло бы её
     // в светлое пятно под кораблём. Свой размывающий фильтр у тени есть всегда, поэтому

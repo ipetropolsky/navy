@@ -878,7 +878,7 @@ test('берег острова стоит на горизонте, а не от
 const edgeGap = (page: Page): Promise<number> =>
     page.evaluate(() => {
         const scene = document.querySelector('[class*="scene"]')!.getBoundingClientRect();
-        const hull = document.querySelector('[class*="shipBody"] img')!.getBoundingClientRect();
+        const hull = document.querySelector('[class*="shipRock"] img')!.getBoundingClientRect();
         return (Math.min(hull.left - scene.left, scene.right - hull.right) / scene.width) * 100;
     });
 
