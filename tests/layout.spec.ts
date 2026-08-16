@@ -1454,11 +1454,14 @@ test('шторка в просторном окне уже своей полос
 });
 
 /**
- * Затемнение под шторкой есть всегда: выбирать под ней нечего — сцена в этот момент только фон,
- * а нажатие мимо означает «убери». Шапка при этом остаётся нажимаемой: она лежит выше шторки
- * и затемнения, и кнопками из неё шторка и закрывается.
+ * Открытая шторка забирает экран себе: затемнение лежит по всему окну, и под ним всё —
+ * кадр, разговор и шапка. Пока шторка на экране, разговор идёт только про неё, и нажатие
+ * куда угодно мимо означает одно: «убери».
+ *
+ * Шапка тут отдельно: прежде она стояла выше затемнения, и кнопками из неё шторку открывали
+ * и закрывали поверх уже открытой. Теперь она под ним — выходов из шторки и так три.
  */
-test('под шторкой всегда затемнение, а шапка над ним остаётся нажимаемой', async ({ page }) => {
+test('открытая шторка забирает экран себе, и шапка тоже под затемнением', async ({ page }) => {
     await openChannel(page, DEMO, ALBATROS);
     await openSheet(page);
 
@@ -1471,11 +1474,19 @@ test('под шторкой всегда затемнение, а шапка н�
         };
     });
     expect(layers.backdrop, 'затемнение легло поверх шторки').toBeLessThan(layers.shade);
-    expect(layers.shade, 'шторка накрыла шапку, которой её закрывают').toBeLessThan(layers.header);
+    expect(layers.header, 'шапка осталась поверх затемнения').toBeLessThan(layers.backdrop);
 
-    // Кнопка списка в шапке доступна и с открытой шторкой: ею список и закрывают обратно.
-    await shipsButton(page).click();
-    await expect(shadeRegion(page), 'кнопка шапки не закрыла шторку').toHaveCount(0);
+    // Затемнение — во всё окно, а не по кадру: разговор сбоку гаснет вместе со всем остальным.
+    const window = page.viewportSize()!;
+    const backdrop = await boxOf(page, 'button[aria-label="Закрыть шторку"]');
+    expect(backdrop.width, 'затемнение погасило не всё окно').toBe(window.width);
+    expect(backdrop.height, 'затемнение погасило не всё окно').toBe(window.height);
+
+    // Кнопки шапки из-под затемнения не достать: нажатие по её месту достаётся затемнению,
+    // и шторка от него закрывается, а не открывает вторую.
+    const ships = (await shipsButton(page).boundingBox())!;
+    await page.mouse.click(Math.round(ships.x + ships.width / 2), Math.round(ships.y + ships.height / 2));
+    await expect(shadeRegion(page), 'нажатие по шапке не закрыло шторку').toHaveCount(0);
 });
 
 /**
@@ -1860,8 +1871,8 @@ test('шторка и форма корабля приезжают поверх 
     await input.evaluate((node) => node.setAttribute('data-probe', 'тот же самый'));
 
     await openSheet(page);
-    // Кнопка названия та же самая и с открытым списком — тем же нажатием список и убирают.
-    await shipsButton(page).click();
+    // Закрываем крестиком: шапка под затемнением, и кнопкой из неё список уже не убрать.
+    await shadeRegion(page).getByRole('button', { name: 'Закрыть' }).click();
     await expect(input, 'разговор пересобрался под шторкой: поле стало другим узлом').toHaveAttribute(
         'data-probe',
         'тот же самый'
@@ -2651,8 +2662,10 @@ test('шторка встаёт на сцену рядом с разговоро
     expect(Math.abs(shade.left - (room - shade.right)), 'шторка не посередине сцены').toBeLessThanOrEqual(1);
     expect(shade.right, 'шторка залезла на разговор').toBeLessThanOrEqual(room);
 
+    // Затемнение при этом по всему окну, а не по полосе под шторкой: место у шторки своё,
+    // а гаснет под ней всё — разговор рядом в этот момент тоже ничего не ждёт.
     const backdrop = await boxOf(page, 'button[aria-label="Закрыть шторку"]');
-    expect(backdrop.width, 'затемнение погасило не сцену').toBe(room);
+    expect(backdrop.width, 'затемнение погасило не всё окно').toBe(WIDE.width);
     expect(backdrop.left, 'затемнение легло не от левой кромки окна').toBe(0);
 
     await page.getByRole('button', { name: 'Настроить корабль' }).click();
@@ -2884,24 +2897,31 @@ test('карточка ложится поверх списка кораблей
 });
 
 /**
- * А обратно — нет: список, открытый из шапки, карточку под собой закрывает. Он отвечает
- * про весь рейд, и разговор про один корабль на этом кончился. Раньше он в этом случае
- * вылезал под карточкой — и выглядело это поломкой.
+ * А обратно шторки больше не открываются вовсе: пока карточка на экране, шапка под затемнением,
+ * и нажатие по названию канала достаётся затемнению — то есть закрывает карточку, а списка
+ * не открывает. Открытая шторка забирает экран себе, и второй поверх неё из шапки не позвать.
+ *
+ * Правило «поздняя закрывает прежние» (`cover` у `Shade`) от этого никуда не делось: оно про
+ * стопку, а не про шапку, — просто из интерфейса на него теперь не выйти.
  */
-test('список кораблей, открытый поверх карточки, закрывает её за собой', async ({ page }) => {
+test('из-под открытой карточки список кораблей не позвать: шапка под затемнением', async ({ page }) => {
     await openChannel(page, DEMO, ALBATROS);
 
     // Карточку берём из кадра: из списка она открылась бы поверх него, а нам нужен обратный
-    // порядок — сперва карточка, потом список.
+    // порядок — сперва карточка, потом попытка позвать список.
     const fleet = Object.values((await readState(page)).channels)[0].members;
     const other = fleet.find((member) => member.memberId !== ALBATROS)!;
     await clickShip(page, page.locator(`[data-berth-ship="${other.place.slot}-${other.place.corridor}"]`));
     const card = page.getByRole('region', { name: 'Корабль' });
     await expect(card).toBeVisible();
 
-    await openSheet(page);
-    await expect(page.getByRole('region', { name: 'Корабли на связи' }), 'список не открылся').toBeVisible();
-    await expect(card, 'список не закрыл карточку под собой').toBeHidden();
+    const ships = (await shipsButton(page).boundingBox())!;
+    await page.mouse.click(Math.round(ships.x + ships.width / 2), Math.round(ships.y + ships.height / 2));
+    await expect(card, 'карточка не закрылась от нажатия по затемнению').toBeHidden();
+    await expect(
+        page.getByRole('region', { name: 'Корабли на связи' }),
+        'список открылся из-под затемнения'
+    ).toHaveCount(0);
 });
 
 /**
