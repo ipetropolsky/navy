@@ -55,11 +55,12 @@ interface ShadeProps {
     /** Чем шторка подписана тем, кто её не видит. */
     label: string;
     /**
-     * Шторка внутри блока контента, а не поверх окна. Так она стоит, когда разговор убран
-     * в боковую панель: поверх окна она накрыла бы собой рейд, ради которого разговор
-     * туда и убирают. На узком окне боковой раскладки нет, и это не действует.
+     * Шторка на сцене, а не поверх окна. Так она стоит, когда разговор убран в боковую панель:
+     * и список кораблей, и карточка — про рейд, и место им там, где рейд и виден, а панель
+     * с разговором остаётся рядом нетронутой. На узком окне боковой раскладки нет,
+     * и это не действует.
      */
-    inside?: boolean;
+    onScene?: boolean;
     children: ReactNode;
 }
 
@@ -82,7 +83,7 @@ interface ShadeProps {
  * Едет она сдвигом, а не высотой: высоту ей задаёт содержимое, и разводить её во времени
  * значило бы перекладывать содержимое на каждом кадре выезда.
  */
-export default function Shade({ open, onClose, label, inside = false, children }: ShadeProps) {
+export default function Shade({ open, onClose, label, onScene = false, children }: ShadeProps) {
     const shadeRef = useRef<HTMLElement>(null);
     const { mounted, onTransitionEnd } = useSlide(open);
     // Сдвиг вниз, пока шторку тянут, px. Стоит inline-стилем и идёт за пальцем без перехода;
@@ -173,7 +174,7 @@ export default function Shade({ open, onClose, label, inside = false, children }
     const leaving = !open;
     const look = [
         styles.shade,
-        inside ? styles.shadeInside : '',
+        onScene ? styles.shadeOnScene : '',
         leaving ? styles.shadeLeaving : '',
         shift === null ? '' : styles.shadeDragging,
     ]
@@ -188,7 +189,11 @@ export default function Shade({ open, onClose, label, inside = false, children }
                 (см. z-index в App.module.less), и кнопками из неё шторка и закрывается. */}
             <button
                 type="button"
-                className={[styles.backdrop, inside ? styles.backdropInside : '', leaving ? styles.backdropLeaving : '']
+                className={[
+                    styles.backdrop,
+                    onScene ? styles.backdropOnScene : '',
+                    leaving ? styles.backdropLeaving : '',
+                ]
                     .filter(Boolean)
                     .join(' ')}
                 style={shift === null ? undefined : { opacity: Math.max(1 - shift / 200, 0) }}
