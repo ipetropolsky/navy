@@ -293,9 +293,8 @@ test('на тесной линии первым уступает тот, кто 
     // и меняет одним махом, а по кадру корпус едет переходом. Значит и признак покоя простой —
     // корпус стоит серединой ровно там, куда указывает его же дорожка.
     //
-    // Уходящий корабль в счёт не идёт: он виден в кадре ещё полминуты после того, как снялся
-    // с рейда, а сосед отпускает резинку сразу, как только тот пропал из списка канала.
-    // Помечен уходящий своим классом движения, по нему и отличаем.
+    // Идущий корабль в счёт не идёт: покой меряется по тем, кто стоит. Помечен идущий своим
+    // классом движения, по нему и отличаем.
     const settled = async (): Promise<Awaited<ReturnType<typeof hulls>>> => {
         await expect
             .poll(
@@ -360,24 +359,32 @@ test('на тесной линии первым уступает тот, кто 
     await openChannel(page, 'rezinka', resident.memberId);
     await leaveRaid(page);
 
-    // Резинка отпускает не мгновенно: уход соседа сперва доходит до канала, и только потом
-    // расстановка переписывает дорожку. Покой сам по себе тут не признак — застать его можно
-    // и до перемены, на старом месте, — поэтому сперва ждём саму перемену мерки. Катер узнаём
-    // по ширине корпуса: он на этой линии самый узкий, и уходящий сосед этого не меняет.
-    await expect
-        .poll(
+    // Мерка катера в кадре. Узнаём его по ширине корпуса: он на этой линии самый узкий,
+    // и уходящий сосед этого не меняет.
+    const smallAt = (): Promise<number> =>
+        page.evaluate(
             () =>
-                page.evaluate(
-                    () =>
-                        [...document.querySelectorAll<HTMLElement>('[class*="shipLane"]')]
-                            .map((lane) => ({
-                                width: lane.querySelector('[class*="shipSlot"]')!.getBoundingClientRect().width,
-                                at: parseFloat(lane.style.getPropertyValue('--slot-left')),
-                            }))
-                            .sort((one, other) => one.width - other.width)[0].at
-                ),
-            { message: 'катер так и не получил новую мерку', timeout: SAIL_TIMEOUT }
-        )
+                [...document.querySelectorAll<HTMLElement>('[class*="shipLane"]')]
+                    .map((lane) => ({
+                        width: lane.querySelector('[class*="shipSlot"]')!.getBoundingClientRect().width,
+                        at: parseFloat(lane.style.getPropertyValue('--slot-left')),
+                    }))
+                    .sort((one, other) => one.width - other.width)[0].at
+        );
+
+    // Резинка отпускает не в тот миг, когда сосед снялся с рейда, а когда он ушёл: пока
+    // уходящий виден в кадре, место на линии он занимает по-прежнему. Иначе катер трогался бы
+    // обратно на свою точку в тот же миг, когда крупный дал ход, — прямо ему под корпус,
+    // и всю дорогу до кромки они шли бы внахлёст.
+    await expect(page.locator('[data-motion]'), 'крупный так и не дал ход').toHaveCount(1, {
+        timeout: SAIL_TIMEOUT,
+    });
+    expect(await smallAt(), 'катер отпустил резинку, не дождавшись ухода соседа').toBeCloseTo(tightSmall.at, 1);
+
+    // А как ушёл — катер пошёл обратно. Покой сам по себе тут не признак: застать его можно
+    // и до перемены, на старом месте, — поэтому ждём саму перемену мерки.
+    await expect
+        .poll(smallAt, { message: 'катер так и не получил новую мерку', timeout: SAIL_TIMEOUT })
         .toBeGreaterThan(tightSmall.at);
 
     // Насколько именно он отошёл — не проверяем: это его разброс внутри полосы, а он считается

@@ -469,22 +469,29 @@ export const restingLeft = (ship: Anchored): number => restingAt(spotOf(ship), s
  *
  * Держится всё это, как на резинке: ушёл сосед — и корабль вернулся на свою точку, никуда
  * при этом не переезжая, потому что место у него всё это время было своё.
+ *
+ * Считать сцене приходится не состав канала, а кадр: снявшийся с рейда корабль виден ещё
+ * полминуты, и всё это время он занимает своё место — сосед, отошедший от него, обязан стоять
+ * отжатым, а не идти обратно ему под корпус. Отсюда и `leaving`: это те, кто уже в пути.
+ * Втроём на линии сходятся только из-за них — уходящий ещё в кадре, а его место уже занял
+ * новичок, — и тогда счёт уступает уходящий: этим двоим стоять тут и дальше, а он всё равно
+ * сейчас уйдёт. Разводить троих взаправду нечем: воды на линии на троих может и не быть,
+ * а правило, которое живёт полминуты в году, не стоит того, чтобы ошибаться в нём молча.
  */
-export const fleetLefts = (fleet: Anchored[]): Record<string, number> => {
+export const fleetLefts = (fleet: Anchored[], leaving: ReadonlySet<string> = new Set()): Record<string, number> => {
     const left: Record<string, number> = {};
     for (const ship of fleet) {
         left[ship.memberId] = restingLeft(ship);
     }
     for (const slot of new Set(fleet.map((ship) => ship.place.slot))) {
+        const line = fleet.filter((ship) => ship.place.slot === slot);
         // Мельче — уступает первым; при равных силуэтах уступает тот, кто встал раньше:
         // это его резинку натянули, ему и отпускать.
-        const here = fleet
-            .filter((ship) => ship.place.slot === slot)
-            .sort(
-                (one, other) =>
-                    shipWidthPercent(one.place.slot, one.shipKind) -
-                        shipWidthPercent(other.place.slot, other.shipKind) || one.joinedAt - other.joinedAt
-            );
+        const here = (line.length > 2 ? line.filter((ship) => !leaving.has(ship.memberId)) : line).sort(
+            (one, other) =>
+                shipWidthPercent(one.place.slot, one.shipKind) - shipWidthPercent(other.place.slot, other.shipKind) ||
+                one.joinedAt - other.joinedAt
+        );
         if (here.length === 2) {
             const [small, big] = here;
             const smallHalf = hullHalf(small.place.slot, small.shipKind);

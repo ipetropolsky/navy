@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'vitest';
 
-import { ISLAND_FREE_SLOT, ISLAND_SIDE, ShipKind, otherSide } from '@/types/channel';
+import { Corridor, ISLAND_FREE_SLOT, ISLAND_SIDE, ShipKind, otherSide, shipWidthPercent } from '@/types/channel';
 
-import { placeShip } from '@/backend/placement';
+import { Anchored, fleetLefts, placeShip } from '@/backend/placement';
 
 /**
  * Заход на рейд: с какой стороны корабль приходит и куда встаёт носом. Правило счётное,
@@ -55,5 +55,87 @@ describe('заход на рейд', () => {
             const place = placeShip(KIND, [], { slot: NEAR, corridor: 'center', left: 50 });
             expect(place?.facing).toBe(otherSide(place!.enterFrom));
         }
+    });
+});
+
+/**
+ * Расхождение тесных соседей. Считается оно чистой функцией от состава кадра — ни экрана,
+ * ни времени тут не нужно, — и потому проверяется юнитом. Браузеру остаётся то, чего в числах
+ * не увидеть: что корпуса в кадре и правда не налезли друг на друга.
+ */
+
+/** Корабль в кадре: место да силуэт, больше расхождению ничего не нужно. */
+const anchored = (memberId: string, slot: number, corridor: Corridor, kind: ShipKind, joinedAt = 0): Anchored => ({
+    memberId,
+    joinedAt,
+    shipKind: kind,
+    // `left` тут для полноты места: расхождение считает точку само, от слота, коридора
+    // и позывного, — сохранённое число оно не читает вовсе.
+    place: { slot, corridor, left: 50, facing: 'left', enterFrom: 'right' },
+});
+
+/** Налезли ли корпуса: сравниваем расстояние между серединами с полусуммой ширин. */
+const overlap = (fleet: Anchored[]): boolean => {
+    const left = fleetLefts(fleet);
+    return fleet.some((one) =>
+        fleet.some(
+            (other) =>
+                one.memberId !== other.memberId &&
+                one.place.slot === other.place.slot &&
+                Math.abs(left[one.memberId] - left[other.memberId]) <
+                    (shipWidthPercent(one.place.slot, one.shipKind) +
+                        shipWidthPercent(other.place.slot, other.shipKind)) /
+                        2
+        )
+    );
+};
+
+describe('расхождение тесных соседей', () => {
+    test('уступают оба, и никто не остаётся под чужим корпусом', () => {
+        // Катер и корабль в полсотни метров, вставшие на одну линию. Расходятся оба: мелкий
+        // отдаёт всё, что у него есть, — на этой линии ему до кромки поля ближе, чем нужно
+        // воды, — а остаток добирает крупный.
+        const small = anchored('malysh', NEAR, 'left', 'pr1400');
+        const big = anchored('grom', NEAR, 'center', 'pr1141');
+        const together = fleetLefts([small, big]);
+        expect(together[small.memberId], 'мелкий не тронулся с места').not.toBeCloseTo(
+            fleetLefts([small])[small.memberId],
+            3
+        );
+        expect(together[big.memberId], 'крупный не добрал остаток').not.toBeCloseTo(fleetLefts([big])[big.memberId], 3);
+        expect(overlap([small, big]), 'корпуса налезли друг на друга').toBe(false);
+    });
+
+    test('уходящий сосед давит на место, пока он в кадре', () => {
+        // Уходящий корабль виден в кадре ещё полминуты после того, как снялся с рейда,
+        // и всё это время он занимает своё место: сосед, отошедший от него, обязан стоять
+        // отжатым, а не идти обратно ему под корпус.
+        const staying = anchored('malysh', NEAR, 'left', 'pr1400');
+        const leaving = anchored('grom', NEAR, 'center', 'pr1141');
+        const pressed = fleetLefts([staying, leaving], new Set([leaving.memberId]));
+        expect(pressed[staying.memberId], 'сосед отпустил резинку раньше, чем уходящий отошёл').toBeCloseTo(
+            fleetLefts([staying, leaving])[staying.memberId],
+            3
+        );
+        expect(pressed[staying.memberId], 'уходящий перестал занимать своё место').not.toBeCloseTo(
+            fleetLefts([staying])[staying.memberId],
+            3
+        );
+    });
+
+    test('уходящий уступает счёт, когда его место занял новичок', () => {
+        // Трое на одной линии бывают только так: один снялся с рейда и ещё идёт к кромке,
+        // а его место занял новичок — в тот же коридор, потому что оно освободилось. Воды
+        // на линии на троих может и не быть, и разводить приходится тех двоих, кто на ней
+        // останется: уходящий сейчас уйдёт, и стоять с ними ему незачем.
+        const staying = anchored('malysh', NEAR, 'left', 'pr1141', 1);
+        const leaving = anchored('grom', NEAR, 'center', 'pr1400', 2);
+        const joined = anchored('novik', NEAR, 'center', 'pr1400', 3);
+        const line = [staying, leaving, joined];
+        const lefts = fleetLefts(line, new Set([leaving.memberId]));
+        expect(lefts[joined.memberId], 'новичок не разошёлся с тем, кто остаётся').toBe(
+            fleetLefts([staying, joined])[joined.memberId]
+        );
+        expect(overlap(line.filter((ship) => ship !== leaving)), 'корпуса налезли друг на друга').toBe(false);
     });
 });
