@@ -2,7 +2,7 @@ import { SyntheticEvent, useEffect, useRef, useState } from 'react';
 
 import IconButton from '@/components/ui/IconButton';
 import Input from '@/components/ui/Input';
-import { MAX_MESSAGE_LENGTH, Member, Message } from '@/types/channel';
+import { AuthorLook, MAX_MESSAGE_LENGTH, Message } from '@/types/channel';
 import { limitMessage, overLimit } from '@/utils/limit';
 
 import MessageBody from '@/components/chat/MessageBody';
@@ -12,7 +12,8 @@ import styles from './Composer.module.less';
 
 interface ComposerProps {
     replyTo: Message | null;
-    replyToAuthor: Member | null;
+    /** Каким автор цитируемой реплики стоит в ленте. Его самого на рейде может уже не быть. */
+    replyToAuthor: AuthorLook | null;
     onCancelReply: () => void;
     onSend: (text: string) => void;
     /**

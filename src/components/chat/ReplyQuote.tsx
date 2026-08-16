@@ -1,7 +1,7 @@
 import { ReactNode } from 'react';
 
 import MemberName from '@/components/ships/MemberName';
-import { Member } from '@/types/channel';
+import { AuthorLook } from '@/types/channel';
 
 import styles from './ReplyQuote.module.less';
 
@@ -12,7 +12,12 @@ import styles from './ReplyQuote.module.less';
  */
 
 interface ReplyQuoteProps {
-    author?: Member;
+    /**
+     * Чью реплику цитируем — тем видом, каким автор стоит в ленте (см. `authorLook`).
+     * Не участником: цитировать можно и того, кто уже снялся с рейда, и участника такого нет,
+     * а позывной с цветом есть.
+     */
+    author?: AuthorLook;
     /** Что процитировано. Узлом, а не строкой: у системной записи текста нет — есть фраза. */
     text: ReactNode;
 }

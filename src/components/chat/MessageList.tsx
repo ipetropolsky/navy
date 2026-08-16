@@ -4,7 +4,7 @@ import Avatar from '@/components/ships/Avatar';
 import CodePennant from '@/components/ships/CodePennant';
 import MemberName from '@/components/ships/MemberName';
 import { useSnackbar } from '@/components/ui/Snackbar';
-import { Member, Message } from '@/types/channel';
+import { AuthorLook, Member, MemberRef, Message, authorLook } from '@/types/channel';
 import { Press, drifted, isTap, selectedSince, startPress } from '@/utils/tap';
 
 import MessageBody from '@/components/chat/MessageBody';
@@ -250,6 +250,14 @@ export default function MessageList({ messages, members, myId, onReply, onHail }
     const byId = new Map(members.map((member) => [member.memberId, member]));
 
     /**
+     * Как показать автора строчки. Сперва нынешний корабль, а если его на рейде уже нет —
+     * снимок, записанный при отправке: лента переживает участников, и у сообщения корабля,
+     * который снялся с рейда, иначе пропадала бы аватарка, а в цитате ответа вместо позывного
+     * вставало бы «Неизвестный».
+     */
+    const lookOf = (ref: MemberRef): AuthorLook | undefined => authorLook(ref, byId.get(ref.memberId));
+
+    /**
      * По кому группировать подряд идущие сообщения. По автору — и системная запись тут ничем
      * не выделена: она тоже про конкретный корабль и встаёт в его же цепочку, с его аватаркой
      * и его позывным над первой строкой.
@@ -279,7 +287,10 @@ export default function MessageList({ messages, members, myId, onReply, onHail }
             {messages.length > 0 && <div className={styles.dateChip}>{formatDate(messages[0].sentAt)}</div>}
             {messages.map((message, index) => {
                 const own = message.author.memberId === myId;
-                const author = byId.get(message.author.memberId);
+                const author = lookOf(message.author);
+                // На рейде ли он ещё. Оклик есть только у тех, кто есть: окликать некого,
+                // и мигать в кадре нечему — корабль ушёл.
+                const afloat = byId.has(message.author.memberId);
                 const firstOfGroup = index === 0 || groupKeys[index - 1] !== groupKeys[index];
                 const lastOfGroup = index === messages.length - 1 || groupKeys[index + 1] !== groupKeys[index];
                 // Место под аватарку держим у всякой чужой строки, системной в том числе:
@@ -290,10 +301,14 @@ export default function MessageList({ messages, members, myId, onReply, onHail }
                             <Avatar
                                 number={author.hullNumber}
                                 name={author.name}
-                                action={{
-                                    title: `Окликнуть «${author.name}»`,
-                                    onClick: () => onHail(author.memberId),
-                                }}
+                                action={
+                                    afloat
+                                        ? {
+                                              title: `Окликнуть «${author.name}»`,
+                                              onClick: () => onHail(message.author.memberId),
+                                          }
+                                        : undefined
+                                }
                             />
                         )}
                     </div>
@@ -368,7 +383,7 @@ export default function MessageList({ messages, members, myId, onReply, onHail }
                             {replyTo && (
                                 <span className={styles.replyCell}>
                                     <ReplyQuote
-                                        author={byId.get(replyTo.author.memberId)}
+                                        author={lookOf(replyTo.author)}
                                         text={<MessageBody message={replyTo} />}
                                     />
                                 </span>

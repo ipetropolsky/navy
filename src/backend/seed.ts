@@ -1,4 +1,4 @@
-import { Berth, CORRIDORS, Corridor, Member, ShipKind } from '@/types/channel';
+import { AuthorLook, Berth, CORRIDORS, Corridor, Member, MemberRef, ShipKind, memberLook } from '@/types/channel';
 import { pick, pickBetween, shuffled } from '@/utils/random';
 
 import { Standing, berthAt, placeShip } from '@/backend/placement';
@@ -114,108 +114,126 @@ const placeDemoCrew = (): Member[] => {
     });
 };
 
-export const createDemoChannel = (): ChannelSnapshot => ({
-    channel: {
-        channelId: DEMO_CHANNEL_ID,
-        slug: DEMO_CHANNEL_SLUG,
-        title: 'Эскадра «Полночь»',
-        createdAt: minutesAfterMidnight(21, 30),
-        // Старший — тот, кто встал первым: в настоящем канале это выходит само собой,
-        // и демо не должно быть устроено иначе.
-        owner: { memberId: DEMO_CREW[0].memberId },
-    },
-    members: placeDemoCrew(),
-    messages: [
-        {
-            messageId: 'msg-join-1',
-            author: { memberId: 'm-albatros' },
-            kind: 'system',
-            notice: { event: 'joined', before: { shipKind: 'pr1400', name: 'Альбатрос', hullNumber: '317' } },
-            sentAt: minutesAfterMidnight(21, 30),
+export const createDemoChannel = (): ChannelSnapshot => {
+    const members = placeDemoCrew();
+
+    /**
+     * Кто говорит: ссылка на корабль со снимком того, каким его видели в эту минуту разговора.
+     * Снимок в демо нужен затем же, зачем и в настоящем канале, — сообщение переживает корабль
+     * (см. `MemberRef`), — и заодно демо показывает, что снимок в ленте бывает не такой,
+     * как нынешний вид: `was` говорит, что до переоснащения на борту стоял ещё 555.
+     */
+    const said = (memberId: string, was?: Partial<AuthorLook>): MemberRef => {
+        // Корабль из состава найдётся всегда: id ниже взяты из него же.
+        const member = members.find((item) => item.memberId === memberId) ?? members[0];
+        return { memberId: member.memberId, look: { ...memberLook(member), ...was } };
+    };
+
+    return {
+        channel: {
+            channelId: DEMO_CHANNEL_ID,
+            slug: DEMO_CHANNEL_SLUG,
+            title: 'Эскадра «Полночь»',
+            createdAt: minutesAfterMidnight(21, 30),
+            // Старший — тот, кто встал первым: в настоящем канале это выходит само собой,
+            // и демо не должно быть устроено иначе.
+            owner: { memberId: DEMO_CREW[0].memberId },
         },
-        {
-            messageId: 'msg-join-2',
-            author: { memberId: 'm-vympel' },
-            kind: 'system',
-            notice: { event: 'joined', before: { shipKind: 'pr1234', name: 'Вымпел', hullNumber: '555' } },
-            sentAt: minutesAfterMidnight(21, 32),
-        },
-        {
-            messageId: 'msg-join-3',
-            author: { memberId: 'm-rezvy' },
-            kind: 'system',
-            notice: { event: 'joined', before: { shipKind: 'pr201', name: 'Резвый', hullNumber: '208' } },
-            sentAt: minutesAfterMidnight(21, 34),
-        },
-        {
-            messageId: 'msg-1',
-            author: { memberId: 'm-albatros' },
-            text: 'Встали на рейде у острова. Море спокойное, видимость отличная.',
-            sentAt: minutesAfterMidnight(21, 37),
-        },
-        {
-            messageId: 'msg-2',
-            author: { memberId: 'm-vympel' },
-            text: 'Принял. Огни притушить, работаем только сигнальной лампой.',
-            sentAt: minutesAfterMidnight(21, 39),
-        },
-        {
-            messageId: 'msg-3',
-            author: { memberId: 'm-rezvy' },
-            text: 'Резвый на связи. Швартовы отданы, выходим из бухты.',
-            sentAt: minutesAfterMidnight(21, 41),
-        },
-        {
-            // Вторая фраза о перемене: у силуэта и позывного старое значение не показывают —
-            // оно стоит строчкой выше в той же ленте.
-            messageId: 'msg-refit-kind',
-            author: { memberId: 'm-rezvy' },
-            kind: 'system',
-            notice: {
-                event: 'refit',
-                before: { shipKind: 'pr201', name: 'Резвый', hullNumber: '208' },
-                after: { shipKind: 'pr205', name: 'Резвый', hullNumber: '208' },
-                changed: 'shipKind',
+        members,
+        messages: [
+            {
+                messageId: 'msg-join-1',
+                author: said('m-albatros'),
+                kind: 'system',
+                notice: { event: 'joined', before: { shipKind: 'pr1400', name: 'Альбатрос', hullNumber: '317' } },
+                sentAt: minutesAfterMidnight(21, 30),
             },
-            sentAt: minutesAfterMidnight(21, 42),
-        },
-        {
-            messageId: 'msg-4',
-            author: { memberId: 'm-albatros' },
-            text: 'Идём следом, держу кильватер.',
-            thread: { messageId: 'msg-3' },
-            sentAt: minutesAfterMidnight(21, 42),
-        },
-        {
-            messageId: 'msg-5',
-            author: { memberId: 'm-vympel' },
-            text: 'Вымпел на позиции, к переходу готов.',
-            sentAt: minutesAfterMidnight(21, 44),
-        },
-        {
-            messageId: 'msg-refit',
-            author: { memberId: 'm-vympel' },
-            kind: 'system',
-            notice: {
-                event: 'refit',
-                before: { shipKind: 'pr1234', name: 'Вымпел', hullNumber: '555' },
-                after: { shipKind: 'pr1234', name: 'Вымпел', hullNumber: '561' },
-                changed: 'hullNumber',
+            {
+                messageId: 'msg-join-2',
+                author: said('m-vympel', { hullNumber: '555' }),
+                kind: 'system',
+                notice: { event: 'joined', before: { shipKind: 'pr1234', name: 'Вымпел', hullNumber: '555' } },
+                sentAt: minutesAfterMidnight(21, 32),
             },
-            sentAt: minutesAfterMidnight(21, 45),
-        },
-        {
-            messageId: 'msg-6',
-            author: { memberId: 'm-vympel' },
-            text: 'Луна вышла — остров как на ладони. Красота.',
-            sentAt: minutesAfterMidnight(21, 47),
-        },
-        {
-            messageId: 'msg-7',
-            author: { memberId: 'm-albatros' },
-            text: 'Ради такого и служим.',
-            thread: { messageId: 'msg-6' },
-            sentAt: minutesAfterMidnight(21, 48),
-        },
-    ],
-});
+            {
+                messageId: 'msg-join-3',
+                author: said('m-rezvy'),
+                kind: 'system',
+                notice: { event: 'joined', before: { shipKind: 'pr201', name: 'Резвый', hullNumber: '208' } },
+                sentAt: minutesAfterMidnight(21, 34),
+            },
+            {
+                messageId: 'msg-1',
+                author: said('m-albatros'),
+                text: 'Встали на рейде у острова. Море спокойное, видимость отличная.',
+                sentAt: minutesAfterMidnight(21, 37),
+            },
+            {
+                messageId: 'msg-2',
+                author: said('m-vympel', { hullNumber: '555' }),
+                text: 'Принял. Огни притушить, работаем только сигнальной лампой.',
+                sentAt: minutesAfterMidnight(21, 39),
+            },
+            {
+                messageId: 'msg-3',
+                author: said('m-rezvy'),
+                text: 'Резвый на связи. Швартовы отданы, выходим из бухты.',
+                sentAt: minutesAfterMidnight(21, 41),
+            },
+            {
+                // Вторая фраза о перемене: у силуэта и позывного старое значение не показывают —
+                // оно стоит строчкой выше в той же ленте.
+                messageId: 'msg-refit-kind',
+                author: said('m-rezvy'),
+                kind: 'system',
+                notice: {
+                    event: 'refit',
+                    before: { shipKind: 'pr201', name: 'Резвый', hullNumber: '208' },
+                    after: { shipKind: 'pr205', name: 'Резвый', hullNumber: '208' },
+                    changed: 'shipKind',
+                },
+                sentAt: minutesAfterMidnight(21, 42),
+            },
+            {
+                messageId: 'msg-4',
+                author: said('m-albatros'),
+                text: 'Идём следом, держу кильватер.',
+                thread: { messageId: 'msg-3' },
+                sentAt: minutesAfterMidnight(21, 42),
+            },
+            {
+                messageId: 'msg-5',
+                author: said('m-vympel', { hullNumber: '555' }),
+                text: 'Вымпел на позиции, к переходу готов.',
+                sentAt: minutesAfterMidnight(21, 44),
+            },
+            {
+                // Запись о переоснащении стоит в прежней цепочке — она про то, каким корабль
+                // был, — и снимок у неё прежний: 555, а не 561.
+                messageId: 'msg-refit',
+                author: said('m-vympel', { hullNumber: '555' }),
+                kind: 'system',
+                notice: {
+                    event: 'refit',
+                    before: { shipKind: 'pr1234', name: 'Вымпел', hullNumber: '555' },
+                    after: { shipKind: 'pr1234', name: 'Вымпел', hullNumber: '561' },
+                    changed: 'hullNumber',
+                },
+                sentAt: minutesAfterMidnight(21, 45),
+            },
+            {
+                messageId: 'msg-6',
+                author: said('m-vympel'),
+                text: 'Луна вышла — остров как на ладони. Красота.',
+                sentAt: minutesAfterMidnight(21, 47),
+            },
+            {
+                messageId: 'msg-7',
+                author: said('m-albatros'),
+                text: 'Ради такого и служим.',
+                thread: { messageId: 'msg-6' },
+                sentAt: minutesAfterMidnight(21, 48),
+            },
+        ],
+    };
+};

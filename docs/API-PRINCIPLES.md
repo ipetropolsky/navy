@@ -124,7 +124,9 @@ setTyping({ channelId, memberId, typing: { chars } });
 - у сущности один идентификатор, и в ссылке он называется так же: `member.memberId`
   и `message.author.memberId` — одно и то же поле;
 - ссылки — объекты: `author: { memberId }`, `thread: { messageId }`,
-  `member-left { member: { memberId } }`, `typing { member, typing: { chars } }`;
+  `member-left { member: { memberId } }`, `typing { member, typing: { chars } }`, — и это
+  уже пригодилось: у автора сообщения рядом с id дописался снимок его вида (`look`),
+  потому что ссылка переживает самого участника, а читатели ссылки не сломались;
 - методы принимают один именованный объект, адресные поля лежат в нём скалярами;
 - ответы завёрнуты: `join` → `{ member }`, `sendMessage` → `{ message }`,
   `createChannel` → `{ channel }`;

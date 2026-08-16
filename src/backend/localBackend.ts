@@ -3,9 +3,11 @@ import {
     MAX_COURSE_LENGTH,
     MAX_MESSAGE_LENGTH,
     Member,
+    MemberRef,
     Message,
     ShipNotice,
     isSameBerth,
+    memberRef,
 } from '@/types/channel';
 import { limitMessage, overLimit } from '@/utils/limit';
 import { isValidSlug } from '@/utils/slug';
@@ -53,7 +55,7 @@ const BROADCAST_NAME = 'kilvater';
  * Здесь должна появиться миграция раньше, чем в канале заведётся первый неигрушечный разговор.
  * Подробно — в docs/BACKEND-API.md, раздел «К чужим данным — бережно».
  */
-const STORAGE_VERSION = 14;
+const STORAGE_VERSION = 15;
 
 /** Ключ, под которым состояние лежало до появления версии. Чистим, чтобы не мусорить. */
 const LEGACY_STORAGE_KEY = 'kilvater.v1';
@@ -198,14 +200,20 @@ export function createLocalBackend(): ChannelBackend {
         deliver(event);
     };
 
-    /** Записать в ленту запись от самого канала и разослать её как обычное сообщение. */
+    /**
+     * Записать в ленту запись от самого канала и разослать её как обычное сообщение.
+     *
+     * Автор приходит ссылкой, а не одним id, потому что снимок к ней прикладывает тот, кто
+     * зовёт: у входа это вошедший, у переоснащения — корабль, каким он был до перемены,
+     * у ухода — ушедший, которого в списке участников уже нет.
+     */
     const postNotice = async (
         channelId: string,
-        memberId: string,
+        author: MemberRef,
         notice: ShipNotice,
         sentAt: number
     ): Promise<void> => {
-        const message: Message = { messageId: randomId('msg'), author: { memberId }, kind: 'system', notice, sentAt };
+        const message: Message = { messageId: randomId('msg'), author, kind: 'system', notice, sentAt };
         await mutate(channelId, (current) => current.messages.push(message));
         emit(channelId, { type: 'message-added', message });
     };
@@ -349,7 +357,7 @@ export function createLocalBackend(): ChannelBackend {
             // тогда строчка останется прежней, даже если он потом сменит позывной.
             await postNotice(
                 channelId,
-                member.memberId,
+                memberRef(member),
                 { event: 'joined', before: shipTitle(member) },
                 member.joinedAt
             );
@@ -394,9 +402,13 @@ export function createLocalBackend(): ChannelBackend {
             // и свой ответ — в ленте они встают отдельными сообщениями. Подряд, а не разом:
             // запись идёт через общую очередь, и каждая должна лечь в состояние целиком,
             // прежде чем возьмётся следующая.
+            // Снимок в записи — прежний, до перемены: запись стоит в прежней цепочке ленты
+            // и рассказывает о том корабле, а новый начинается после неё (см. группировку
+            // в `components/chat/MessageList`).
+            const author = before ? memberRef(before) : { memberId: updated.memberId };
             for (const notice of before ? refitNotices(before, updated) : []) {
                 // eslint-disable-next-line no-await-in-loop -- очередь тут и нужна: записи ложатся в ленту по одной и по порядку
-                await postNotice(channelId, updated.memberId, notice, Date.now());
+                await postNotice(channelId, author, notice, Date.now());
             }
             return delay({ member: updated });
         },
@@ -417,7 +429,7 @@ export function createLocalBackend(): ChannelBackend {
                 // двумя разными способами значит однажды сложить строчку про пустой курс.
                 await postNotice(
                     channelId,
-                    memberId,
+                    memberRef(gone),
                     { event: 'left', before: shipTitle(gone), ...(newCourse ? { course: newCourse } : {}) },
                     Date.now()
                 );
@@ -426,7 +438,11 @@ export function createLocalBackend(): ChannelBackend {
         },
 
         kick: async ({ channelId, memberId, member: { memberId: targetId } }) => {
+            // Кто распорядился: запись встаёт в его цепочку, и снимок в ней его же. Берём
+            // старшего из того же снимка состояния, в котором проверяем его право высаживать.
+            let senior: Member | null = null;
             const gone = await dropMember(channelId, targetId, (snapshot) => {
+                senior = snapshot.members.find((item) => item.memberId === memberId) ?? null;
                 if (snapshot.channel.owner?.memberId !== memberId) {
                     throw new ChannelError('not-senior', 'Высадить корабль может только старший на рейде');
                 }
@@ -440,7 +456,12 @@ export function createLocalBackend(): ChannelBackend {
             if (gone) {
                 // Запись от старшего, а не от высаженного: распорядился он, и по тому, в чьей
                 // цепочке она встала, это видно.
-                await postNotice(channelId, memberId, { event: 'kicked', before: shipTitle(gone) }, Date.now());
+                await postNotice(
+                    channelId,
+                    senior ? memberRef(senior) : { memberId },
+                    { event: 'kicked', before: shipTitle(gone) },
+                    Date.now()
+                );
             }
             return delay(undefined);
         },
@@ -451,14 +472,21 @@ export function createLocalBackend(): ChannelBackend {
             if (overLimit(draft.text, MAX_MESSAGE_LENGTH)) {
                 throw new ChannelError('message-too-long', limitMessage(draft.text, MAX_MESSAGE_LENGTH));
             }
-            const message: Message = {
-                messageId: randomId('msg'),
-                author: { memberId },
-                text: draft.text,
-                thread: draft.thread,
-                sentAt: Date.now(),
-            };
-            await mutate(channelId, (snapshot) => snapshot.messages.push(message));
+            // Снимок автора складываем в той же очереди, в которой сообщение и записывается:
+            // отправитель на этот миг ещё в составе, и другого случая спросить, как он тогда
+            // выглядел, уже не будет — снимется с рейда, и в ленте останется одно сообщение.
+            const message = await mutate(channelId, (snapshot) => {
+                const author = snapshot.members.find((item) => item.memberId === memberId);
+                const posted: Message = {
+                    messageId: randomId('msg'),
+                    author: author ? memberRef(author) : { memberId },
+                    text: draft.text,
+                    thread: draft.thread,
+                    sentAt: Date.now(),
+                };
+                snapshot.messages.push(posted);
+                return posted;
+            });
             emit(channelId, { type: 'message-added', message });
             return delay({ message });
         },

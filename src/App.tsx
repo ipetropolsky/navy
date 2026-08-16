@@ -32,7 +32,7 @@ import { useLayout } from '@/hooks/useLayout';
 import { useSlide } from '@/hooks/useSlide';
 import { useSwipe } from '@/hooks/useSwipe';
 import { channelLink, useRoute } from '@/routing';
-import { Berth, Message, MorseFeed, ShipKind, Side, isSameBerth, otherSide } from '@/types/channel';
+import { Berth, Message, MorseFeed, ShipKind, Side, authorLook, isSameBerth, otherSide } from '@/types/channel';
 import { copyText } from '@/utils/clipboard';
 
 import styles from './App.module.less';
@@ -249,8 +249,13 @@ export default function App() {
 
     const typingMember =
         typing && typing.memberId !== myId ? members.find((member) => member.memberId === typing.memberId) : null;
+    // Отвечать можно и тому, кто уже снялся с рейда: тогда позывной с цветом берутся
+    // из снимка при сообщении, а не из состава (см. `authorLook`).
     const replyToAuthor = replyTo
-        ? (members.find((member) => member.memberId === replyTo.author.memberId) ?? null)
+        ? (authorLook(
+              replyTo.author,
+              members.find((member) => member.memberId === replyTo.author.memberId)
+          ) ?? null)
         : null;
 
     // Оклик: тычок в аватарку — и корабль отзывается лампой со своего места на рейде.
