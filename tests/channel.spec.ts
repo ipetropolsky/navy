@@ -752,3 +752,32 @@ test('характеристики корабля в форме выделяют
     await page.keyboard.press('Enter');
     await expect(next, 'ввод по плашке не выбрал корабль').toHaveAttribute('aria-pressed', 'true');
 });
+
+/**
+ * Системного отклика на касание в интерфейсе нет. На телефоне браузер подсвечивает нажатое
+ * синим прямоугольником по своей мерке — по всей коробке разом, не зная ни скруглений,
+ * ни того, что нажали вымпел внутри плашки, — и это читалось поломкой: синие углы у круглой
+ * аватарки, синяя полоса во всю шапку от названия канала. Свой отклик рисуют сами кнопки
+ * и лента, и его довольно.
+ *
+ * Выделение текста при этом остаётся там, где текст читают: подпись кнопки выделять незачем,
+ * а чужую реплику человек должен уметь скопировать.
+ */
+test('нажатия не подсвечиваются системой, а подписи кнопок не выделяются', async ({ page }) => {
+    await openChannel(page, DEMO, ALBATROS);
+
+    const look = (target: Locator, property: string): Promise<string> =>
+        target.evaluate((node, name) => getComputedStyle(node).getPropertyValue(name), property);
+
+    // Название канала в шапке — кнопка: подсветки нет, подпись не выделяется.
+    await expect(shipsButton(page)).toBeVisible();
+    expect(await look(shipsButton(page), '-webkit-tap-highlight-color')).toBe('rgba(0, 0, 0, 0)');
+    expect(await look(shipsButton(page), 'user-select')).toBe('none');
+
+    // В ленте подсветки нет тоже, хотя плашка реплики — не кнопка: свойство наследуется,
+    // и снято оно на всё дерево разом.
+    const bubble = bubbles(page).first();
+    expect(await look(bubble, '-webkit-tap-highlight-color')).toBe('rgba(0, 0, 0, 0)');
+    // А вот текст реплики выделяется — за тем плашка и сделана не кнопкой.
+    expect(await look(bubble, 'user-select'), 'реплику в ленте не выделить').not.toBe('none');
+});
