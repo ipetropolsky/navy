@@ -453,7 +453,7 @@ export default function App() {
                         members={members}
                         myId={me.memberId}
                         onReply={setReplyTo}
-                        onShowShip={handleShowShip}
+                        onHail={handleHail}
                     />
                     <Composer
                         replyTo={replyTo}
@@ -897,6 +897,9 @@ export default function App() {
                     // на список дальше, а не уходит из него.
                     onKick={(memberId) => void channelState.kick(memberId)}
                     onHail={handleHail}
+                    // Карточка чужого корабля — та же, что и по щелчку по нему в кадре, и точно
+                    // так же закрывает за собой список (см. handleShowShip).
+                    onShowShip={handleShowShip}
                 />
             </Shade>
             {/* Карточка чужого корабля — такой же шторкой. Второй шторкой, а не содержимым

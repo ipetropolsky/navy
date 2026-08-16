@@ -25,11 +25,13 @@ interface MessageListProps {
     myId: string;
     onReply: (message: Message) => void;
     /**
-     * Показать карточку корабля автора: тычок в аватарку — и видно, кто это говорит. В ленте
-     * от чужого корабля видны только три цифры на аватарке, и связать их с силуэтом в кадре
-     * иначе нечем.
+     * Окликнуть корабль автора: тычок в аватарку — и тот отзывается лампой со своего места
+     * на рейде. Это и есть ответ на вопрос «кто это говорит»: в ленте от чужого корабля видны
+     * только три цифры на аватарке, а какой из десятка силуэтов в кадре за ними стоит, иначе
+     * и не понять. Карточка на этот вопрос отвечает хуже: она сама накрывает собой кадр,
+     * в котором корабль и надо было увидеть, — и открывают её из списка на связи.
      */
-    onShowShip: (memberId: string) => void;
+    onHail: (memberId: string) => void;
 }
 
 /**
@@ -44,7 +46,7 @@ const STICK_SLOP = 24;
 const NOTICE_TITLE = 'Техническое сообщение';
 
 /** Лента сообщений в стиле Telegram: группировка по автору, ответы, тап по сообщению — ответить. */
-export default function MessageList({ messages, members, myId, onReply, onShowShip }: MessageListProps) {
+export default function MessageList({ messages, members, myId, onReply, onHail }: MessageListProps) {
     const listRef = useRef<HTMLDivElement>(null);
     const notify = useSnackbar();
 
@@ -289,8 +291,8 @@ export default function MessageList({ messages, members, myId, onReply, onShowSh
                                 number={author.hullNumber}
                                 name={author.name}
                                 action={{
-                                    title: `Корабль «${author.name}»`,
-                                    onClick: () => onShowShip(author.memberId),
+                                    title: `Окликнуть «${author.name}»`,
+                                    onClick: () => onHail(author.memberId),
                                 }}
                             />
                         )}

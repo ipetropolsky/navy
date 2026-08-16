@@ -112,6 +112,19 @@ export const openSheet = async (page: Page): Promise<void> => {
     await page.waitForTimeout(300);
 };
 
+/**
+ * Открыть карточку чужого корабля из списка кораблей — тычком по его строчке.
+ *
+ * Из ленты карточку больше не открыть: аватарка там окликает. Дорога к карточке две — кадр
+ * и этот список, и в проверках, которым важна сама карточка, а не путь к ней, берём список:
+ * он не зависит ни от раскладки, ни от того, куда корабль встал на рейде.
+ */
+export const openShipCard = async (page: Page, name: string): Promise<void> => {
+    await openSheet(page);
+    await page.getByRole('button', { name: `Корабль «${name}»` }).click();
+    await page.waitForTimeout(300);
+};
+
 /** Написать в ленту. */
 export const send = async (page: Page, text: string): Promise<void> => {
     await page.getByPlaceholder('Сообщение').fill(text);

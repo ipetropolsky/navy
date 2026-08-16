@@ -9,6 +9,7 @@ import {
     openChannel,
     openNewChannel,
     openSheet,
+    openShipCard,
     readState,
     send,
     ships,
@@ -359,8 +360,8 @@ test('вымпел старшего отвечает званием, а подп
 test('вымпел старшего в карточке корабля отвечает званием', async ({ page }) => {
     await openChannel(page, DEMO, VYMPEL);
 
-    // Открываем карточку старшего из ленты, тычком по его аватарке.
-    await page.locator('button[title="Корабль «Альбатрос»"]').first().click();
+    // Открываем карточку старшего из списка кораблей, тычком по его строчке.
+    await openShipCard(page, 'Альбатрос');
     const card = page.getByRole('region', { name: 'Корабль' });
     await expect(card).toContainText('Альбатрос');
 

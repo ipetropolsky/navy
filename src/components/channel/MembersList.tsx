@@ -1,9 +1,12 @@
+import { KeyboardEvent, MouseEvent, PointerEvent, useRef } from 'react';
+
 import Avatar from '@/components/ships/Avatar';
 import MemberName from '@/components/ships/MemberName';
 import Pennant from '@/components/ships/Pennant';
 import IconButton from '@/components/ui/IconButton';
 import { useSnackbar } from '@/components/ui/Snackbar';
 import { Member, SHIP_KIND_LABELS } from '@/types/channel';
+import { Press, isTap, startPress } from '@/utils/tap';
 
 import styles from './MembersList.module.less';
 
@@ -22,17 +25,28 @@ interface MembersListProps {
     onKick: (memberId: string) => void;
     /** Окликнуть корабль: тычок в аватарку — и тот отвечает лампой со своего места на рейде. */
     onHail: (memberId: string) => void;
+    /** Показать карточку чужого корабля: тем же движением, что и щелчок по нему в кадре. */
+    onShowShip: (memberId: string) => void;
 }
 
 /**
  * Список тех, кто на связи. Переключиться на чужой корабль нельзя: за каждый говорит
  * своя вкладка со своим memberId, а не выбор в списке.
  *
- * Действие у строчки одно, и стоит оно у всех на одном месте — справа в самой строке.
- * В своей это «настроить корабль», в чужих у старшего на рейде — «высадить». Отдельной
- * полосы кнопок под списком нет: собранные внизу, они спрашивали бы корабль второй раз,
- * уже выбранный строчкой. Второе действие со своим кораблём — уйти с рейда — живёт
- * в шапке и появляется там же, где открылась форма.
+ * Строчка целиком нажимается и делает то же, что щелчок по кораблю в кадре: своя открывает
+ * форму, чужая — карточку. Правило одно на всё приложение: своим на рейде распоряжаются,
+ * чужой разглядывают, — и в списке оно то же самое, что и на воде. У своей строчки то же
+ * действие продублировано значком справа: по нему видно, что случится, ещё до нажатия.
+ *
+ * Аватарка при этом своя: тычок в неё окликает корабль, и в кадре он отзывается лампой
+ * со своего места. Оклик и есть ответ на вопрос «который из них», а карточка на него отвечает
+ * хуже — она накрывает собой ровно тот кадр, в котором корабль и надо было увидеть.
+ *
+ * Значок действия стоит у всех на одном месте — справа в строке. В своей это «настроить
+ * корабль», в чужих у старшего на рейде — «высадить». Отдельной полосы кнопок под списком
+ * нет: собранные внизу, они спрашивали бы корабль второй раз, уже выбранный строчкой.
+ * Второе действие со своим кораблём — уйти с рейда — живёт в шапке и появляется там же,
+ * где открылась форма.
  *
  * Вымпел стоит всегда и всегда отвечает званием — тычком на снекбар, наведением на подсказку.
  * Словами звание подписано там, где на подпись есть ширина: бэдж справа в строке прячется,
@@ -43,9 +57,64 @@ interface MembersListProps {
  * причём вторым этажом — поверх разговора, а не на его месте, — и рамка, затемнение, выезд
  * и крестик там свои.
  */
-export default function MembersList({ members, myId, seniorId, onEditMe, onKick, onHail }: MembersListProps) {
+export default function MembersList({
+    members,
+    myId,
+    seniorId,
+    onEditMe,
+    onKick,
+    onHail,
+    onShowShip,
+}: MembersListProps) {
     const notify = useSnackbar();
     const iAmSenior = Boolean(myId) && myId === seniorId;
+
+    /** С чего началось нажатие на строчку: откуда и при каком выделении (см. `@/utils/tap`). */
+    const pressRef = useRef<Press | null>(null);
+
+    const openMember = (member: Member): void => {
+        if (member.memberId === myId) {
+            onEditMe();
+        } else {
+            onShowShip(member.memberId);
+        }
+    };
+
+    /**
+     * Тычок по строчке — открыть корабль. Но строчка состоит из текста — позывной и тип
+     * корабля, — и протяжка по нему значит «выделить и скопировать»: позывной переписывают
+     * в разговор, чтобы позвать. Отличаем одно от другого общим правилом (`isTap`).
+     */
+    const handleTap = (event: MouseEvent<HTMLDivElement>, member: Member): void => {
+        const press = pressRef.current;
+        pressRef.current = null;
+        // Внутри строчки есть свои кнопки — аватарка, вымпел, значок действия, — и их нажатия
+        // всплывают сюда же. У каждой своё дело, и строчкино поверх него делать не надо:
+        // тычок в аватарку окликает и не открывает корабль. Спрашиваем один раз про все, а не
+        // глушим всплытие в каждой: кнопки эти разные и приходят из разных мест.
+        if ((event.target as Element).closest('button')) {
+            return;
+        }
+        if (!isTap(press, event)) {
+            return;
+        }
+        openMember(member);
+    };
+
+    // Строчка — не `button`, а `div` с ролью кнопки: из настоящей кнопки не выделишь текст,
+    // да и вложить кнопку в кнопку нельзя, а в строчке их до трёх — аватарка, вымпел и значок
+    // действия. Значит, клавиатуру строчка отрабатывает сама — вводом и пробелом, как кнопка.
+    const handleKey = (event: KeyboardEvent<HTMLDivElement>, member: Member): void => {
+        // Нажатия вложенных кнопок сюда всплывают тоже, и без этого ввод по вымпелу открывал бы
+        // заодно и корабль. Своё нажатие у строчки то, что пришло прямо в неё.
+        if (event.target !== event.currentTarget) {
+            return;
+        }
+        if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            openMember(member);
+        }
+    };
 
     return (
         <div className={styles.list}>
@@ -55,9 +124,24 @@ export default function MembersList({ members, myId, seniorId, onEditMe, onKick,
                 const mine = member.memberId === myId;
                 const senior = member.memberId === seniorId;
                 return (
-                    <div key={member.memberId} className={mine ? styles.rowActive : styles.row}>
-                        {/* В списке аватарка окликает, а не открывает карточку: строчка и так
-                            показывает всё, что в карточке есть, — позывной, силуэт, вымпел. */}
+                    <div
+                        key={member.memberId}
+                        role="button"
+                        tabIndex={0}
+                        // Название строчке даём своё: собранное из содержимого, оно вышло бы
+                        // из позывного, типа корабля, звания и подписей всех вложенных кнопок
+                        // разом — читать такое с экрана невозможно.
+                        aria-label={`Корабль «${member.name}»`}
+                        className={mine ? styles.rowActive : styles.row}
+                        onPointerDown={(event: PointerEvent<HTMLDivElement>) => {
+                            pressRef.current = startPress(event);
+                        }}
+                        onClick={(event) => handleTap(event, member)}
+                        onKeyDown={(event) => handleKey(event, member)}
+                    >
+                        {/* В списке аватарка окликает, а не открывает корабль: оклик и есть ответ
+                            на вопрос «который из них», и строчка вокруг неё отвечает на него хуже
+                            — она уводит от кадра, в котором корабль и надо было увидеть. */}
                         <Avatar
                             number={member.hullNumber}
                             large

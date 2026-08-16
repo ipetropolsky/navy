@@ -11,6 +11,8 @@ import {
     join,
     openChannel,
     openNewChannel,
+    openSheet,
+    openShipCard,
     openShipForm,
     readState,
     ships,
@@ -1121,7 +1123,7 @@ const watchLamps = (page: Page, within = '[class*="shipLane"]'): Promise<void> =
 
 const flashes = (page: Page): Promise<Record<string, number>> => page.evaluate(() => window.__flashes);
 
-test('карточка чужого корабля открывается и из кадра, и из ленты', async ({ page }) => {
+test('карточка чужого корабля открывается и из кадра, и из списка кораблей', async ({ page }) => {
     await openChannel(page, DEMO, ALBATROS);
     const fleet = Object.values((await readState(page)).channels)[0].members;
     const other = fleet.find((member) => member.memberId !== ALBATROS)!;
@@ -1135,12 +1137,92 @@ test('карточка чужого корабля открывается и и�
     // Свой корабль карточки не открывает: по нему открывается форма.
     await expect(card).not.toContainText('Альбатрос');
 
-    // Закрыли — и открыли заново из ленты, тычком по аватарке. Это те же три цифры на борту,
-    // и приводить они должны к тому же кораблю.
+    // Закрыли — и открыли заново из списка кораблей, тычком по строчке. Это тот же корабль,
+    // и приводить строчка должна к той же карточке.
     await card.getByRole('button', { name: 'Закрыть' }).click();
     await expect(card).toBeHidden();
-    await page.locator(`button[title="Корабль «${other.name}»"]`).first().click();
+    await openShipCard(page, other.name);
     await expect(page.getByRole('region', { name: 'Корабль' })).toContainText(`Бортовой номер ${other.hullNumber}`);
+});
+
+/**
+ * Оклик — не карточка. Тычок в аватарку окликает корабль, и тот отвечает лампой со своего
+ * места на рейде: это и есть ответ на вопрос «который из них». Карточка отвечала бы на него
+ * хуже — она накрывает собой ровно тот кадр, в котором корабль и надо было увидеть.
+ *
+ * Аватарку берём по подсказке, а не по роли: внутри у неё бортовой номер, и именем кнопки
+ * для проверки по роли оказался бы он, а не то, что кнопка делает.
+ */
+test('аватарка в ленте окликает корабль, а карточку не открывает', async ({ page }) => {
+    await openChannel(page, DEMO, ALBATROS);
+    await watchLamps(page);
+
+    await page.locator('button[title="Окликнуть «Вымпел»"]').first().click();
+
+    // К — «−·−», три вспышки. Ждём именно трёх: одной хватило бы и на случайное мигание.
+    await expect
+        .poll(async () => (await flashes(page))['Корабль «Вымпел»'], 'корабль не отозвался на оклик')
+        .toBeGreaterThanOrEqual(3);
+    // И мигнул один он: оклик — обращение к кораблю, а не общий сигнал по рейду.
+    const all = await flashes(page);
+    expect(
+        Object.entries(all).filter(([name, count]) => name !== 'Корабль «Вымпел»' && count > 0),
+        'на оклик отозвался кто-то ещё'
+    ).toHaveLength(0);
+    await expect(page.getByRole('region', { name: 'Корабль' }), 'оклик открыл карточку').toBeHidden();
+});
+
+/**
+ * То же самое в списке кораблей: строчка целиком открывает корабль, а аватарка в ней держит
+ * своё дело — оклик. Открывается по строчке свой корабль формой, чужой — карточкой: правило
+ * одно на всё приложение, и в кадре оно то же самое.
+ */
+test('строчка списка открывает корабль, а аватарка в ней окликает', async ({ page }) => {
+    await openChannel(page, DEMO, ALBATROS);
+    await watchLamps(page);
+    await openSheet(page);
+    const sheet = page.getByRole('region', { name: 'Корабли на связи' });
+
+    // Аватарка: корабль отзывается лампой, карточка не открывается, список остаётся на месте.
+    await sheet.locator('button[title="Окликнуть «Вымпел»"]').click();
+    await expect
+        .poll(async () => (await flashes(page))['Корабль «Вымпел»'], 'корабль не отозвался на оклик из списка')
+        .toBeGreaterThanOrEqual(3);
+    await expect(page.getByRole('region', { name: 'Корабль' }), 'оклик из списка открыл карточку').toBeHidden();
+    await expect(sheet, 'оклик закрыл список').toBeVisible();
+
+    // Строчка чужого — карточка, и того самого корабля.
+    await sheet.getByRole('button', { name: 'Корабль «Вымпел»' }).click();
+    const card = page.getByRole('region', { name: 'Корабль' });
+    await expect(card).toContainText('Вымпел');
+    await card.getByRole('button', { name: 'Закрыть' }).click();
+    await expect(card).toBeHidden();
+
+    // Строчка своего — форма настройки, та же, что и по щелчку по своему кораблю в кадре.
+    await openSheet(page);
+    await sheet.getByRole('button', { name: 'Корабль «Альбатрос»' }).click();
+    await expect(page.getByPlaceholder('Гром'), 'своя строчка не открыла форму').toBeVisible();
+});
+
+/**
+ * Кружок аватарки маленький, и попадать в него надо пальцем. Расти ему некуда — он стоит
+ * в ряду и задаёт ритм строки, — поэтому вокруг него оставлено невидимое поле нажатия.
+ * Жмём заведомо мимо кружка: на пару пикселей от его угла наружу по диагонали. В сам кружок
+ * такая точка не попадает вовсе — он круглый, и до его края от угла ещё далеко.
+ */
+test('в аватарку попадает нажатие рядом с ней, а не только в самый кружок', async ({ page }) => {
+    await openChannel(page, DEMO, ALBATROS);
+    await watchLamps(page);
+    // Последняя в ленте: она заведомо в поле зрения. Первая стоит выше начала прокрутки,
+    // и мерка у неё честная, а нажатие по ней досталось бы кадру, лежащему над лентой.
+    const avatar = page.locator('button[title="Окликнуть «Вымпел»"]').last();
+    const circle = (await avatar.locator('span').first().boundingBox())!;
+
+    await page.mouse.click(circle.x - 2, circle.y - 2);
+
+    await expect
+        .poll(async () => (await flashes(page))['Корабль «Вымпел»'], 'нажатие рядом с кружком не дошло до аватарки')
+        .toBeGreaterThanOrEqual(3);
 });
 
 /**
@@ -1180,8 +1262,8 @@ test('нажатие по воде достаётся ближайшему ко�
 test('«Сигнал» зажигает лампу на портрете, а рейд остаётся тёмным', async ({ page }) => {
     await openChannel(page, DEMO, ALBATROS);
 
-    // Аватарка в ленте открывает карточку, а сигнал просят уже из неё.
-    await page.locator('button[title^="Корабль «"]').first().click();
+    // Карточку берём из списка кораблей, а сигнал просят уже из неё.
+    await openShipCard(page, 'Вымпел');
     const card = page.getByRole('region', { name: 'Корабль' });
     await expect(card).toBeVisible();
 
@@ -1205,7 +1287,7 @@ test('«Сигнал» зажигает лампу на портрете, а р�
 
 test('«Ход» и «Якорь» переключают огни портрета, не меняя ширины кнопки', async ({ page }) => {
     await openChannel(page, DEMO, ALBATROS);
-    await page.locator('button[title^="Корабль «"]').first().click();
+    await openShipCard(page, 'Вымпел');
     const card = page.getByRole('region', { name: 'Корабль' });
     const portrait = '[class*="portraitShip"]';
 
@@ -1248,7 +1330,7 @@ test('«Ход» и «Якорь» переключают огни портре�
 
 test('позывной в карточке стоит вровень с крестиком', async ({ page }) => {
     await openChannel(page, DEMO, ALBATROS);
-    await page.locator('button[title^="Корабль «"]').first().click();
+    await openShipCard(page, 'Вымпел');
     const card = page.getByRole('region', { name: 'Корабль' });
 
     await expect(card).toBeVisible();
