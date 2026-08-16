@@ -58,13 +58,27 @@ export const openNewChannel = async (page: Page, slug: string): Promise<void> =>
 const WRITE_MS = 300;
 
 /**
- * Заполнить форму постановки в строй и отправить её.
+ * Открыть форму постановки в строй. Канал по ссылке встречает гостя закрытой формой — пустой
+ * плашкой с одной кнопкой посреди, — и до нажатия по ней ни полей, ни свободных мест на рейде
+ * на экране нет. Свой, только что заведённый канал сюда не приходит: там форма открыта сразу.
+ */
+export const openJoinForm = async (page: Page): Promise<void> => {
+    await page.getByRole('button', { name: 'Встать на рейд' }).click();
+    await expect(page.getByPlaceholder('Гром'), 'форма постановки в строй не открылась').toBeVisible();
+};
+
+/**
+ * Заполнить форму постановки в строй и отправить её. Закрытую сперва открываем: проверке,
+ * которой нужен сам вход, дорога к форме безразлична, а гостя встречает именно закрытая.
  *
  * Кнопку берём из самой формы, а не со страницы: при переоснащении форма выезжает поверх
  * разговора, и поле ввода со своей кнопкой отправки никуда не девается — «отправить» на
  * странице в этот момент двое.
  */
 export const join = async (page: Page, name: string, hullNumber: string, shipKind?: string): Promise<void> => {
+    if (await page.getByRole('button', { name: 'Встать на рейд' }).isVisible()) {
+        await openJoinForm(page);
+    }
     const form = page.locator('form').filter({ has: page.getByPlaceholder('Гром') });
     await page.getByPlaceholder('Гром').fill(name);
     await page.locator('input[inputmode="numeric"]').fill(hullNumber);

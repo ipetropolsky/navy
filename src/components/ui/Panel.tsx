@@ -14,7 +14,11 @@ import styles from './Panel.module.less';
  */
 
 interface PanelProps {
-    title: string;
+    /**
+     * Заголовок. Необязателен: у закрытой формы корабля на плашке одна кнопка посреди пустого
+     * места, и заголовок над ней говорил бы то же самое, что и она сама.
+     */
+    title?: string;
     /** Одна-две строки о том, что здесь происходит. */
     hint?: ReactNode;
     /** Поля формы. */
@@ -35,7 +39,7 @@ interface PanelProps {
 export default function Panel({ title, hint, children, actions, footer, pinActions, onSubmit }: PanelProps) {
     const content = (
         <>
-            <h1 className={styles.title}>{title}</h1>
+            {title && <h1 className={styles.title}>{title}</h1>}
             {hint && <p className={styles.hint}>{hint}</p>}
             {children}
             {actions && (

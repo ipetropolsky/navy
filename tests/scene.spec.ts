@@ -11,6 +11,7 @@ import {
     join,
     leaveRaid,
     openChannel,
+    openJoinForm,
     openNewChannel,
     openSheet,
     openShipCard,
@@ -206,8 +207,10 @@ test('на одной линии помещаются двое, и борта н
     await page.locator('[data-berth="5-center"]').click();
     await join(page, 'Малыш', '111');
 
-    // Возвращаемся тем, кого в канале нет: форма открывается заново, а сосед остаётся стоять.
+    // Возвращаемся тем, кого в канале нет: канал встречает закрытой формой, а сосед остаётся
+    // стоять. Открываем форму — и всё, что нужно для выбора места, снова на воде.
     await openChannel(page, 'para', 'gost');
+    await openJoinForm(page);
     await page.getByText('Пограничный сторожевой катер', { exact: true }).click();
 
     // Щёлкаем по воде, а не по самому огоньку: круг света у выбранного места широкий и вполне
@@ -326,6 +329,7 @@ test('на тесной линии первым уступает тот, кто 
     // Проверять поэтому будем не расстояния в пикселях, а то, что от разброса не зависит:
     // тесная линия у этой пары такая, что воды катеру не хватает при любом разбросе.
     await openChannel(page, 'rezinka', 'gost');
+    await openJoinForm(page);
     await page.getByText('Пограничный сторожевой катер', { exact: true }).click();
     const spot = await page.locator('[data-berth="8-left"]').boundingBox();
     expect(spot, 'слева от соседа не нашлось места').toBeTruthy();
@@ -463,8 +467,10 @@ test('свободные места на рейде зависят от выбр
     await page.locator('[data-berth="8-center"]').click();
     await join(page, 'Вымпел', '111');
 
-    // Возвращаемся тем, кого в канале нет: форма открывается заново, а корабль остаётся стоять.
+    // Возвращаемся тем, кого в канале нет: канал встречает закрытой формой, а корабль остаётся
+    // стоять. Открываем её — и выбор корабля снова пересчитывает свободные места.
     await openChannel(page, 'razmer', 'gost');
+    await openJoinForm(page);
 
     const offered = async (ship: string): Promise<string[]> => {
         await page.getByText(ship, { exact: true }).click();
@@ -507,6 +513,7 @@ test('соседняя линия занятого коридора остаёт
     // Сторона первая: гость видит на воде обе соседние линии центрального коридора. А вот
     // сама четвёртая пропала — там место занято, и точка на воде у них была бы одна на двоих.
     await openChannel(page, 'sosedi', 'gost');
+    await openJoinForm(page);
     await page.getByText('Пограничный сторожевой катер', { exact: true }).click();
     const offered = await berths(page).evaluateAll((dots) =>
         dots.map((dot) => (dot as HTMLElement).dataset.berth ?? '')
@@ -1418,6 +1425,7 @@ test('в списке кораблей выбранный стоит под па
     const KINDS = '[class*="kinds_"] > [role="button"]';
     // Канал открываем, но в строй не встаём: список кораблей — это и есть форма входа.
     await openChannel(page, DEMO);
+    await openJoinForm(page);
     const buttons = page.locator(KINDS);
     await expect(buttons.first()).toBeVisible();
     await watchLamps(page, KINDS);

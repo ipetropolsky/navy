@@ -4,10 +4,13 @@ import {
     ALBATROS,
     DEMO,
     VYMPEL,
+    berths,
     bubbles,
+    clickShip,
     join,
     leaveRaid,
     openChannel,
+    openJoinForm,
     openNewChannel,
     openSheet,
     openShipCard,
@@ -43,6 +46,44 @@ test('канал заводится с главной, и в него можно
     await expect(systemLines(page).first().locator('[class*="text"]')).not.toContainText('Буря');
     // А над фразой позывной стоит — и стоит всегда, даже над своей строчкой.
     await expect(systemLines(page).first().locator('[class*="name_"]')).toHaveText('Буря');
+});
+
+/**
+ * Закрытое состояние формы корабля. Пришедший по ссылке — ещё никто в этом канале, и канал
+ * ведёт себя с ним соответственно: рейд ему виден как обычно — за ним по ссылке и идут, —
+ * а больше не видно ничего. Ни разговора, ни списка кораблей, и корабли в кадре не нажимаются:
+ * пока человек не встал в строй, канал о нём не знает ничего, и он о канале ровно столько же.
+ * Вопрос к нему на экране один и стоит одной кнопкой посреди пустой плашки.
+ */
+test('канал по ссылке встречает закрытой формой: рейд видно, а трогать нечего', async ({ page }) => {
+    await openChannel(page, DEMO);
+
+    // Одна кнопка, и никакой анкеты под ней.
+    await expect(page.getByRole('button', { name: 'Встать на рейд' })).toBeVisible();
+    await expect(page.getByPlaceholder('Гром'), 'форма открылась сама').toHaveCount(0);
+    // Рейд при этом на месте и виден целиком: три корабля демо-эскадры.
+    await expect(ships(page)).toHaveCount(3);
+    // А выбирать место ещё не из чего: свободные места показывает открытая форма.
+    await expect(berths(page), 'закрытая форма показала свободные места').toHaveCount(0);
+    // Списка кораблей гостю тоже нет: название канала осталось строчкой, а не кнопкой.
+    await expect(shipsButton(page), 'гостю досталась кнопка списка кораблей').toHaveCount(0);
+
+    // И корабли не нажимаются: тычок по чужому не открывает его карточку.
+    await clickShip(page, ships(page).first());
+    await page.waitForTimeout(300);
+    await expect(page.getByRole('region', { name: 'Корабль' }), 'корабль открылся гостю').toHaveCount(0);
+
+    // Кнопка открывает ту самую форму — с полями и со свободными местами на рейде.
+    await openJoinForm(page);
+    await expect(berths(page).first(), 'открытая форма не показала места на рейде').toBeVisible();
+});
+
+test('свой, только что заведённый канал открывается сразу формой', async ({ page }) => {
+    // Исключение из закрытого состояния: заводивший канал только что отвечал на вопросы о нём,
+    // и спрашивать его же, хочет ли он встать на собственный рейд, незачем.
+    await openNewChannel(page, 'svoy-reyd');
+    await expect(page.getByPlaceholder('Гром'), 'на своём рейде спросили дважды').toBeVisible();
+    await expect(page.getByRole('button', { name: 'Встать на рейд' })).toHaveCount(0);
 });
 
 test('реплика уходит и привязывается ответом', async ({ page }) => {
@@ -162,8 +203,9 @@ test('уход с рейда отмечается в ленте и возвра�
     // Уход — кнопкой внизу списка кораблей, а следом новый курс: молча с рейда не уходят.
     await leaveRaid(page, 'В Кронштадт, на зимовку');
 
-    // Вкладка возвращается к форме — тупика нет, встать в строй можно снова.
-    await expect(page.getByPlaceholder('Гром')).toBeVisible();
+    // Вкладка возвращается к закрытой форме — туда же, куда попадает и пришедший по ссылке:
+    // тупика нет, встать в строй можно снова, а до того рейд просто виден со стороны.
+    await expect(page.getByRole('button', { name: 'Встать на рейд' })).toBeVisible();
     const state = await readState(page);
     expect(state.channels['ch-demo'].members.map((member) => member.memberId)).not.toContain(ALBATROS);
     // Бэкенд пишет данными, а не фразой: каким корабль был на момент ухода и что он сказал
@@ -469,7 +511,7 @@ test('не старшему высаживать нечем, а после ег�
     // из оставшихся. Иначе высаживать было бы уже некому.
     await openChannel(page, DEMO, ALBATROS);
     await leaveRaid(page);
-    await expect(page.getByPlaceholder('Гром')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Встать на рейд' })).toBeVisible();
 
     const state = await readState(page);
     expect(state.channels['ch-demo'].channel.owner?.memberId).toBe(VYMPEL);

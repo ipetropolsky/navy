@@ -56,6 +56,17 @@ interface MemberFormProps {
     onFacing: (side: Side) => void;
     onSubmit: (draft: MemberDraft) => Promise<void>;
     onCancel?: () => void;
+    /**
+     * Открыта ли форма. Закрытая — это та же форма, только свёрнутая до одной кнопки посреди
+     * плашки: гость, зашедший по ссылке, попадает не в настройку корабля, а на рейд, который
+     * можно просто разглядывать. Закрытым состоянием живёт только вход (`mode="join"`):
+     * переоснащение открывают нажатием, и закрывать его нечему.
+     *
+     * Состояние формы при этом никуда не девается — набранный позывной и выбранный корабль
+     * переживают закрытие: это одна и та же форма в двух видах, а не две разные.
+     */
+    open?: boolean;
+    onOpen?: () => void;
 }
 
 const randomHullNumber = (): string => String(Math.floor(Math.random() * 900) + 100);
@@ -86,6 +97,10 @@ const CourseArrow = ({ side }: { side: Side }) => (
 /**
  * Корабль участника: силуэт, цвет, бортовой номер и позывной. Форма одна и та же
  * при входе и при переоснащении — меняются только заголовок и состав кнопок.
+ *
+ * У входа есть ещё и закрытый вид (`open={false}`): пустая плашка с одной кнопкой посреди.
+ * Это не отдельный экран, а та же самая форма, свёрнутая до своего единственного вопроса, —
+ * и потому набранное в ней закрытие переживает.
  */
 export default function MemberForm({
     mode,
@@ -98,6 +113,8 @@ export default function MemberForm({
     onFacing,
     onSubmit,
     onCancel,
+    open = true,
+    onOpen,
 }: MemberFormProps) {
     const takenColors = crew.filter((member) => member.memberId !== myId).map((member) => member.color);
     const [name, setName] = useState(initial?.name ?? '');
@@ -175,6 +192,18 @@ export default function MemberForm({
             setBusy(false);
         }
     };
+
+    // Закрытая форма: на месте разговора одна кнопка, и больше на экране ничего не прибавилось.
+    // Заголовка у плашки нет — его сказала бы та же строчка, что и написана на кнопке.
+    if (!open) {
+        return (
+            <Panel>
+                <div className={styles.gate}>
+                    <Button onClick={onOpen}>Встать на рейд</Button>
+                </div>
+            </Panel>
+        );
+    }
 
     return (
         <Panel

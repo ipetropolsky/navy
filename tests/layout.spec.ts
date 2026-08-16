@@ -27,6 +27,7 @@ import {
     clickShip,
     join,
     openChannel,
+    openJoinForm,
     openNewChannel,
     openSheet,
     openShipCard,
@@ -588,6 +589,7 @@ test.describe('телефон', () => {
 
     test('форма занимает ширину целиком и без скруглений, и поле на одно слово тоже', async ({ page }) => {
         await openChannel(page, DEMO);
+        await openJoinForm(page);
         const panel = await panelBox(page);
         expect(panel.width, 'форма не дотянулась до краёв').toBe(panel.parentWidth);
         expect(panel.radius, 'на всю ширину скругления не нужны').toBe(0);
@@ -641,6 +643,7 @@ test.describe('телефон', () => {
 
     test('места на рейде лежат на воде, а занятые подписаны', async ({ page }) => {
         await openChannel(page, DEMO);
+        await openJoinForm(page);
         expectBerthsLieOnWater(await berthShapes(page));
         expectSlotsFollowDepth(await slotLines(page));
         await expectBerthLightGrows(page);
@@ -718,6 +721,7 @@ test.describe('десктоп', () => {
     // Ошибись тут на шаг — и катер молча станет корветом.
     test('места на рейде лежат на воде, а занятые подписаны', async ({ page }) => {
         await openChannel(page, DEMO);
+        await openJoinForm(page);
         expectBerthsLieOnWater(await berthShapes(page));
         expectSlotsFollowDepth(await slotLines(page));
         await expectBerthLightGrows(page);
@@ -731,6 +735,9 @@ test.describe('десктоп', () => {
     // вместе с водой. Сама пропорция на десктопе неподвижна: 40 на 60 при любой высоте окна.
     test('кадр держит свою пропорцию, а рейд с берегом не съезжают на небо', async ({ page }) => {
         await openChannel(page, DEMO);
+        // Разметку рейда — линии, по которым тут и видно, съехал он или нет, — показывает
+        // открытая форма корабля, и открыть её надо до замеров: перемена окна её не трогает.
+        await openJoinForm(page);
         const frames = await measureHeights(page, 1200, [900, 700, 500, 400]);
 
         // Доля неба одна на все высоты окна: обе половины кадра идут вниз вместе. Раньше вода
@@ -762,6 +769,7 @@ test.describe('десктоп', () => {
 
     test('масштабная линейка не врёт: метр на ней и метр корабля — один и тот же', async ({ page }) => {
         await openChannel(page, DEMO);
+        await openJoinForm(page);
         const drawings = await page.evaluate(() =>
             [...document.querySelectorAll('[class*="kind_"], [class*="kindActive"]')].map((button) => ({
                 // Длину корабля берём из его же подписи: «71,2 м · 1 070 т · 32 узла».
@@ -808,6 +816,7 @@ test.describe('десктоп', () => {
     // пикселя. Проверяется поэтому само правило, а не та его половина, которая сейчас победила.
     test('форма занимает ширину целиком, а поле на одно слово — половину', async ({ page }) => {
         await openChannel(page, DEMO);
+        await openJoinForm(page);
         const panel = await panelBox(page);
         expect(panel.width, 'форма не дотянулась до краёв').toBe(panel.parentWidth);
         expect(panel.radius, 'на всю ширину скругления не нужны').toBe(0);
@@ -822,6 +831,7 @@ test.describe('десктоп', () => {
 
     test('в форме кнопки делят ширину так же, как на телефоне', async ({ page }) => {
         await openChannel(page, DEMO);
+        await openJoinForm(page);
         const bar = await actionsBar(page);
         expectBandLooksLikePanel(bar);
         expect(bar.buttons[0].width, 'одинокая кнопка не заняла ширину формы').toBeCloseTo(bar.width, 0);
@@ -839,6 +849,7 @@ test.describe('кнопки у нижней кромки', () => {
 
     test('кнопка формы видна сразу и на высоком окне, и на низком', async ({ page }) => {
         await openChannel(page, DEMO);
+        await openJoinForm(page);
         expect((await actionsBar(page)).position, 'кнопки не прилипли на высоком окне').toBe('sticky');
         await expect(page.locator('button[type=submit]'), 'прилипшая кнопка не видна').toBeInViewport();
 
