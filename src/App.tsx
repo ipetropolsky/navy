@@ -432,7 +432,22 @@ export default function App() {
 
     // Форма своего корабля: выезжает снизу поверх разговора и уходит туда же. Пока едет —
     // остаётся на экране, см. useSlide.
-    const formSlide = useSlide(editing && inChat);
+    const formOpen = editing && inChat;
+    const formSlide = useSlide(formOpen);
+
+    // Размер формы. Пока разговор на экране, это он и есть; убранный разговор нулевой,
+    // а форме надо во что-то встать — берём тот размер, в какой его вернёт кнопка.
+    const formSize = shown ? size : layout.back;
+
+    // Сколько внизу (или сбоку) занято. Обычно это разговор, но форма своего корабля стоит
+    // в той же коробке и остаётся на экране, когда разговор убрали: занято тогда ею.
+    //
+    // Число это и поджимает кадр — на него считаются и высота сцены, и её правая кромка сбоку,
+    // и ширина шторок на сцене. Кадру всё равно, кто именно внизу стоит: важно, сколько места
+    // осталось ему. Без этого убранный разговор отдавал кадру треть экрана прямо под открытой
+    // формой, и рейд разъезжался под неё — отметки ближних мест оказывались ровно под формой,
+    // и выбрать их было нечем.
+    const taken = formOpen ? formSize : size;
 
     /**
      * Потяг за коридор вдоль кромки разговора.
@@ -502,10 +517,24 @@ export default function App() {
             className={[styles.app, atSide ? styles.appSide : styles.appUnder, dragging ? styles.appDragging : '']
                 .filter(Boolean)
                 .join(' ')}
-            // Размер разговора — одним числом на всё, что от него считается: сам разговор,
-            // высота кадра, ширина шторки на сцене и затемнение под ней (см. --chat-to
-            // в стилях). Высота это или ширина, говорит раскладка, а не число.
-            style={{ '--chat-to': `${size}px` } as CSSProperties}
+            // Три размера одной и той же коробки. Высота это или ширина, говорит раскладка,
+            // а не число.
+            //
+            // --chat-to — сам разговор: сколько его на экране.
+            // --form-to — форма своего корабля: та стоит в той же коробке, но живёт отдельно
+            //   от разговора и остаётся, когда его убрали. Пока разговор на месте, числа
+            //   одинаковы, и форма едет вместе с ним; убрали разговор — форма встаёт в тот
+            //   размер, в каком он был бы (см. `back` в hooks/useLayout).
+            // --taken-to — сколько внизу занято кем-нибудь из них. Из него считается всё,
+            //   что поджимает кадр: высота сцены, её правая кромка сбоку, ширина шторок
+            //   на сцене и затемнение под ними.
+            style={
+                {
+                    '--chat-to': `${size}px`,
+                    '--form-to': `${formSize}px`,
+                    '--taken-to': `${taken}px`,
+                } as CSSProperties
+            }
         >
             <header className={styles.header}>
                 <div className={styles.scene} ref={sceneRef}>
@@ -600,23 +629,36 @@ export default function App() {
                             Про канал кнопка не спрашивает: раскладка — про кадр и разговор,
                             а они на месте и на главной, где вместо разговора стоит форма
                             создания канала. Кадр там такой же настоящий, и смотреть на него
-                            во весь экран хочется не меньше. */}
-                        <IconButton onClick={toggleChat} aria-label={shown ? 'Убрать разговор' : 'Вернуть разговор'}>
-                            <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
-                                <path
-                                    d={
-                                        shown
-                                            ? 'M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7'
-                                            : 'M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H9l-5 4V6z'
-                                    }
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    fill="none"
-                                />
-                            </svg>
-                        </IconButton>
+                            во весь экран хочется не меньше.
+
+                            Под открытой формой своего корабля кнопки нет вовсе. Форма стоит
+                            на том же месте, что и разговор, и держит его собой: убери разговор
+                            из-под неё — на экране не поменяется ничего, кроме значка на самой
+                            кнопке. Такую кнопку жать незачем, а увидеть её последствия можно
+                            только закрыв форму — то есть неожиданностью. Разговор при этом
+                            остаётся в том положении, в каком его застали: закрылась форма —
+                            вернулось оно же. */}
+                        {!(inChat && editing) && (
+                            <IconButton
+                                onClick={toggleChat}
+                                aria-label={shown ? 'Убрать разговор' : 'Вернуть разговор'}
+                            >
+                                <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+                                    <path
+                                        d={
+                                            shown
+                                                ? 'M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7'
+                                                : 'M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H9l-5 4V6z'
+                                        }
+                                        stroke="currentColor"
+                                        strokeWidth="2"
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        fill="none"
+                                    />
+                                </svg>
+                            </IconButton>
+                        )}
                     </div>
                 </div>
             </header>
@@ -630,28 +672,36 @@ export default function App() {
                 inert={!shown}
             >
                 <TopFade className={styles.base}>{baseContent}</TopFade>
-                {formSlide.mounted && me && (
-                    <div
-                        className={[styles.form, editing ? '' : styles.formLeaving].filter(Boolean).join(' ')}
-                        onTransitionEnd={formSlide.onTransitionEnd}
-                    >
-                        <TopFade>
-                            <MemberForm
-                                mode="edit"
-                                crew={members}
-                                myId={myId}
-                                initial={myDraft}
-                                shipKind={shipKind}
-                                onShipKind={setPickedKind}
-                                facing={facing}
-                                onFacing={setPickedFacing}
-                                onSubmit={handleMemberSubmit}
-                                onCancel={() => setEditing(false)}
-                            />
-                        </TopFade>
-                    </div>
-                )}
             </main>
+            {/* Форма своего корабля. Стоит она в той же коробке, что и разговор, и тем же
+                размером — но соседом ему, а не содержимым: форму открывают нажатием по своему
+                кораблю в кадре, и убранный разговор не должен уносить её с собой. Прежде она
+                лежала внутри блока разговора и вместе с ним схлопывалась в ноль и глохла
+                для указателя (inert) — то есть нажатие по кораблю на весь экран не делало
+                ровно ничего. Ростом она поэтому не в разговор, а в тот размер, в каком он
+                был бы на экране (--form-to): у убранного он нулевой, а форме надо во что-то
+                встать. */}
+            {formSlide.mounted && me && (
+                <div
+                    className={[styles.form, editing ? '' : styles.formLeaving].filter(Boolean).join(' ')}
+                    onTransitionEnd={formSlide.onTransitionEnd}
+                >
+                    <TopFade>
+                        <MemberForm
+                            mode="edit"
+                            crew={members}
+                            myId={myId}
+                            initial={myDraft}
+                            shipKind={shipKind}
+                            onShipKind={setPickedKind}
+                            facing={facing}
+                            onFacing={setPickedFacing}
+                            onSubmit={handleMemberSubmit}
+                            onCancel={() => setEditing(false)}
+                        />
+                    </TopFade>
+                </div>
+            )}
             {/* Коридор вдоль кромки разговора: за него меняют его ширину. Стоит он рядом
                 с разговором, а не внутри, и приходится ровно на стык — половиной на кадр,
                 половиной на разговор. Внутри он лежал поверх ленты и съедал поле нажатия

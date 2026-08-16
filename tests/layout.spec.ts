@@ -1276,10 +1276,15 @@ test('дымка стоит над водой полоской в семьдес
 });
 
 /**
- * Главный случай большого кадра — форма настройки корабля: место на рейде выбирают именно там.
- * Разговор убирают с экрана, не закрывая формы: она лежит поверх разговора и вместе с ним
- * уходит с глаз, а отметки свободных мест разъезжаются вместе с раздавшимся кадром — ровно
- * ради этого всё и затевалось.
+ * Форма настройки корабля живёт отдельно от разговора.
+ *
+ * Раньше она лежала внутри блока разговора: убранный разговор схлопывался в ноль и глох для
+ * указателя (`inert`), а с ним пропадала и форма. То есть на кадре во весь экран — там, где
+ * рейд как раз и виден лучше всего, — нажатие по своему кораблю не делало ровно ничего.
+ * Теперь форма стоит соседом разговору и тем же размером: разговор ушёл, форма выехала.
+ *
+ * Размер в убранном разговоре нулевой, поэтому форма меряется не им, а тем, в какой размер
+ * его вернёт кнопка (`back` в hooks/useLayout, `--form-to` в стилях).
  */
 const berthSpan = (page: Page): Promise<number> =>
     page.evaluate(() => {
@@ -1289,31 +1294,66 @@ const berthSpan = (page: Page): Promise<number> =>
         return bottom - top;
     });
 
-test('на форме настройки корабля большой кадр разводит отметки мест', async ({ page }) => {
-    await page.setViewportSize({ width: MOBILE_MAX_WIDTH - 90, height: 844 });
+const PHONE = { width: MOBILE_MAX_WIDTH - 90, height: 844 };
+
+test('с убранным разговором форма своего корабля всё равно выезжает', async ({ page }) => {
+    await page.setViewportSize(PHONE);
     await openChannel(page, DEMO, ALBATROS);
-    await openSheet(page);
-    await page.getByRole('button', { name: 'Настроить корабль' }).click();
-    const marks = page.locator('[data-berth]');
-    const count = await marks.count();
-    expect(count, 'на форме не показали свободных мест').toBeGreaterThan(0);
-    const tight = await berthSpan(page);
 
     await page.getByRole('button', { name: 'Убрать разговор' }).click();
-    // Рейд растягивается ровно настолько, насколько прибавилось воды: убранный разговор отдаёт
-    // кадру свою треть, вода забирает свои 60% от прибавки — выходит примерно полторы прежних
-    // воды. Сравниваем с запасом вниз: числа тут зависят от высоты окна, а проверяется рост.
-    await expect
-        .poll(() => berthSpan(page), { message: 'рейд на форме не растянулся вместе с кадром' })
-        .toBeGreaterThan(tight * 1.3);
-    // Мест ровно столько же: раздался кадр, а не расклад рейда.
-    await expect(marks, 'вместе с кадром изменился и расклад мест').toHaveCount(count);
-    // Место выбирается прямо здесь: рейд — это кадр, и убранный разговор ему не помеха.
+    await expect(page.getByRole('button', { name: 'Вернуть разговор' }), 'разговор не ушёл с экрана').toBeVisible();
+
+    // Открываем форму на голом кадре: список кораблей достают из шапки, и он от разговора
+    // не зависит вовсе.
+    await openSheet(page);
+    await page.getByRole('button', { name: 'Настроить корабль' }).click();
+    await page.waitForTimeout(600);
+
+    const form = await boxOf(page, '[class*="form_"]');
+    expect(form.height, 'форма выехала нулевой высоты — то есть не выехала').toBe(chatSize(PHONE));
+    expect(form.top + form.height, 'форма не дошла до нижней кромки окна').toBe(PHONE.height);
+    await expect(page.getByRole('button', { name: 'Готово' }), 'в форме не видно кнопки готовности').toBeVisible();
+
+    // И работает она целиком: место на рейде выбирается прямо отсюда.
+    const marks = page.locator('[data-berth]');
+    expect(await marks.count(), 'на форме не показали свободных мест').toBeGreaterThan(0);
+    expect(await berthSpan(page), 'отметки мест сошлись в точку').toBeGreaterThan(0);
     await marks.first().click();
 
-    // А сама форма никуда не делась — она ушла вместе с разговором и вместе с ним вернулась.
-    await page.getByRole('button', { name: 'Вернуть разговор' }).click();
-    await expect(page.getByRole('button', { name: 'Готово' }), 'форма потерялась вместе с разговором').toBeVisible();
+    // Разговор при этом так и остался убранным: форма его не возвращала и не подменяла собой.
+    await page.getByRole('button', { name: 'Отмена' }).click();
+    await page.waitForTimeout(600);
+    await expect(page.getByRole('button', { name: 'Вернуть разговор' }), 'форма вернула разговор').toBeVisible();
+});
+
+/**
+ * Под открытой формой разговор не убирают: кнопки на это в шапке нет.
+ *
+ * Форма занимает ровно то же место, и убранный из-под неё разговор не поменял бы на экране
+ * ничего — кроме значка на самой кнопке. Увидеть последствия можно было бы только закрыв
+ * форму, то есть неожиданностью.
+ */
+test('под открытой формой в шапке нет кнопки разговора, а рейд стоит на месте', async ({ page }) => {
+    await page.setViewportSize(PHONE);
+    await openChannel(page, DEMO, ALBATROS);
+    await openSheet(page);
+
+    const before = await boxOf(page, 'header');
+    await page.getByRole('button', { name: 'Настроить корабль' }).click();
+    await page.waitForTimeout(600);
+
+    await expect(page.getByRole('button', { name: 'Убрать разговор' }), 'под формой осталась кнопка').toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Вернуть разговор' }), 'под формой осталась кнопка').toHaveCount(0);
+    // Место у формы то же, что у разговора, — значит, и кадр над ней прежнего роста.
+    expect((await boxOf(page, 'header')).height, 'кадр под открытой формой поменял рост').toBe(before.height);
+
+    // Закрылась форма — кнопка вернулась, и разговор в том же положении, в каком его застали.
+    await page.getByRole('button', { name: 'Отмена' }).click();
+    await page.waitForTimeout(600);
+    await expect(
+        page.getByRole('button', { name: 'Убрать разговор' }),
+        'кнопка не вернулась с уходом формы'
+    ).toBeVisible();
 });
 
 /**
@@ -1734,7 +1774,10 @@ test('полосу прокрутки поджимает сверху у люб�
     expect(crew.top, 'полоса списка кораблей полезла под скруглённый угол').toBeCloseTo(FADE_HEIGHT, 0);
 
     await page.getByRole('button', { name: 'Настроить корабль' }).click();
-    const form = await trackInset(page, 'main form[class*="card"]');
+    // Форма живёт не внутри блока разговора, а соседом ему (см. `--form-to`), — поэтому
+    // и селектор без `main`. Правило от этого не поменялось: полоску даёт TopFade, и достаётся
+    // она любому прокручиваемому внутри, где бы тот ни стоял.
+    const form = await trackInset(page, 'form[class*="card"]');
     expect(form.top, 'полоса формы полезла под скруглённый угол').toBeCloseTo(FADE_HEIGHT, 0);
     // Поля у формы шире, чем у ленты: полоса кончается там же, где кончается текст.
     expect(form.bottom, 'полоса формы кончается не по её полям').toBeGreaterThan(feed.bottom);
@@ -2602,23 +2645,27 @@ test('разговор не отрывается от нижней кромки,
  * форму на место: движения оставалось ровно столько, сколько прокрутке не хватило (замер:
  * 273 из 319px в развёрнутой раскладке — то есть 46px вместо 319).
  *
- * Меряется покадрово одно и то же: блок не промотан ни на пиксель, а верх формы идёт от
- * нижней кромки блока к его верхней.
+ * Меряется покадрово одно и то же: ничто себя не промотало, а верх формы идёт от нижней кромки
+ * окна к своему месту. Мерка сменилась с блока на окно вместе с самой формой: та переехала
+ * из блока разговора наружу, соседом ему, и едет теперь по окну (см. `--form-to`).
  */
 test('форма выезжает снизу целиком, а не встаёт на место сразу', async ({ page }) => {
-    await page.setViewportSize({ width: COLUMN_WIDTH + 440, height: 900 });
+    const window = { width: COLUMN_WIDTH + 440, height: 900 };
+    await page.setViewportSize(window);
     await openChannel(page, DEMO, ALBATROS);
     await openSheet(page);
 
     const frames = await page.evaluate(async () => {
         const main = document.querySelector('main')!;
-        const taken: { scrolled: number; offset: number }[] = [];
+        const app = main.parentElement!;
+        const taken: { scrolled: number; top: number }[] = [];
         const probe = (): void => {
-            const box = main.getBoundingClientRect();
-            const form = main.querySelector(':scope > div[class*="form"]');
+            const form = app.querySelector(':scope > div[class*="form_"]');
             taken.push({
-                scrolled: Math.round(main.scrollTop),
-                offset: form ? Math.round(form.getBoundingClientRect().top - box.top) : -1,
+                // Прокрутиться могло что угодно из троих: блок разговора, коробка приложения
+                // и сама страница. Складываем — ноль тут значит, что не прокрутился никто.
+                scrolled: Math.round(main.scrollTop + app.scrollTop + document.documentElement.scrollTop),
+                top: form ? Math.round(form.getBoundingClientRect().top) : -1,
             });
         };
         document.querySelector<HTMLButtonElement>('button[aria-label="Настроить корабль"]')!.click();
@@ -2637,12 +2684,11 @@ test('форма выезжает снизу целиком, а не встаё�
     });
 
     const scrolled = [...new Set(frames.map((frame) => frame.scrolled))];
-    expect(scrolled, 'блок контента промотал сам себя под сфокусированное поле').toEqual([0]);
+    expect(scrolled, 'кто-то промотал себя под сфокусированное поле').toEqual([0]);
 
-    const offsets = frames.map((frame) => frame.offset);
-    const height = await page.locator('main').evaluate((node) => Math.round(node.getBoundingClientRect().height));
-    expect(Math.max(...offsets), 'форма не начала выезд из-за нижней кромки блока').toBeGreaterThan(height - 8);
-    expect(Math.min(...offsets), 'форма не доехала до верхней кромки блока').toBeLessThan(2);
+    const tops = frames.map((frame) => frame.top);
+    expect(Math.max(...tops), 'форма не начала выезд из-за нижней кромки окна').toBeGreaterThan(window.height - 8);
+    expect(Math.min(...tops), 'форма не доехала до своего места').toBeLessThan(2);
 });
 
 /**
@@ -2694,10 +2740,10 @@ test('на широком окне разговор встаёт сбоку во
  * та же, что и под кадром, — разговор у неё только отнимает место справа, а мерки остаются
  * общими.
  *
- * Форма корабля, наоборот, остаётся внутри разговора: она про свой корабль, и открывают её
- * из разговора.
+ * Форма корабля, наоборот, встаёт на место разговора: она не шторка на сцене, а второй слой
+ * той же боковой коробки — ровно там, где только что был разговор, и той же ширины.
  */
-test('шторка встаёт на сцену рядом с разговором, а форма остаётся внутри него', async ({ page }) => {
+test('шторка встаёт на сцену рядом с разговором, а форма — на его место', async ({ page }) => {
     await openSide(page);
     await openSheet(page);
 
@@ -2717,13 +2763,14 @@ test('шторка встаёт на сцену рядом с разговоро
 
     await page.getByRole('button', { name: 'Настроить корабль' }).click();
     await page.waitForTimeout(500);
-    // Форма стоит внутри разговора и меряется по нему же: у бокового разговора слева рамка,
-    // и на неё форма честно уже своей полосы.
+    // Форма встаёт ровно в коробку разговора: та же ширина, та же высота, та же правая кромка.
+    // Соседом ему, а не содержимым, — но снаружи разницы быть не должно.
     const content = await boxOf(page, 'main');
-    const form = await boxOf(page, 'main > div[class*="form"]');
-    expect(form.width, 'форма шире разговора').toBeLessThanOrEqual(content.width);
-    expect(form.width, 'форма не заняла разговор целиком').toBeGreaterThan(content.width - 4);
-    expect(form.left, 'форма вылезла на кадр').toBeGreaterThanOrEqual(content.left);
+    const form = await boxOf(page, '[class*="form_"]');
+    expect(form.width, 'форма встала не в ширину разговора').toBe(content.width);
+    expect(form.right, 'форма не прижата к правой кромке окна').toBe(WIDE.width);
+    expect(form.height, 'форма не во всю высоту окна').toBe(WIDE.height);
+    expect(form.left, 'форма вылезла на кадр').toBe(content.left);
 });
 
 /**
