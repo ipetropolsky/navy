@@ -52,6 +52,18 @@ const ownBoxAspect = (kind: ShipKind): number => 1 / shipHeight(kind);
 const percent = (share: number): string => `${(share * 100).toFixed(2)}%`;
 
 /**
+ * Во сколько раз силуэт вырастает, когда его разглядывают вблизи: место под него занято
+ * своей долей, а вблизи он занимает его целиком. У самого длинного корабля справочника доля
+ * и так единица — ему расти некуда, и нажатие на его портрете ничего не меняет: он и без того
+ * показан во всю ширину.
+ */
+const zoomFactor = (kind: ShipKind): number => 1 / shipWidth(kind);
+
+/** Что случится по нажатию на портрет. Подсказка меняется вместе с положением, как и у «Ход»/«Якорь». */
+const ZOOM_IN_TITLE = 'Рассмотреть вблизи';
+const ZOOM_OUT_TITLE = 'Отойти на шаг';
+
+/**
  * Строчка с характеристиками силуэта: длина, водоизмещение, полный ход. Числа не украшение —
  * по ним считается ход корабля в сцене, и катер потому и уходит с рейда быстрее тральщика.
  * Порядок тот же, что в справочниках: размер, масса, скорость.
@@ -80,6 +92,17 @@ interface ShipPortraitProps {
      * без неё корабли встают на разные уровни.
      */
     ownHeight?: boolean;
+    /**
+     * Разглядывают ли корабль вблизи. Силуэт тогда занимает место целиком, а вместе с ним
+     * растёт и линейка: она мерит этот самый рисунок, и оставь её прежней — она начала бы врать.
+     */
+    zoomed?: boolean;
+    /**
+     * Что делать по нажатию на портрет. Передан — портрет становится кнопкой; не передан —
+     * остаётся картинкой, на которую незачем нажимать (так он стоит в форме своего корабля,
+     * где силуэт и без того выбирают строчкой списка).
+     */
+    onZoom?: () => void;
 }
 
 export default function ShipPortrait({
@@ -89,7 +112,28 @@ export default function ShipPortrait({
     mode,
     morseFeed = null,
     ownHeight = false,
+    zoomed = false,
+    onZoom,
 }: ShipPortraitProps) {
+    // Место под силуэт: своё по этому кораблю, а вблизи — ниже ровно во столько же раз,
+    // во сколько силуэт шире. Меняется соотношение сторон, а не высота в пикселях: ширину
+    // месту даёт то, в чём оно лежит, и в пикселях её тут никто не знает.
+    const boxAspect = ownHeight ? ownBoxAspect(kind) : IMAGE_BOX_ASPECT;
+    const zoom = zoomed ? zoomFactor(kind) : 1;
+    const box = { aspectRatio: boxAspect / zoom };
+    const inner = (
+        <span className={styles.portraitShip} style={{ width: percent(shipWidth(kind) * zoom) }}>
+            <Ship
+                kind={kind}
+                name={SHIP_KIND_LABELS[kind]}
+                hullNumber={hullNumber}
+                facing={facing}
+                mode={mode}
+                morseFeed={morseFeed}
+            />
+        </span>
+    );
+
     return (
         <>
             {/* Место под силуэт одно на всех, а сам силуэт в нём той ширины, какую даёт его
@@ -97,23 +141,28 @@ export default function ShipPortrait({
                 стоянка на рейде — это то, ради чего его и выбирают, а огни у каждого силуэта
                 свои и стоят по-разному. Номер на борту — того же размера и на том же месте,
                 каким он будет виден в кадре. */}
-            <span
-                className={styles.portraitBox}
-                style={{ aspectRatio: ownHeight ? ownBoxAspect(kind) : IMAGE_BOX_ASPECT }}
-            >
-                <span className={styles.portraitShip} style={{ width: percent(shipWidth(kind)) }}>
-                    <Ship
-                        kind={kind}
-                        name={SHIP_KIND_LABELS[kind]}
-                        hullNumber={hullNumber}
-                        facing={facing}
-                        mode={mode}
-                        morseFeed={morseFeed}
-                    />
+            {onZoom ? (
+                // Кнопка без всякой кнопочности: нажимают саму картинку, и подсказка говорит,
+                // что случится. `aria-pressed` — потому что это положение, а не разовое
+                // действие: портрет остаётся увеличенным, пока его не уменьшат обратно.
+                <button
+                    type="button"
+                    className={`${styles.portraitBox} ${styles.portraitZoom}`}
+                    style={box}
+                    title={zoomed ? ZOOM_OUT_TITLE : ZOOM_IN_TITLE}
+                    aria-label={zoomed ? ZOOM_OUT_TITLE : ZOOM_IN_TITLE}
+                    aria-pressed={zoomed}
+                    onClick={onZoom}
+                >
+                    {inner}
+                </button>
+            ) : (
+                <span className={styles.portraitBox} style={box}>
+                    {inner}
                 </span>
-            </span>
+            )}
             <span className={styles.scaleRow}>
-                <span className={styles.scaleBar} style={{ width: percent(scaleWidth(kind)) }}>
+                <span className={styles.scaleBar} style={{ width: percent(scaleWidth(kind) * zoom) }}>
                     {SCALE_SEGMENTS.map((step) => (
                         <span key={step} className={step % 2 ? styles.scaleDark : styles.scaleLight} />
                     ))}

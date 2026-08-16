@@ -21,6 +21,7 @@ import { MAX_MESSAGE_LENGTH, SLOT_COUNT, slotDepth, slotShare } from '@/types/ch
 import {
     ALBATROS,
     DEMO,
+    VYMPEL,
     backToChatButton,
     bubbles,
     clickShip,
@@ -28,6 +29,7 @@ import {
     openChannel,
     openNewChannel,
     openSheet,
+    openShipCard,
     readState,
     send,
     shipNames,
@@ -2997,4 +2999,59 @@ test('уведомление на телефоне стоит в одну стр
 
     expect(written.lines, 'короткое уведомление сломалось на две строки').toBe(1);
     expect(written.width, 'уведомление растянулось на весь экран').toBeLessThan(360 * 0.92 + 1);
+});
+
+/**
+ * Портрет в карточке корабля приближается по нажатию.
+ *
+ * Размер силуэта тут общий со сценой (`shipSizeShare`): катер обязан быть мельче корвета,
+ * и в карточке он занимает половину отведённого места. Разглядеть его при этом всё равно
+ * хочется — приближение и есть единственное место в приложении, где корабль показан не
+ * в масштабе флота, а сам по себе.
+ *
+ * Меряется тут не только силуэт, но и линейка: она мерит этот самый рисунок, и отстань она
+ * от него — десять метров на ней перестанут быть десятью метрами.
+ *
+ * Берём «Альбатрос»: это самый короткий корабль справочника, и растёт он ровно вдвое —
+ * у самого длинного доля и так единица, и проверять на нём нечего.
+ */
+test('портрет корабля приближается по нажатию и возвращается обратно', async ({ page }) => {
+    await openChannel(page, DEMO, VYMPEL);
+    await openShipCard(page, 'Альбатрос');
+
+    const box = page.locator('[class*="portraitBox"]');
+    const ship = page.locator('[class*="portraitShip"]');
+    const scale = page.locator('[class*="scaleBar"]');
+    const measure = async () => ({
+        place: (await box.boundingBox())?.width ?? 0,
+        ship: (await ship.boundingBox())?.width ?? 0,
+        height: (await box.boundingBox())?.height ?? 0,
+        scale: (await scale.boundingBox())?.width ?? 0,
+    });
+
+    const before = await measure();
+    expect(before.ship / before.place, 'катер в карточке и так во всю ширину — приближать нечего').toBeLessThan(0.9);
+
+    // Ждём не наугад: приближение идёт переходом, и мерить его надо после того, как он встал.
+    await page.getByRole('button', { name: 'Рассмотреть вблизи' }).click();
+    await page.waitForTimeout(600);
+    const near = await measure();
+
+    expect(near.ship / near.place, 'силуэт не дорос до полной ширины места').toBeCloseTo(1, 1);
+    expect(near.height / before.height, 'место под силуэт не выросло вместе с ним').toBeCloseTo(
+        near.ship / before.ship,
+        1
+    );
+    expect(near.scale / before.scale, 'линейка отстала от силуэта и начала врать').toBeCloseTo(
+        near.ship / before.ship,
+        1
+    );
+
+    // Повторное нажатие уводит обратно: это положение, а не разовое действие.
+    await page.getByRole('button', { name: 'Отойти на шаг' }).click();
+    await page.waitForTimeout(600);
+    const after = await measure();
+
+    expect(after.ship, 'силуэт не вернулся к своему размеру').toBeCloseTo(before.ship, 0);
+    expect(after.scale, 'линейка не вернулась вместе с силуэтом').toBeCloseTo(before.scale, 0);
 });

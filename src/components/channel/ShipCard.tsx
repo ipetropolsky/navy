@@ -47,6 +47,9 @@ export default function ShipCard({ member, senior }: ShipCardProps) {
     // Под парами или на якоре. Показ, а не состояние корабля: на рейде он как стоял на якоре,
     // так и стоит, — поэтому и живёт это только в карточке и забывается вместе с ней.
     const [underway, setUnderway] = useState(false);
+    // Разглядывают ли корабль вблизи. Живёт это тут же, рядом с огнями, и по той же причине:
+    // приближение — способ посмотреть, а не свойство корабля, и забывается вместе с карточкой.
+    const [zoomed, setZoomed] = useState(false);
     const notify = useSnackbar();
 
     const handleSignal = () => {
@@ -75,7 +78,14 @@ export default function ShipCard({ member, senior }: ShipCardProps) {
             <div className={styles.hullNumber}>Бортовой номер {member.hullNumber}</div>
 
             {/* По умолчанию корабль на якоре — он и правда стоит на рейде, и огни у него
-                якорные. Ходовые зажигает кнопка внизу, и только на портрете. */}
+                якорные. Ходовые зажигает кнопка внизу, и только на портрете.
+
+                Нажатие на сам портрет приближает корабль: силуэт занимает место целиком,
+                и вместе с ним растёт линейка. Мелкие проекты в карточке выходят вдвое меньше
+                места под них — не по прихоти, а потому что размер тут общий со сценой
+                (см. shipSizeShare), и катер обязан быть мельче корвета. Разглядеть его при
+                этом всё равно хочется, и приближение — единственное место в приложении,
+                где корабль показан не в масштабе флота, а сам по себе. */}
             <ShipPortrait
                 kind={member.shipKind}
                 hullNumber={member.hullNumber}
@@ -83,6 +93,8 @@ export default function ShipCard({ member, senior }: ShipCardProps) {
                 mode={underway ? 'underway' : 'anchored'}
                 morseFeed={reply}
                 ownHeight
+                zoomed={zoomed}
+                onZoom={() => setZoomed((was) => !was)}
             />
 
             <div className={styles.kind}>{SHIP_KIND_LABELS[member.shipKind]}</div>
