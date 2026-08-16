@@ -1,9 +1,17 @@
-import { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode, useRef, useState } from 'react';
+import {
+    CSSProperties,
+    MouseEvent as ReactMouseEvent,
+    PointerEvent as ReactPointerEvent,
+    ReactNode,
+    useRef,
+    useState,
+} from 'react';
 
 import { useSlide } from '@/hooks/useSlide';
 import { isTextField } from '@/utils/keyboard';
 
 import IconButton from '@/components/ui/IconButton';
+import { useShadeFloor } from '@/components/ui/ShadeStack';
 import TopFade from '@/components/ui/TopFade';
 
 import styles from './Shade.module.less';
@@ -61,12 +69,29 @@ interface ShadeProps {
      * и это не действует.
      */
     onScene?: boolean;
+    /**
+     * Лечь поверх уже открытых шторок, а не закрывать их за собой.
+     *
+     * Так открывают продолжение: карточку корабля из строчки списка. Закрыв её, человек ждёт
+     * увидеть список, из которого её и открыл, а не пустой рейд. Затемнение верхней шторки
+     * накрывает при этом и нижнюю: под верхней ничего не выбирают, чем бы это ни было.
+     *
+     * По умолчанию шторка соседей под собой не терпит: список кораблей открывают из шапки,
+     * и накрывать им карточку одного корабля незачем — разговор про этот корабль кончился.
+     * Подробности — в `ShadeStack`.
+     */
+    cover?: boolean;
     children: ReactNode;
 }
 
 /**
  * Шторка: блок, приезжающий снизу поверх всего остального. Ей показывают список кораблей
- * и карточку чужого корабля — открытыми разом они не бывают.
+ * и карточку чужого корабля.
+ *
+ * Открытых разом бывает несколько: карточку открывают из строчки списка и кладут поверх него
+ * (`cover`), а закрывают в обратном порядке — сверху вниз. Кто над кем лежит, считает
+ * не разметка, а `ShadeStack`: в разметке шторки написаны одна за другой, и порядок этот —
+ * тот, в котором о них рассказано, а не тот, в котором их открывали.
  *
  * Устроена она просто: открыта или закрыта, третьего положения нет. Ростом шторка ровно
  * по своему содержимому и не выше окна за вычетом шапки — то есть короткий список показан
@@ -83,9 +108,12 @@ interface ShadeProps {
  * Едет она сдвигом, а не высотой: высоту ей задаёт содержимое, и разводить её во времени
  * значило бы перекладывать содержимое на каждом кадре выезда.
  */
-export default function Shade({ open, onClose, label, onScene = false, children }: ShadeProps) {
+export default function Shade({ open, onClose, label, onScene = false, cover = false, children }: ShadeProps) {
     const shadeRef = useRef<HTMLElement>(null);
     const { mounted, onTransitionEnd } = useSlide(open);
+    // Этаж в стопке: открытая позже лежит выше открытой раньше, а не так, как их написали
+    // в разметке. Считает его ShadeStack, он же и закрывает нижние, если эта не `cover`.
+    const floor = useShadeFloor(mounted, onClose, cover);
     // Сдвиг вниз, пока шторку тянут, px. Стоит inline-стилем и идёт за пальцем без перехода;
     // отпустили — стиль убираем, и шторка сама возвращается на место или уезжает совсем.
     const [shift, setShift] = useState<number | null>(null);
@@ -196,13 +224,25 @@ export default function Shade({ open, onClose, label, onScene = false, children 
                 ]
                     .filter(Boolean)
                     .join(' ')}
-                style={shift === null ? undefined : { opacity: Math.max(1 - shift / 200, 0) }}
+                style={
+                    {
+                        // Этаж уходит в стили переменной: и шторка, и её затемнение считают
+                        // из неё свой z-index, а числа остаются в одном месте — в стилях.
+                        '--shade-floor': floor,
+                        ...(shift === null ? {} : { opacity: Math.max(1 - shift / 200, 0) }),
+                    } as CSSProperties
+                }
                 aria-label="Закрыть шторку"
                 onClick={onClose}
             />
             <section
                 className={look}
-                style={shift === null ? undefined : { transform: `translateY(${shift}px)` }}
+                style={
+                    {
+                        '--shade-floor': floor,
+                        ...(shift === null ? {} : { transform: `translateY(${shift}px)` }),
+                    } as CSSProperties
+                }
                 aria-label={label}
                 ref={shadeRef}
                 onPointerDown={handlePointerDown}

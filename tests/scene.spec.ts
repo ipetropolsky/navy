@@ -1195,11 +1195,13 @@ test('строчка списка открывает корабль, а ават
     await sheet.getByRole('button', { name: 'Корабль «Вымпел»' }).click();
     const card = page.getByRole('region', { name: 'Корабль' });
     await expect(card).toContainText('Вымпел');
+    // Закрыли карточку — и вернулись в список, из которого её открыли: она лежала поверх него,
+    // а не вместо него.
     await card.getByRole('button', { name: 'Закрыть' }).click();
     await expect(card).toBeHidden();
+    await expect(sheet, 'карточка закрылась не в список').toBeVisible();
 
     // Строчка своего — форма настройки, та же, что и по щелчку по своему кораблю в кадре.
-    await openSheet(page);
     await sheet.getByRole('button', { name: 'Корабль «Альбатрос»' }).click();
     await expect(page.getByPlaceholder('Гром'), 'своя строчка не открыла форму').toBeVisible();
 });

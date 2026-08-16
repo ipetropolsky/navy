@@ -22,6 +22,7 @@ import {
     ALBATROS,
     DEMO,
     bubbles,
+    clickShip,
     join,
     openChannel,
     openNewChannel,
@@ -2798,6 +2799,68 @@ test('разговор переезжает вбок и на главной, г�
     await page.getByRole('button', { name: 'Разговор под кадром' }).click();
     await page.waitForTimeout(600);
     expect((await boxOf(page, 'main')).width, 'форма не вернулась под кадр').toBe(COLUMN_WIDTH);
+});
+
+/**
+ * Шторки стоят стопкой: открытая позже лежит выше открытой раньше. В разметке они написаны
+ * одна за другой, и порядок этот — тот, в котором о них рассказано, а не тот, в котором
+ * их открывали: карточка стоит в App ниже списка, и открытый поверх неё список вылезал под ней.
+ *
+ * Карточку из списка при этом кладут поверх (`cover`), а не вместо: закрыв её, человек ждёт
+ * увидеть список, из которого её открыл. Затемнение карточки накрывает и список — под верхней
+ * шторкой ничего не выбирают, чем бы это ни было.
+ */
+test('карточка ложится поверх списка кораблей и затемняет его', async ({ page }) => {
+    await openChannel(page, DEMO, ALBATROS);
+    await openSheet(page);
+    const sheet = page.getByRole('region', { name: 'Корабли на связи' });
+    await sheet.getByRole('button', { name: 'Корабль «Вымпел»' }).click();
+    await expect(page.getByRole('region', { name: 'Корабль' })).toBeVisible();
+
+    // Обе шторки на экране разом, и этажи считаем у обеих сразу: спрашивать их по одной
+    // значило бы мерить в разные кадры выезда.
+    const floors = await page.evaluate(() => {
+        const level = (node: Element) => Number(getComputedStyle(node).zIndex);
+        const shades = [...document.querySelectorAll('[class*="shade_"]')];
+        const backdrops = [...document.querySelectorAll('[class*="backdrop_"]')];
+        const named = (name: string) => shades.find((node) => node.getAttribute('aria-label') === name)!;
+        return {
+            list: level(named('Корабли на связи')),
+            card: level(named('Корабль')),
+            // Затемнений тоже два, и верхнее — то, что выше: оно и должно накрывать список.
+            top: Math.max(...backdrops.map(level)),
+        };
+    });
+
+    expect(floors.card, 'карточка легла не поверх списка').toBeGreaterThan(floors.list);
+    expect(floors.top, 'затемнение карточки не накрыло список').toBeGreaterThan(floors.list);
+    expect(floors.card, 'затемнение карточки накрыло и саму карточку').toBeGreaterThan(floors.top);
+
+    // Закрыли верхнюю — вернулись в нижнюю. Закрываются они по одной, сверху вниз.
+    await page.getByRole('region', { name: 'Корабль' }).getByRole('button', { name: 'Закрыть' }).click();
+    await expect(page.getByRole('region', { name: 'Корабль' })).toBeHidden();
+    await expect(sheet, 'карточка закрылась не в список').toBeVisible();
+});
+
+/**
+ * А обратно — нет: список, открытый из шапки, карточку под собой закрывает. Он отвечает
+ * про весь рейд, и разговор про один корабль на этом кончился. Раньше он в этом случае
+ * вылезал под карточкой — и выглядело это поломкой.
+ */
+test('список кораблей, открытый поверх карточки, закрывает её за собой', async ({ page }) => {
+    await openChannel(page, DEMO, ALBATROS);
+
+    // Карточку берём из кадра: из списка она открылась бы поверх него, а нам нужен обратный
+    // порядок — сперва карточка, потом список.
+    const fleet = Object.values((await readState(page)).channels)[0].members;
+    const other = fleet.find((member) => member.memberId !== ALBATROS)!;
+    await clickShip(page, page.locator(`[data-berth-ship="${other.place.slot}-${other.place.corridor}"]`));
+    const card = page.getByRole('region', { name: 'Корабль' });
+    await expect(card).toBeVisible();
+
+    await openSheet(page);
+    await expect(page.getByRole('region', { name: 'Корабли на связи' }), 'список не открылся').toBeVisible();
+    await expect(card, 'список не закрыл карточку под собой').toBeHidden();
 });
 
 /**
