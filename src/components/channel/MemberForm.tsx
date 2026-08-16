@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { KeyboardEvent, MouseEvent, PointerEvent, useRef, useState } from 'react';
 
 import { ChannelError, MemberDraft } from '@/backend';
 import MemberName from '@/components/ships/MemberName';
@@ -20,6 +20,7 @@ import {
     Side,
     isValidHullNumber,
 } from '@/types/channel';
+import { Press, isTap, startPress } from '@/utils/tap';
 import { isTouch } from '@/utils/viewport';
 
 import styles from './MemberForm.module.less';
@@ -105,6 +106,39 @@ export default function MemberForm({
     // всегда один и тот же, и по нему двух нажатий не различить.
     const [reply, setReply] = useState<MorseFeed | null>(null);
     const notify = useSnackbar();
+
+    /** С чего началось нажатие на плашку корабля: откуда и при каком выделении (см. `@/utils/tap`). */
+    const pressRef = useRef<Press | null>(null);
+
+    const chooseShip = (kind: ShipKind): void => {
+        onShipKind(kind);
+        setReply((prev) => ({ seq: (prev?.seq ?? 0) + 1, text: HAIL_SIGNAL }));
+    };
+
+    /**
+     * Тычок по плашке — выбрать корабль. Но плашка почти целиком состоит из текста: название
+     * и строчка характеристик, — и протяжка по ним значит «выделить и скопировать», а не
+     * «выбрать». Отличаем одно от другого общим правилом (`isTap`).
+     */
+    const handleShipTap = (event: MouseEvent<HTMLDivElement>, kind: ShipKind): void => {
+        const press = pressRef.current;
+        pressRef.current = null;
+        if (!isTap(press, event)) {
+            return;
+        }
+        chooseShip(kind);
+    };
+
+    // Плашка — не `button`, а `div` с ролью кнопки: из настоящей кнопки браузер не даёт выделить
+    // текст вовсе, даже при `user-select: text`, и нажатие по ней не сбрасывает уже набранное
+    // выделение. Значит, клавиатуру плашка отрабатывает сама — пробелом и вводом, как кнопка.
+    const handleShipKey = (event: KeyboardEvent<HTMLDivElement>, kind: ShipKind): void => {
+        if (event.key === 'Enter' || event.key === ' ') {
+            // Пробел иначе прокрутил бы форму, ввод — отправил её раньше времени.
+            event.preventDefault();
+            chooseShip(kind);
+        }
+    };
 
     const hullNumberOk = isValidHullNumber(hullNumber);
     // Надпись одна на оба случая: что при входе, что при переоснащении человек делает одно
@@ -219,14 +253,17 @@ export default function MemberForm({
                     Зато в столбик каждому достаётся вся ширина панели — силуэт видно как следует. */}
                 <div className={styles.kinds}>
                     {SHIP_KINDS.map((kind) => (
-                        <button
+                        <div
                             key={kind}
-                            type="button"
+                            role="button"
+                            tabIndex={0}
+                            aria-pressed={kind === shipKind}
                             className={kind === shipKind ? styles.kindActive : styles.kind}
-                            onClick={() => {
-                                onShipKind(kind);
-                                setReply((prev) => ({ seq: (prev?.seq ?? 0) + 1, text: HAIL_SIGNAL }));
+                            onPointerDown={(event: PointerEvent<HTMLDivElement>) => {
+                                pressRef.current = startPress(event);
                             }}
+                            onClick={(event) => handleShipTap(event, kind)}
+                            onKeyDown={(event) => handleShipKey(event, kind)}
                         >
                             {/* Портрет — общий с карточкой чужого корабля (ShipPortrait):
                                 силуэт в своём масштабе и линейка под ним.
@@ -248,7 +285,7 @@ export default function MemberForm({
                             />
                             <span className={styles.kindLabel}>{SHIP_KIND_LABELS[kind]}</span>
                             <span className={styles.kindSpec}>{shipSpecLine(kind)}</span>
-                        </button>
+                        </div>
                     ))}
                 </div>
             </Field>

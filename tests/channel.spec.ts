@@ -280,7 +280,9 @@ test('набранный номер стоит на выбранном кора�
     ).toHaveText('317');
 
     // Выбрали другой силуэт — номер перешёл вместе с выбором, прежний борт остался чистым.
-    const kinds = page.locator('button:has([class*="portraitShip"])');
+    // Плашка корабля — `div` с ролью кнопки, а не `button`: из настоящей кнопки не выделишь
+    // текст, а он там главное (см. проверку про характеристики ниже).
+    const kinds = page.locator('[role="button"]:has([class*="portraitShip"])');
     await kinds.nth(3).click();
     expect(await onHulls(), 'номер остался на прежнем борту').toEqual(['317']);
     await expect(kinds.nth(3).locator('[class*="hullNumber"]'), 'номер не перешёл на новый выбор').toHaveText('317');
@@ -607,4 +609,54 @@ test('два корабля не встают на одно место, даже
         await berthOf(theirs, VYMPEL)
     );
     expect(ownMine, 'обе вкладки считают своим одно и то же место').not.toBe(ownTheirs);
+});
+
+/**
+ * Плашка корабля в форме почти целиком состоит из текста: название и строчка характеристик.
+ * Текст этот для того и написан, чтобы его читали и сравнивали, — а значит, и выделяли:
+ * выбирая между катером и тральщиком, ход с осадкой хочется утащить с собой.
+ *
+ * Настоящей кнопкой такая плашка быть не может (см. `@/utils/tap`): из `button` браузер не даёт
+ * выделить текст вовсе, даже при `user-select: text`, и нажатие по ней не сбрасывает уже набранное
+ * выделение. Форма от этого выглядела заклинившей: выделить нечего, а если выделилось соседним
+ * полем или Cmd+A — обратно уже не снимешь, нажатия она словно не замечает.
+ */
+test('характеристики корабля в форме выделяются, а тычок сбрасывает выделение', async ({ page }) => {
+    await openChannel(page, DEMO, ALBATROS);
+    await openShipForm(page);
+
+    const selection = (): Promise<string> => page.evaluate(() => window.getSelection()?.toString().trim() ?? '');
+    const plates = page.locator('[class*="kinds_"] [role="button"]');
+
+    // Берём невыбранную плашку по номеру, а не локатором по `aria-pressed`: за проверку она
+    // как раз становится выбранной, и локатор уехал бы с неё на соседнюю.
+    const pressed = await plates.evaluateAll((nodes) => nodes.map((node) => node.getAttribute('aria-pressed')));
+    const plate = plates.nth(pressed.indexOf('false'));
+
+    // Тянем по самой строчке характеристик, изнутри её полей: снаружи выделять было бы нечего.
+    // Форма длинная и мотает себя сама, а мышь ходит по окну: не подведи плашку под глаза —
+    // и протяжка пройдёт мимо экрана.
+    const spec = plate.locator('[class*="kindSpec"]');
+    await spec.scrollIntoViewIfNeeded();
+    const box = (await spec.boundingBox())!;
+    const middle = box.y + box.height / 2;
+    await page.mouse.move(box.x + 2, middle);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width - 2, middle, { steps: 12 });
+    await page.mouse.up();
+
+    expect(await selection(), 'характеристики корабля не выделяются').not.toBe('');
+    await expect(plate, 'протяжка по тексту обернулась выбором корабля').toHaveAttribute('aria-pressed', 'false');
+
+    // Тычок по той же плашке — обычный выбор, и выделение он снимает, как снял бы на любом
+    // другом месте страницы.
+    await plate.click();
+    expect(await selection(), 'выделение не сбросилось нажатием').toBe('');
+    await expect(plate, 'тычок по плашке не выбрал корабль').toHaveAttribute('aria-pressed', 'true');
+
+    // Клавиатуру плашка отрабатывает сама, раз она не кнопка: ввод по ней выбирает корабль.
+    const next = plates.nth(pressed.indexOf('false') === 0 ? 1 : 0);
+    await next.focus();
+    await page.keyboard.press('Enter');
+    await expect(next, 'ввод по плашке не выбрал корабль').toHaveAttribute('aria-pressed', 'true');
 });

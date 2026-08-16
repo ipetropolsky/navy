@@ -5,6 +5,7 @@ import CodePennant from '@/components/ships/CodePennant';
 import MemberName from '@/components/ships/MemberName';
 import { useSnackbar } from '@/components/ui/Snackbar';
 import { Member, Message } from '@/types/channel';
+import { Press, drifted, isTap, selectedSince, startPress } from '@/utils/tap';
 
 import MessageBody from '@/components/chat/MessageBody';
 import ReplyQuote from '@/components/chat/ReplyQuote';
@@ -38,16 +39,6 @@ interface MessageListProps {
  * случаться от настоящего движения вверх, а не от округления.
  */
 const STICK_SLOP = 24;
-
-/**
- * Насколько далеко можно увести курсор или палец между нажатием и отпусканием, чтобы это
- * всё ещё считалось тычком, px. Дальше — уже протяжка: человек выделяет текст, а не отвечает.
- *
- * Порог нужен, потому что одним выделением не обойтись: протянуть можно и по пустому месту
- * плашки, и тогда выделять окажется нечего, а ответ бы сработал. Восемь пикселей — обычный
- * запас на дрожь: палец на телефоне уезжает на два-три даже при честном тычке.
- */
-const TAP_SLOP = 8;
 
 /** Что означает ответный вымпел у позывного. Слово одно на все служебные строчки. */
 const NOTICE_TITLE = 'Техническое сообщение';
@@ -159,14 +150,8 @@ export default function MessageList({ messages, members, myId, onReply, onShowSh
         return () => observer.disconnect();
     }, []);
 
-    /** Что выделено в окне прямо сейчас. Пусто — не выделено ничего. */
-    const selectedText = (): string => window.getSelection()?.toString().trim() ?? '';
-
-    /**
-     * С чего началось нажатие: откуда и при каком выделении. У самого `click` этого не спросишь —
-     * он приходит уже по отпусканию и про дорогу между ними молчит.
-     */
-    const pressRef = useRef<{ x: number; y: number; selected: string } | null>(null);
+    /** С чего началось нажатие: откуда и при каком выделении (см. `@/utils/tap`). */
+    const pressRef = useRef<Press | null>(null);
 
     /**
      * Какая плашка сейчас утоплена. Держим сами, а не отдаём браузеру `:active`, потому что
@@ -192,7 +177,7 @@ export default function MessageList({ messages, members, myId, onReply, onShowSh
     };
 
     const handlePress = (event: PointerEvent<HTMLDivElement>): void => {
-        pressRef.current = { x: event.clientX, y: event.clientY, selected: selectedText() };
+        pressRef.current = startPress(event);
         release();
         pressedRef.current = event.currentTarget;
         event.currentTarget.classList.add(styles.pressed);
@@ -214,14 +199,12 @@ export default function MessageList({ messages, members, myId, onReply, onShowSh
      */
     useEffect(() => {
         const watchMove = (event: globalThis.PointerEvent): void => {
-            const press = pressRef.current;
-            if (press && Math.hypot(event.clientX - press.x, event.clientY - press.y) > TAP_SLOP) {
+            if (drifted(pressRef.current, event)) {
                 release();
             }
         };
         const watchSelection = (): void => {
-            const selected = selectedText();
-            if (selected !== '' && selected !== pressRef.current?.selected) {
+            if (selectedSince(pressRef.current)) {
                 release();
             }
         };
@@ -241,23 +224,12 @@ export default function MessageList({ messages, members, myId, onReply, onShowSh
      * Тычок по плашке — ответить. Но не всякое нажатие тычок: текст в ленте можно и нужно
      * выделять — протяжкой на десктопе, долгим нажатием на телефоне, — и ответ на выделение
      * срабатывать не должен. Человек тянул курсор через реплику, чтобы её скопировать,
-     * а получал панель ответа и сбитое выделение.
-     *
-     * Отличаем по двум приметам разом. Первая — дорога: увели дальше `TAP_SLOP` — это протяжка,
-     * даже если выделять на этом месте было нечего. Вторая — выделение, которого до нажатия
-     * не было: долгое нажатие на телефоне никуда курсор не ведёт, а выделение оставляет.
-     *
-     * Сравниваем именно с тем, что было выделено в начале нажатия, а не просто смотрим, есть ли
-     * выделение вообще. Нажатие внутрь уже выделенного браузер схлопывает не сразу, и правило
-     * «есть выделение — не отвечать» отняло бы ответ у следующего же тычка по той самой реплике,
-     * которую человек только что выделял.
+     * а получал панель ответа и сбитое выделение. Как отличается одно от другого — в `isTap`.
      */
     const handleTap = (event: MouseEvent<HTMLDivElement>, message: Message): void => {
         const press = pressRef.current;
         pressRef.current = null;
-        const moved = press !== null && Math.hypot(event.clientX - press.x, event.clientY - press.y) > TAP_SLOP;
-        const selected = selectedText();
-        if (moved || (selected !== '' && selected !== press?.selected)) {
+        if (!isTap(press, event)) {
             return;
         }
         onReply(message);

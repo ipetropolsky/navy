@@ -68,6 +68,10 @@
     background: var(--color-bubble-in);
     color: var(--color-text);
     font: inherit;
+    // Плашка — `div` (см. MemberForm.tsx), а он выравнивает текст по левому краю; кнопка
+    // выравнивала бы по центру сама. Длинная строчка характеристик переносится, и без этого
+    // вторая строка вставала бы не под первой.
+    text-align: center;
     cursor: pointer;
 }
 

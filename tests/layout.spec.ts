@@ -885,7 +885,7 @@ const edgeGap = (page: Page): Promise<number> =>
 test('корабль не встаёт бортом на обрез кадра, и поле у него одно на всех экранах', async ({ page }) => {
     await openNewChannel(page, 'polya');
     // Самый крупный корабль справочника стоит в списке первым: проекты идут по убыванию длины.
-    await page.locator('button:has([class*="portraitShip"])').first().click();
+    await page.locator('[role="button"]:has([class*="portraitShip"])').first().click();
     await page.locator('[data-berth="9-left"]').click();
     await join(page, 'Гроза', '404');
     // Ход у самого крупного корабля на ближней линии долгий, и меряться он мешает: по дороге
