@@ -16,9 +16,15 @@ import { MagnetSettings, normalizeMagnets, settleMagnet, trackFling } from '@/ut
  *
  * Механика одна на всех, кого в приложении тянут: на шторки (список кораблей, карточка корабля,
  * прощание с рейдом) и на форму своего корабля, которую приспускают, чтобы разглядеть рейд
- * под ней. Различаются они только настройками — точками магнита и осью, — а правила движения
- * у них общие, и общими они должны и остаться: разойдись они хоть чем, один и тот же бросок
- * пальца закрывал бы одно и не закрывал другое.
+ * под ней. Различаются они только точками магнита, а правила движения у них общие, и общими
+ * они должны и остаться: разойдись они хоть чем, один и тот же бросок пальца закрывал бы одно
+ * и не закрывал другое.
+ *
+ * Тянут всегда вниз. Сбоку, в боковой панели на десктопе, коробку двигают за полоску на её
+ * кромке — так двигают панели все настольные приложения (см. коридор в App.tsx). Прежде её
+ * там тянули за любое место вбок, и это движение спорило с выделением текста: вдоль строки
+ * ходят оба, и различать их приходилось по тому, попал ли указатель в букву. Полоска
+ * этот спор снимает целиком.
  *
  * Считается всё в открытости: сколько коробки видно над её кромкой. Наружу отдаётся обратное —
  * сдвиг от раскрытого положения: рисуют коробку именно им.
@@ -32,25 +38,12 @@ import { MagnetSettings, normalizeMagnets, settleMagnet, trackFling } from '@/ut
  */
 const DRAG_SLOP = 4;
 
-/**
- * Вдоль какой оси коробка ходит: вниз или вбок.
- *
- * Шторки ходят вниз всегда — они приезжают снизу и уходят туда же. Форма корабля стоит в той же
- * коробке, что и разговор, а та в горизонтальном окне переезжает к правой кромке и меряется
- * шириной (см. hooks/useLayout): приспускают её там вбок, а не вниз.
- */
-export type SheetAxis = 'y' | 'x';
-
-/** Мотается ли этот блок сам вдоль нашей оси: и разрешено, и есть что мотать. */
-const scrolls = (node: Element, axis: SheetAxis): boolean => {
-    const style = getComputedStyle(node);
-    const overflow = axis === 'x' ? style.overflowX : style.overflowY;
-    const room = axis === 'x' ? node.scrollWidth - node.clientWidth : node.scrollHeight - node.clientHeight;
+/** Мотается ли этот блок сам: и разрешено, и есть что мотать. */
+const scrolls = (node: Element): boolean => {
+    const room = node.scrollHeight - node.clientHeight;
+    const overflow = getComputedStyle(node).overflowY;
     return (overflow === 'auto' || overflow === 'scroll') && room > 0;
 };
-
-/** Насколько этот блок уже промотан вдоль нашей оси. */
-const scrolled = (node: HTMLElement, axis: SheetAxis): number => (axis === 'x' ? node.scrollLeft : node.scrollTop);
 
 /**
  * Ближайшая своя прокрутка под указателем — где-то между ним и самой коробкой.
@@ -60,49 +53,13 @@ const scrolled = (node: HTMLElement, axis: SheetAxis): number => (axis === 'x' ?
  * лежит ручка, а на то, есть ли под пальцем что мотать, — и кому достанется движение, решаем
  * уже по нему (см. `move` ниже).
  */
-const ownScroller = (target: EventTarget | null, root: HTMLElement, axis: SheetAxis): HTMLElement | null => {
+const ownScroller = (target: EventTarget | null, root: HTMLElement): HTMLElement | null => {
     for (let node = target instanceof Element ? target : null; node && node !== root; node = node.parentElement) {
-        if (node instanceof HTMLElement && scrolls(node, axis)) {
+        if (node instanceof HTMLElement && scrolls(node)) {
             return node;
         }
     }
     return null;
-};
-
-/**
- * Стоит ли указатель на самой букве, а не на поле вокруг неё.
- *
- * Нужно это одной боковой раскладке. Вдоль строки ходят два разных движения — потяг за коробку
- * и выделение текста, — и различить их можно только по тому, с чего движение началось: с буквы
- * значит выделяют, с поля вокруг — тянут. Вниз никто не выделяет, и там вопроса нет вовсе.
- *
- * Мерено по самим буквам, а не по блоку под ними: строчка характеристик корабля лежит в плашке
- * во всю ширину формы, и «попал в блок» значило бы «попал куда угодно правее текста».
- * Место, где выделять нечего, потягу и достаётся.
- */
-const onLetters = (target: EventTarget | null, at: { clientX: number; clientY: number }): boolean => {
-    // Там, где выделять запрещено, спорить не о чем: подпись кнопки не выделяется и не должна.
-    if (!(target instanceof Element) || getComputedStyle(target).userSelect === 'none') {
-        return false;
-    }
-    const range = document.createRange();
-    // Только свои буквы, без вложенных блоков: до них указатель добрался бы сам — событие
-    // приходит с того места, на которое нажали, а не с его родителя.
-    const letters = [...target.childNodes].filter(
-        (node) => node.nodeType === Node.TEXT_NODE && node.textContent?.trim()
-    );
-    return letters.some((node) => {
-        range.selectNodeContents(node);
-        // Прямоугольник на каждую строку: перенесённая надпись занимает не одну полосу,
-        // и общая рамка вокруг них накрыла бы и поле справа от короткой последней строки.
-        return [...range.getClientRects()].some(
-            (line) =>
-                at.clientX >= line.left &&
-                at.clientX <= line.right &&
-                at.clientY >= line.top &&
-                at.clientY <= line.bottom
-        );
-    });
 };
 
 export interface SheetDragSettings {
@@ -115,13 +72,11 @@ export interface SheetDragSettings {
     onClose: () => void;
     /** Где ей позволено останавливаться (см. `@/utils/magnet`). */
     magnet: MagnetSettings;
-    /** Вдоль какой оси её тянут. По умолчанию вниз — так ходят все шторки. */
-    axis?: SheetAxis;
 }
 
 export interface SheetDrag {
     /**
-     * Сдвиг от раскрытого положения, px: вниз по своей оси. Пока тянут — идёт за пальцем без
+     * Сдвиг от раскрытого положения, px: вниз. Пока тянут — идёт за пальцем без
      * перехода; отпустили — остаётся тем, на чём коробка встала, и она приезжает туда переходом.
      * `null` — «на своём месте по стилям»: раскрыта целиком или как раз уезжает.
      */
@@ -148,7 +103,7 @@ export interface SheetDrag {
  * видна целиком. Меряется он на каждый потяг заново — по тому самому блоку, за который взялись:
  * содержимое могло вырасти, а окно смениться.
  */
-export const useSheetDrag = ({ open, onClose, magnet, axis = 'y' }: SheetDragSettings): SheetDrag => {
+export const useSheetDrag = ({ open, onClose, magnet }: SheetDragSettings): SheetDrag => {
     const [shift, setShift] = useState<number | null>(null);
     const [dragging, setDragging] = useState(false);
     // Перетаскивание кончается тем же click, что и нажатие, — и кончается им где угодно,
@@ -183,36 +138,24 @@ export const useSheetDrag = ({ open, onClose, magnet, axis = 'y' }: SheetDragSet
         }
     }, [open, drop]);
 
-    /**
-     * Сменилась ось — сдвиг больше ничего не значит: мерян он по высоте, а коробка отныне
-     * меряется шириной. Случается это при смене раскладки, то есть при повороте телефона,
-     * и приспущенная форма обязана встать на своё место в новом окне, а не уехать вбок
-     * ровно на столько, на сколько её опустили в старом.
-     */
-    useEffect(() => drop(), [axis, drop]);
-
     const onPointerDown = (event: ReactPointerEvent<HTMLElement>) => {
         // Блок, за который взялись. Запоминаем его сразу: обработчики ниже зовутся уже после
         // того, как React прибрал за собой событие, и `currentTarget` в них пуст.
         const box = event.currentTarget;
         // Вторичные кнопки мыши коробку не тянут: у правой своё дело — меню. Текстовое поле
-        // тоже не тянет: движение по нему ставит курсор и выделяет набранное. И буквы не тянут,
-        // когда коробку отодвигают вбок: вдоль строки то же движение выделяет текст, и человек,
-        // ведущий указатель по характеристикам корабля, выделяет их, а не отодвигает форму.
-        if (event.button !== 0 || isTextField(event.target) || (axis === 'x' && onLetters(event.target, event))) {
+        // тоже не тянет: движение по нему ставит курсор и выделяет набранное.
+        if (event.button !== 0 || isTextField(event.target)) {
             return;
         }
         // Что мотается под пальцем, если мотается вообще. Само по себе оно потяг не отменяет:
         // кому достанется движение, видно только по его направлению и по тому, домотано ли
         // содержимое до верха, — а этого в момент нажатия ещё не знает никто. Решение поэтому
         // отложено до первого шага (см. `move`).
-        const scroller = ownScroller(event.target, box, axis);
-        // Где палец вдоль той оси, по которой коробка и ходит. Дальше числа одни и те же:
-        // «дальше по оси» значит «коробки видно меньше» в обеих раскладках.
-        const along = (point: { clientX: number; clientY: number }) => (axis === 'x' ? point.clientX : point.clientY);
+        const scroller = ownScroller(event.target, box);
+        // Где палец по вертикали: «ниже» значит «коробки видно меньше».
+        const along = (point: { clientY: number }) => point.clientY;
         const startAt = along(event);
-        const rect = box.getBoundingClientRect();
-        const run = axis === 'x' ? rect.width : rect.height;
+        const run = box.getBoundingClientRect().height;
         const points = normalizeMagnets(magnet.points ?? [], run, magnet.gap);
         const lowest = points.length ? points[0] : 0;
         const highest = points.length ? points[points.length - 1] : run;
@@ -251,7 +194,7 @@ export const useSheetDrag = ({ open, onClose, magnet, axis = 'y' }: SheetDragSet
                 //
                 // Направление и место прокрутки смотрим один раз, на первом шаге: перехватывать
                 // движение посреди пути нельзя — палец у нижнего края то листал бы, то закрывал.
-                if (scroller && (way < 0 ? startOpen >= highest : scrolled(scroller, axis) > 0)) {
+                if (scroller && (way < 0 ? startOpen >= highest : scroller.scrollTop > 0)) {
                     // eslint-disable-next-line @typescript-eslint/no-use-before-define -- отписка объявлена ниже, а зовётся отсюда уже после
                     stopListening();
                     return;
