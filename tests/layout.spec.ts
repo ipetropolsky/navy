@@ -3688,3 +3688,132 @@ test('подведённая к правой кромке кромка убир�
     await page.waitForTimeout(600);
     expect(await chatWidth(page), 'разговор вернулся не в свой размер').toBe(Math.round(LYING.width * CHAT_SHARE));
 });
+
+/**
+ * Приспущенная форма своего корабля.
+ *
+ * Место на рейде выбирают в форме, а форма занимает под собой ту же треть экрана, что
+ * и разговор, — отметки ближних мест жмутся к самой её кромке, и разглядеть их нечем. Чтобы
+ * их разглядеть, форму приспускают потягом: коробка уходит вниз (сбоку — вправо), кадр
+ * раздаётся на освободившееся, отметки разъезжаются. Отпущенная у своей кромки, коробка
+ * встаёт обратно; утянутая до конца — закрывает форму совсем.
+ *
+ * Едет при этом вся коробка, а не одна форма: под формой стоит разговор, и уйди она одна,
+ * из-под неё показался бы он, а не рейд.
+ */
+
+/** Заголовок формы: за него её и берут — это ни поле, ни кнопка. */
+const formGrip = async (page: Page, title: string): Promise<{ x: number; y: number }> => {
+    const box = (await page.getByRole('heading', { name: title }).boundingBox())!;
+    return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+};
+
+/**
+ * Приспустить форму на `by` пикселей и поставить. Под кадром её ведут вниз, сбоку — вправо:
+ * коробка там стоит у правой кромки, и «приспустить» значит отодвинуть её туда.
+ *
+ * Перед отпусканием палец стоит дольше отрезка, на котором меряется усилие (`FLING_MS`), —
+ * то есть форму именно подвели, а не бросили, и приезжает она туда, куда её привели.
+ */
+const lowerForm = async (page: Page, title: string, by: number, axis: 'y' | 'x' = 'y'): Promise<void> => {
+    const { x, y } = await formGrip(page, title);
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(axis === 'x' ? x + by : x, axis === 'x' ? y : y + by, { steps: 12 });
+    await page.waitForTimeout(FLING_MS * 3);
+    await page.mouse.up();
+    await page.waitForTimeout(600);
+};
+
+/**
+ * Потяг за форму отдаёт кадру ровно то, на сколько форму увели, — и отдаёт это сразу, пока
+ * палец ещё ведёт. Проверяется вся дорога целиком: приспустили, кадр раздался, отметки мест
+ * разъехались, разговор поехал вместе с формой; подвели обратно к кромке — форма встала
+ * на место; утянули до конца — закрылась совсем.
+ *
+ * Точек у формы две, закрыто и на месте, а между ними она вольна стоять где угодно (`free`):
+ * рейд разглядывают на любую нужную глубину, а не на одну заранее выбранную.
+ */
+test('приспущенная форма отдаёт кадру своё место, а отпущенная у кромки встаёт обратно', async ({ page }) => {
+    await page.setViewportSize(PHONE);
+    await openChannel(page, DEMO, ALBATROS);
+    await openSheet(page);
+    await page.getByRole('button', { name: 'Настроить корабль' }).click();
+    await page.waitForTimeout(600);
+
+    const stood = await boxOf(page, '[class*="form_"]');
+    const sceneStood = (await boxOf(page, 'header')).height;
+    const spanStood = await berthSpan(page);
+    expect(stood.top + stood.height, 'форма встала не на нижнюю кромку окна').toBe(PHONE.height);
+
+    // Ведём форму вниз на 120: до обеих её точек оттуда далеко, и она остаётся, где поставили.
+    await lowerForm(page, 'Настроить корабль', 120);
+
+    const low = await boxOf(page, '[class*="form_"]');
+    expect(low.top - stood.top, 'форма не поехала за пальцем').toBe(120);
+    // Кадр раздаётся ровно на то, что форма отдала: щели между ними не бывает.
+    expect((await boxOf(page, 'header')).height - sceneStood, 'кадр не забрал освободившееся').toBe(120);
+    // Рейд разъезжается вместе с кадром — ради этого потяг и затеян.
+    expect(await berthSpan(page), 'отметки мест не разъехались').toBeGreaterThan(spanStood);
+    // Разговор едет вместе с формой: коробка внизу экрана у них одна. Уйди форма одна,
+    // из-под неё показался бы он, а не рейд.
+    expect((await boxOf(page, 'main')).top - stood.top, 'разговор остался стоять под приспущенной формой').toBe(120);
+
+    // Подвели обратно к кромке — форма встала на место: двадцать оставшихся пикселей ближе
+    // к точке, чем MAGNET_PULL.
+    await lowerForm(page, 'Настроить корабль', -100);
+    expect((await boxOf(page, '[class*="form_"]')).top, 'форма не вернулась на место').toBe(stood.top);
+    expect((await boxOf(page, 'header')).height, 'кадр не отдал место обратно').toBe(sceneStood);
+
+    // Утянутая до конца — закрывается совсем, и разговор остаётся там же, где стоял.
+    const grip = await formGrip(page, 'Настроить корабль');
+    await flingAt(page, grip.x, grip.y, 160);
+    await expect(page.getByRole('heading', { name: 'Настроить корабль' }), 'форма не закрылась').toHaveCount(0);
+    expect((await boxOf(page, 'main')).top, 'разговор не вернулся на своё место').toBe(stood.top);
+});
+
+/**
+ * Тем же потягом закрывается и форма постановки в строй — обратно в свою единственную кнопку.
+ * Кнопки «отмена» у неё поэтому нет вовсе: закрывает её движение, а не ещё одна кнопка рядом
+ * с «Встать на рейд».
+ *
+ * Набранное закрытие переживает: это одна форма в двух видах, и в закрытом её держат на месте,
+ * а не разбирают.
+ */
+test('форму постановки в строй закрывает тот же потяг, а набранное в ней остаётся', async ({ page }) => {
+    await page.setViewportSize(PHONE);
+    await openChannel(page, DEMO);
+    await openJoinForm(page);
+    await page.getByPlaceholder('Гром').fill('Гроза');
+
+    const grip = await formGrip(page, 'Встать на рейд');
+    await flingAt(page, grip.x, grip.y, 160);
+
+    await expect(page.getByRole('button', { name: 'Встать на рейд' }), 'форма не свернулась').toBeVisible();
+    await expect(page.getByPlaceholder('Гром'), 'поля остались на экране').toHaveCount(0);
+
+    await openJoinForm(page);
+    await expect(page.getByPlaceholder('Гром'), 'набранное потерялось при закрытии').toHaveValue('Гроза');
+});
+
+/**
+ * Сбоку коробка стоит у правой кромки и меряется шириной — приспускают её там вбок, а не вниз:
+ * форма отодвигается вправо, кадр раздаётся вширь. Правило то же самое, ось другая.
+ */
+test('сбоку форму отодвигают вправо, и кадр раздаётся вширь', async ({ page }) => {
+    await openSide(page);
+    await openSheet(page);
+    await page.getByRole('button', { name: 'Настроить корабль' }).click();
+    await page.waitForTimeout(600);
+
+    const stood = await boxOf(page, '[class*="form_"]');
+    const frameStood = (await boxOf(page, 'header')).width;
+    expect(stood.right, 'форма встала не у правой кромки окна').toBe(WIDE.width);
+
+    await lowerForm(page, 'Настроить корабль', 120, 'x');
+
+    expect((await boxOf(page, '[class*="form_"]')).left - stood.left, 'форма не отодвинулась вправо').toBe(120);
+    expect((await boxOf(page, 'header')).width - frameStood, 'кадр не забрал освободившееся').toBe(120);
+    // Разговор под формой отъехал вместе с ней: коробка у них одна и сбоку тоже.
+    expect((await boxOf(page, 'main')).left - stood.left, 'разговор остался стоять под формой').toBe(120);
+});

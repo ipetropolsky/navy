@@ -1,30 +1,14 @@
-import {
-    CSSProperties,
-    MouseEvent as ReactMouseEvent,
-    PointerEvent as ReactPointerEvent,
-    ReactNode,
-    useEffect,
-    useRef,
-    useState,
-} from 'react';
+import { CSSProperties, ReactNode } from 'react';
 
+import { useSheetDrag } from '@/hooks/useSheetDrag';
 import { useSlide } from '@/hooks/useSlide';
-import { isTextField } from '@/utils/keyboard';
-import { MagnetSettings, normalizeMagnets, settleMagnet, trackFling } from '@/utils/magnet';
+import { MagnetSettings } from '@/utils/magnet';
 
 import IconButton from '@/components/ui/IconButton';
 import { useShadeFloor } from '@/components/ui/ShadeStack';
 import TopFade from '@/components/ui/TopFade';
 
 import styles from './Shade.module.less';
-
-/**
- * Сколько палец должен пройти, чтобы это считалось перетаскиванием, px. Меньше — нажатие:
- * попасть в шторку и не сдвинуть её на пиксель-другой невозможно, и без этого зазора каждое
- * нажатие оборачивалось бы рывком. Тем же зазором отделяется нажатие на кнопку внутри шторки
- * от потяга за то место, где она лежит.
- */
-const DRAG_SLOP = 4;
 
 /**
  * Магнит по умолчанию: два положения, закрыто и раскрыто по содержимому, и ничего между ними.
@@ -37,29 +21,6 @@ const DRAG_SLOP = 4;
  * а рост ей задаёт содержимое.
  */
 const DEFAULT_MAGNET: MagnetSettings = { points: [0, '100%'] };
-
-/** Мотается ли этот блок сам: и разрешено, и есть что мотать. */
-const scrolls = (node: Element): boolean => {
-    const overflow = getComputedStyle(node).overflowY;
-    return (overflow === 'auto' || overflow === 'scroll') && node.scrollHeight > node.clientHeight;
-};
-
-/**
- * Ближайшая своя прокрутка под указателем — где-то между ним и самой шторкой.
- *
- * Тянуть шторку можно за любое место, но список и всё, что мотается само, должны мотаться,
- * а не превращать каждое движение пальца в закрытие. Смотрим поэтому не на то, где именно
- * лежит ручка, а на то, есть ли под пальцем что мотать, — и кому достанется движение, решаем
- * уже по нему (см. `handlePointerDown`).
- */
-const ownScroller = (target: EventTarget | null, root: HTMLElement): HTMLElement | null => {
-    for (let node = target instanceof Element ? target : null; node && node !== root; node = node.parentElement) {
-        if (node instanceof HTMLElement && scrolls(node)) {
-            return node;
-        }
-    }
-    return null;
-};
 
 interface ShadeProps {
     /** Открыта ли шторка. Закрытая ещё едет вниз и потому какое-то время остаётся на экране. */
@@ -130,6 +91,10 @@ interface ShadeProps {
  *
  * Едет она сдвигом, а не высотой: высоту ей задаёт содержимое, и разводить её во времени
  * значило бы перекладывать содержимое на каждом кадре выезда.
+ *
+ * Сам потяг — общий (см. hooks/useSheetDrag): так же тянут и форму своего корабля, которую
+ * приспускают, чтобы разглядеть рейд под ней. Шторке остаётся сказать, где ей позволено
+ * останавливаться, и нарисовать себя по тому сдвигу, который потяг насчитал.
  */
 export default function Shade({
     open,
@@ -140,173 +105,14 @@ export default function Shade({
     magnet = DEFAULT_MAGNET,
     children,
 }: ShadeProps) {
-    const shadeRef = useRef<HTMLElement>(null);
     const { mounted, onTransitionEnd } = useSlide(open);
     // Этаж в стопке: открытая позже лежит выше открытой раньше, а не так, как их написали
     // в разметке. Считает его ShadeStack, он же и закрывает нижние, если эта не `cover`.
     const floor = useShadeFloor(mounted, onClose, cover);
-    // Сдвиг вниз от раскрытого положения, px. Пока тянут — идёт за пальцем без перехода;
-    // отпустили — остаётся тем, на чём шторка встала, и она приезжает туда переходом.
-    // `null` — «на своём месте по стилям»: раскрыта целиком или как раз уезжает.
-    const [shift, setShift] = useState<number | null>(null);
-    // Тянут ли прямо сейчас. Отдельно от сдвига: сдвиг остаётся и после отпускания, если шторка
-    // встала не на верхнюю точку, а вот переход снимается ровно на время движения пальца.
-    const [dragging, setDragging] = useState(false);
-    // Перетаскивание кончается тем же click, что и нажатие, — и кончается им где угодно,
-    // хоть на кнопке внутри шторки. Флаг гасит этот click: без него потяг за строку списка
-    // заодно нажимал бы то, с чего начали.
-    const draggedRef = useRef(false);
-    // Чем оборвать незаконченный потяг снаружи. Пишется на время движения, зовётся при закрытии.
-    const dropDragRef = useRef<() => void>(() => undefined);
-
-    /**
-     * Закрытие отменяет потяг, чем бы тот ни кончился.
-     *
-     * Движение пальца обрывается чаще, чем кажется: указатель отпустили за краем окна, касание
-     * забрал браузер, вкладку увели. После такого обрыва на шторке остаётся и сдвиг, и снятый
-     * на время движения переход — и оба спорят с уходом. Сдвиг стоит в стиле самого блока
-     * и оказывается сильнее `translateY(100%)` из класса, а без перехода уход не начинается
-     * вовсе; между тем снимают шторку с экрана именно по концу этого перехода. Выходило, что
-     * затемнение гасло, а шторка оставалась висеть навсегда — и на следующем открытии молча
-     * подменяла корабль в себе на другой.
-     */
-    useEffect(() => {
-        if (open) {
-            return;
-        }
-        dropDragRef.current();
-        dropDragRef.current = () => undefined;
-        setDragging(false);
-        setShift(null);
-    }, [open]);
-
-    const handlePointerDown = (event: ReactPointerEvent<HTMLElement>) => {
-        const shade = shadeRef.current;
-        // Вторичные кнопки мыши шторку не тянут: у правой своё дело — меню. Текстовое поле
-        // тоже не тянет: движение по нему ставит курсор и выделяет набранное.
-        if (!shade || event.button !== 0 || isTextField(event.target)) {
-            return;
-        }
-        // Что мотается под пальцем, если мотается вообще. Само по себе оно потяг не отменяет:
-        // кому достанется движение, видно только по его направлению и по тому, домотано ли
-        // содержимое до верха, — а этого в момент нажатия ещё не знает никто. Решение поэтому
-        // отложено до первого шага (см. `move`).
-        const scroller = ownScroller(event.target, shade);
-        const startY = event.clientY;
-        // Ход шторки — её собственный рост: она приезжает снизу, и раскрыта ровно тогда, когда
-        // видна целиком. Точки считаются от него же — и заново на каждый потяг: содержимое
-        // могло вырасти, а окно смениться.
-        const height = shade.getBoundingClientRect().height;
-        const points = normalizeMagnets(magnet.points ?? [], height, magnet.gap);
-        const lowest = points.length ? points[0] : 0;
-        const highest = points.length ? points[points.length - 1] : height;
-        // Открытость на момент, когда шторку взяли: сколько её видно над нижней кромкой.
-        const startOpen = height - (shift ?? 0);
-        const drag = { moved: false, shift: shift ?? 0 };
-        // Чем кончилось движение пальца: по последним его отметкам и считается скорость
-        // в момент отпускания. Мерка общая со всеми, кого тянут, — см. `trackFling`.
-        const fling = trackFling();
-
-        const move = (moveEvent: PointerEvent) => {
-            if (moveEvent.pointerId !== event.pointerId) {
-                return;
-            }
-            if (!drag.moved) {
-                const way = moveEvent.clientY - startY;
-                if (Math.abs(way) <= DRAG_SLOP) {
-                    return;
-                }
-                // Прокрутка главнее ровно до тех пор, пока ей есть куда мотаться: вверх она
-                // забирает движение всегда, вниз — пока не домотана до верха. Домотанный список
-                // вниз больше не едет, и движение по нему остаётся ничьим — а человек в этот
-                // момент тянет шторку и ждёт, что она закроется.
-                //
-                // Заметнее всего это на карточке корабля: стоит содержимому перерасти короткое
-                // окно, как своя прокрутка появляется у всей карточки — то есть у всего, что
-                // в шторке видно. Потяг вниз доставался ей отовсюду, и закрыть шторку выходило
-                // только за рисочку ручки или крестиком.
-                //
-                // Направление и место прокрутки смотрим один раз, на первом шаге: перехватывать
-                // движение посреди пути нельзя — палец у нижнего края то листал бы, то закрывал.
-                if (scroller && (way < 0 || scroller.scrollTop > 0)) {
-                    // eslint-disable-next-line @typescript-eslint/no-use-before-define -- отписка объявлена ниже, а зовётся отсюда уже после
-                    stopListening();
-                    return;
-                }
-                drag.moved = true;
-                setDragging(true);
-                // Выделение, начатое этим же движением, снимаем: тянут шторку, а не выделяют
-                // текст. Дальше его не даёт набрать `user-select` (см. .shadeDragging).
-                window.getSelection()?.removeAllRanges();
-            }
-            // Отмечаем то, куда палец увёл шторку, а не то, где он сам: скорость считается
-            // в открытости, и упереться в предел она не должна — брошенная за нижнюю точку
-            // шторка обязана долететь до конца, а не потерять на упоре весь разгон.
-            fling.mark(startOpen - (moveEvent.clientY - startY), moveEvent.timeStamp);
-            // За пределы своих точек шторка не выходит ни вверх, ни вниз: выше верхней её
-            // и так не видно целиком, ниже нижней — не видно вовсе.
-            const opened = Math.min(Math.max(startOpen - (moveEvent.clientY - startY), lowest), highest);
-            drag.shift = height - opened;
-            setShift(drag.shift);
-        };
-
-        // Отписка объявлена раньше самих обработчиков: она им и нужна — движение кончается тем,
-        // что мы перестаём его слушать.
-        const stopListening = () => {
-            window.removeEventListener('pointermove', move);
-            // eslint-disable-next-line @typescript-eslint/no-use-before-define -- взаимная ссылка: отписка снимает обработчик, обработчик её зовёт
-            window.removeEventListener('pointerup', up);
-            // eslint-disable-next-line @typescript-eslint/no-use-before-define -- то же самое
-            window.removeEventListener('pointercancel', up);
-        };
-
-        const up = (upEvent: PointerEvent) => {
-            stopListening();
-            setDragging(false);
-            if (!drag.moved) {
-                return;
-            }
-            draggedRef.current = true;
-            const settled = settleMagnet({
-                from: startOpen,
-                to: height - drag.shift,
-                velocity: fling.speed(upEvent.timeStamp),
-                points,
-                free: magnet.free,
-                pull: magnet.pull,
-            });
-            // Закрытой шторки на экране не бывает: съехавшую в ноль убирают совсем, и уезжает
-            // она обычным уходом — сдвиг с неё поэтому снимаем, иначе он спорил бы с ним.
-            if (settled <= 0) {
-                setShift(null);
-                onClose();
-                return;
-            }
-            setShift(settled >= height ? null : height - settled);
-        };
-
-        // Слушаем окно, а не саму шторку: первый же шаг вниз выносит палец за её кромку,
-        // и обработчик на шторке не увидел бы дальше ничего. Захват указателя
-        // (setPointerCapture) вместо этого не годится — он уводит к шторке и нажатия,
-        // и ни одна кнопка внутри неё больше не нажималась бы.
-        window.addEventListener('pointermove', move);
-        window.addEventListener('pointerup', up);
-        window.addEventListener('pointercancel', up);
-        dropDragRef.current = stopListening;
-    };
-
-    /**
-     * Нажатие, которым кончилось перетаскивание, до содержимого не доходит: тянут шторку
-     * за любое место, в том числе за кнопку. Ловится оно на погружении — до всех обработчиков
-     * внутри.
-     */
-    const handleClickCapture = (event: ReactMouseEvent<HTMLElement>) => {
-        if (draggedRef.current) {
-            draggedRef.current = false;
-            event.preventDefault();
-            event.stopPropagation();
-        }
-    };
+    // Потяг — общая механика (см. hooks/useSheetDrag): за любое место, кроме текстового поля,
+    // своя прокрутка внутри забирает движение себе, а отпущенная шторка приезжает к своей точке.
+    // Шторка ходит вниз всегда — она и приезжает снизу, — и ось потягу поэтому не задаётся.
+    const { shift, dragging, handlers } = useSheetDrag({ open, onClose, magnet });
 
     if (!mounted) {
         return null;
@@ -314,7 +120,7 @@ export default function Shade({
 
     const leaving = !open;
     // Уходящая шторка потяга под собой не помнит — и помнить не должна ни кадра. Отменяет его
-    // и эффект выше, но тот случается после отрисовки, а тут нужен тот самый первый кадр,
+    // и сам потяг, но делает это после отрисовки, а тут нужен тот самый первый кадр,
     // в котором появился класс ухода: не будь на нём ни сдвига, ни снятого перехода, уход
     // и начинается с него.
     const held = leaving ? null : shift;
@@ -357,9 +163,7 @@ export default function Shade({
                     } as CSSProperties
                 }
                 aria-label={label}
-                ref={shadeRef}
-                onPointerDown={handlePointerDown}
-                onClickCapture={handleClickCapture}
+                {...handlers}
                 onTransitionEnd={onTransitionEnd}
             >
                 {/* Ручка — рисунок, а не кнопка: она говорит «меня можно тянуть», и только.
