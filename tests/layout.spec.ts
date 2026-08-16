@@ -1987,48 +1987,76 @@ test('кнопка в шапке не уходит под кромку разг�
  * всё вместе. Отдельной кнопки в шапке для этого больше нет — список это и есть «кто в этом
  * канале», и спрашивают о нём, тыча в его название.
  *
+ * Нажимается при этом весь блок, обе строчки: и название со значком, и «сколько на связи»
+ * под ним. Строчка отвечает на тот же вопрос, что и список, и мимо названия палец попадает
+ * в неё чаще, чем в само название.
+ *
  * Заодно проверяется отклик на наведение: подсвечивается вся кнопка разом — и название,
  * и значок, — потому что нажимается она целиком. Подсветка именно подсветка, а не другой
  * цвет: акцентным название читалось бы ссылкой куда-то наружу, хотя открывает свою же
- * шторку (см. .chatTitleButton в стилях).
+ * шторку (см. .chatTitleButton в стилях). Значок при этом ровно того же цвета, что и буквы
+ * рядом: он часть названия, а не приставленная к нему кнопка.
  */
-test('список кораблей открывается названием канала со значком на конце', async ({ page }) => {
+test('список кораблей открывается всем блоком названия, и значок в цвет букв', async ({ page }) => {
     await openChannel(page, DEMO, ALBATROS);
     const title = shipsButton(page);
 
     const parts = await title.evaluate((node) => {
-        const name = node.querySelector('span')!;
-        const icon = node.querySelector('svg')!.getBoundingClientRect();
+        const name = node.querySelector('[class*="chatTitleName"]')!;
+        const status = node.querySelector('[class*="chatStatus"]')!;
+        const icon = node.querySelector('svg')!;
+        const box = icon.getBoundingClientRect();
         return {
             nameRight: name.getBoundingClientRect().right,
-            iconLeft: icon.left,
-            iconRight: icon.right,
+            iconLeft: box.left,
+            iconRight: box.right,
             right: node.getBoundingClientRect().right,
             color: getComputedStyle(name).color,
-            iconOpacity: Number(getComputedStyle(node.querySelector('svg')!.parentElement!).opacity),
+            iconColor: getComputedStyle(icon.parentElement!).color,
+            // Строчка «сколько на связи» — внутри кнопки, а не рядом с ней: нажимается блок
+            // целиком.
+            statusInside: node.contains(status),
+            statusTop: status.getBoundingClientRect().top,
         };
     });
     expect(parts.iconLeft, 'значок стоит не в конце названия').toBeGreaterThanOrEqual(parts.nameRight);
     expect(parts.iconRight, 'значок вылез за пределы кнопки').toBeLessThanOrEqual(parts.right + 1);
-    expect(parts.iconOpacity, 'значок и без наведения в полный голос').toBeLessThan(1);
+    expect(parts.iconColor, 'значок не в цвет букв рядом').toBe(parts.color);
+    expect(parts.statusInside, 'строчка «сколько на связи» осталась за кнопкой').toBe(true);
 
-    // Наведение оживляет обе половины кнопки: название белеет, значок доходит до полного голоса.
+    // Наведение оживляет кнопку целиком: название белеет, а значок белеет вместе с ним —
+    // цвет у них один.
     await title.hover();
     // Подсветка приезжает переходом в 0.12s — читать её сразу значит поймать середину пути.
     await page.waitForTimeout(300);
-    const hovered = await title.evaluate((node) => ({
-        color: getComputedStyle(node.querySelector('span')!).color,
-        iconOpacity: Number(getComputedStyle(node.querySelector('svg')!.parentElement!).opacity),
-    }));
+    const hovered = await title.evaluate((node) => {
+        const name = node.querySelector('[class*="chatTitleName"]')!;
+        return {
+            color: getComputedStyle(name).color,
+            iconColor: getComputedStyle(node.querySelector('svg')!.parentElement!).color,
+        };
+    });
     expect(hovered.color, 'название не подсветилось под указателем').not.toBe(parts.color);
     expect(hovered.color, 'название подсветилось не белым, а другим цветом').toBe('rgb(255, 255, 255)');
-    expect(hovered.iconOpacity, 'значок не подсветился под указателем').toBe(1);
+    expect(hovered.iconColor, 'значок не пошёл за названием').toBe(hovered.color);
 
     // Нажатие в самое начало кнопки — по названию, мимо значка: открывает список и оно.
     await title.click({ position: { x: 4, y: 10 } });
     await expect(
         page.getByRole('region', { name: MEMBERS_SHADE }),
         'список не открылся нажатием на название'
+    ).toBeVisible();
+
+    // И нажатие по нижней строчке — тоже: блок один, и ведёт он в одно место. Открытый список
+    // сперва убираем крестиком: под открытой шторкой шапка лежит под затемнением, и нажать
+    // мимо неё нечем.
+    await page.getByRole('region', { name: MEMBERS_SHADE }).getByRole('button', { name: 'Закрыть' }).click();
+    await expect(page.getByRole('region', { name: MEMBERS_SHADE })).toBeHidden();
+    const box = (await title.boundingBox())!;
+    await page.mouse.click(box.x + 8, parts.statusTop + 6);
+    await expect(
+        page.getByRole('region', { name: MEMBERS_SHADE }),
+        'список не открылся нажатием на строчку «сколько на связи»'
     ).toBeVisible();
 });
 
