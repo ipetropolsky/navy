@@ -1,4 +1,4 @@
-import { Page, expect, test } from '@playwright/test';
+import { Page, expect } from '@playwright/test';
 
 import { EDGE_MARGIN } from '@/backend/placement';
 import {
@@ -37,6 +37,8 @@ import {
     shipNames,
     ships,
     shipsButton,
+    test,
+    unhasten,
 } from '@tests/helpers';
 
 /**
@@ -731,8 +733,9 @@ test.describe('десктоп', () => {
         expect(view.horizon / view.scene.height, 'небо на десктопе взяло не свою долю').toBeCloseTo(SKY_SHARE, 2);
     });
 
-    // Масштаб в списке один на всех, и линейка — единственное, что переводит его в метры.
-    // Ошибись тут на шаг — и катер молча станет корветом.
+    // Та же проверка, что и на телефоне, и повторяется она не зря: коридоры на телефоне сходятся
+    // круче, а места на дальних линиях стоят теснее — правило «место на воде и подписано» одно,
+    // а геометрия под ним разная по обе стороны мобильной мерки.
     test('места на рейде лежат на воде, а занятые подписаны', async ({ page }) => {
         await openChannel(page, DEMO);
         await openJoinForm(page);
@@ -1429,6 +1432,9 @@ declare global {
  * кнопка после этого убирает разговор всё тем же движением, что и до.
  */
 test('кадр встаёт в новый рост вместе с окном, а не едет к нему следом', async ({ page }) => {
+    // Время тут обычное: в конце проверка считает кадры движения, а ускоренный переезд
+    // уложился бы в три кадра экрана — движение от прыжка на таком не отличить.
+    await unhasten(page);
     await page.setViewportSize(STANDING);
     await openChannel(page, DEMO, ALBATROS);
 

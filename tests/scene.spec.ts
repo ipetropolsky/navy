@@ -1,4 +1,4 @@
-import { Page, expect, test } from '@playwright/test';
+import { Page, expect } from '@playwright/test';
 
 import { EDGE_MARGIN } from '@/backend/placement';
 import { slotShare } from '@/types/channel';
@@ -6,8 +6,10 @@ import { slotShare } from '@/types/channel';
 import {
     ALBATROS,
     DEMO,
+    TIME_SCALE,
     berths,
     clickShip,
+    hasten,
     join,
     leaveRaid,
     openChannel,
@@ -19,6 +21,8 @@ import {
     readState,
     ships,
     shipsButton,
+    test,
+    unhasten,
 } from '@tests/helpers';
 
 /**
@@ -47,11 +51,15 @@ const SPREAD_NEAR = 0.1;
 /**
  * Сколько ждать конца манёвра, мс. Мерка не запасная, а расчётная: самый длинный ход в кадре —
  * уход с ближней линии через весь рейд, — идёт на наименьшем ходу по кадру (`MIN_SAIL_PACE`)
- * около 53 с. Отсюда и минута с небольшим: меньше — и проверки начнут падать от того, что
- * корабль ещё в пути, а не от того, что он идёт не туда. Сбавят ход ещё — это число сбавляют
- * вместе с ним, иначе падение будет ждать полторы минуты вместо секунды.
+ * около 53 с, а под проверками во столько же раз меньше, во сколько ускорено время. Отсюда
+ * и запас: меньше — и проверки начнут падать от того, что корабль ещё в пути, а не от того,
+ * что он идёт не туда.
+ *
+ * Слагаемым, а не множителем: ускоряется ход корабля, а не открытие канала, загрузка картинок
+ * и постановка в строй, которые в это же ожидание попадают. Сбавят ход ещё — первое число
+ * сбавляют вместе с ним.
  */
-const SAIL_TIMEOUT = 70_000;
+const SAIL_TIMEOUT = 60_000 / TIME_SCALE + 10_000;
 
 /** Насколько боковое место этой линии отстоит от середины кадра, доля его ширины. */
 const berthOffset = (slot: number): number => CORRIDOR_STEP + SPREAD_FAR + (SPREAD_NEAR - SPREAD_FAR) * slotShare(slot);
@@ -221,7 +229,11 @@ test('на одной линии помещаются двое, и борта н
     await page.mouse.click(spot!.x + spot!.width / 2, spot!.y + spot!.height / 2);
     await expect(page.locator(`[data-berth="${shared}"][aria-pressed="true"]`)).toHaveCount(1);
     await join(page, 'Гроза', '777');
-    await page.waitForTimeout(1200);
+    // Ждём признак, а не время: борта сравнивать можно только со стоящими кораблями. Заходящий
+    // проходит над местом соседа по дороге к своему — застигнутый в этот миг, он с ним и
+    // «налезает». Прежде тут стояла пауза в 1200 мс, и держалась она на том, что за это время
+    // корабль не успевал дойти даже до середины пути.
+    await expect(page.locator('[data-motion]'), 'корабли так и не встали на места').toHaveCount(0);
 
     const after = await readState(page).then(
         (state) => Object.values(state.channels).find((item) => item.channel.slug === 'para')!.members
@@ -824,6 +836,9 @@ const crossed = (path: { ms: number; part: number }[], mark: number): number => 
 };
 
 test('разметка гаснет вместе с флотом, а не кадром', async ({ page }) => {
+    // Время тут обычное: замер идёт покадрово и с запасом в полсотни миллисекунд, а ускоренное
+    // высветление целиком короче этого запаса.
+    await unhasten(page);
     await openChannel(page, DEMO, ALBATROS);
     await openShipForm(page);
     // Ждём, пока флот договорит своё: замер идёт по долям пути, и начинать его посреди
@@ -1003,6 +1018,9 @@ test('ход корабля идёт с правдоподобной скоро�
     // в строй в той же вкладке уже не покажется, вкладка помнит, что корабль у неё есть.
     const seconds = async (kind: string): Promise<number> => {
         const context = await browser.newContext();
+        // Контекст свой, а значит и ускорение времени в нём своё: фикстура достаётся только
+        // тому контексту, который выдаёт сам `test`.
+        await hasten(context);
         const page = await context.newPage();
         await openNewChannel(page, `hod${kind.length}`);
         await join(page, `Гость${kind.length}`, String(100 + kind.length), kind);
@@ -1010,7 +1028,9 @@ test('ход корабля идёт с правдоподобной скоро�
         await expect(slot).toHaveCount(1);
         const value = await slot.evaluate((element) => getComputedStyle(element).getPropertyValue('--enter-seconds'));
         await context.close();
-        return Number.parseFloat(value);
+        // Обратно к обычному времени: проверяется правило, а правило записано в настоящих
+        // секундах хода, а не в тех, за которые его отыгрывают под ускорением.
+        return Number.parseFloat(value) * TIME_SCALE;
     };
 
     const cutter = await seconds('Пограничный сторожевой катер');

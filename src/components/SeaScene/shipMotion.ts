@@ -1,3 +1,4 @@
+import { paced } from '@/config/time';
 import {
     ISLAND_FREE_SLOT,
     ISLAND_SIDE,
@@ -188,10 +189,15 @@ export const pathToEdge = (
  * Скорость здесь средняя по манёвру, а не мгновенная: корабль и так трогается с нуля и в ноль
  * приходит, поэтому «столько-то метров за столько-то секунд» — честная мерка, а как скорость
  * распределится внутри прогона, решает кривая в стилях.
+ *
+ * Готовое число делится на скорость времени (см. config/time): под проверками весь кадр живёт
+ * быстрее, и ход — первое, что там незачем пережидать. Делится оно в самом конце, одним местом
+ * на все манёвры: соотношения между ними от этого не меняются, а разъехаться с длительностями
+ * в стилях, поделёнными на ту же мерку, нечему.
  */
 export const sailSeconds = (pathPercent: number, slot: number, kind: ShipKind, astern: boolean): number => {
     const metres = pathPercent * metresPerPercent(slot);
-    return Math.min(metres / sailSpeed(metres, kind, astern), pathPercent / MIN_SAIL_PACE);
+    return paced(Math.min(metres / sailSpeed(metres, kind, astern), pathPercent / MIN_SAIL_PACE));
 };
 
 /**

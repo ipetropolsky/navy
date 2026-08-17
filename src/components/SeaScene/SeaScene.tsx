@@ -19,6 +19,7 @@ import skyUrl from '@/assets/scene/sky.png';
 import { fleetLefts, restingLeft } from '@/backend';
 import MemberName from '@/components/ships/MemberName';
 import Ship from '@/components/ships/Ship';
+import { paced } from '@/config/time';
 import {
     Berth,
     CORRIDORS,
@@ -118,12 +119,15 @@ const SCENE_IMAGES = [skyUrl, moonUrl, cloudFarUrl, cloudNearUrl, islandUrl, sea
 
 // Сколько корабль пропадает из виду, перезаходя на другой слот. Пауза нужна, чтобы уход
 // и заход читались как два разных манёвра, а не как рывок из одного края кадра в другой.
-const RELOCATE_PAUSE_MS = 3000;
+//
+// Она часть манёвра, а не отсрочка перед ним, — поэтому идёт по той же скорости времени,
+// что и сам ход (см. config/time). Иначе ускоренный перезаход состоял бы почти из одной паузы.
+const RELOCATE_PAUSE_MS = paced(3000);
 
 // Сколько длится кивок, с. Сама длительность живёт в стилях (@nod-seconds), здесь она нужна
 // затем, чтобы вовремя снять класс: анимация запускается его появлением, и оставшийся класс
-// не дал бы кораблю кивнуть во второй раз.
-const NOD_SECONDS = 3.5;
+// не дал бы кораблю кивнуть во второй раз. Скорость времени делит обе одинаково.
+const NOD_SECONDS = paced(3.5);
 
 // Насколько кивок на остановке опережает конец хода. Клюёт носом корабль, пока гасит ход,
 // а не после: к тому мгновению, когда он встал, он уже должен быть выровнен. Не весь кивок
@@ -134,7 +138,7 @@ const NOD_LEAD = 0.8;
 // Сколько гаснет слой выбора места, мс. Сама длительность живёт в стилях (@berth-fade),
 // здесь она нужна затем, чтобы вовремя снять разметку: пока переход идёт, слой обязан
 // оставаться в кадре, а после — исчезнуть, иначе он навсегда останется в разметке прозрачным.
-const BERTH_FADE_MS = 200;
+const BERTH_FADE_MS = paced(200);
 
 /** Ждёт загрузки картинки. Не сложилось — тоже ответ: сцену показываем в любом случае. */
 const preload = (url: string): Promise<void> =>
@@ -917,6 +921,10 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
     return (
         <div
             className={[styles.scene, painted ? styles.scenePainted : ''].filter(Boolean).join(' ')}
+            // То же самое, что и класс рядом, но именем, которое не меняется: имена классов
+            // хеширует сборка, и цепляться за них снаружи — в проверках — можно только
+            // подстрокой. Атрибут говорит прямо: задники догрузились, кадр проступил.
+            data-scene-painted={painted ? '' : undefined}
             style={{ '--sky-img-px': `${skyImageHeight}px` } as CSSProperties}
             ref={sceneRef}
         >
