@@ -2003,6 +2003,78 @@ test('в списке кораблей крестик стоит вровень 
     await bandAtBottom();
 });
 
+/**
+ * Просвет над полосой кнопок — свой у самой полосы и одинаковый везде, а не то число, которым
+ * хозяин прижимает её к нижней кромке.
+ *
+ * Разница видна ровно там, где хозяин прижимает полосу через `auto`: слой со списком ростом
+ * во всю коробку разговора, и с тремя кораблями `auto` уводит кнопки вниз. Стоило кораблям
+ * набраться на всю высоту — свободного места не остаётся, `auto` обращается в ноль, и последняя
+ * строчка упиралась в черту над кнопками. Отсюда и проверка: список раздут копиями строчки
+ * и домотан до конца — просвет обязан быть на месте (см. @band-gap в ui/Actions).
+ *
+ * Раздуваем копиями нарочно: правило тут про тесноту, а не про то, откуда она взялась,
+ * и заводить ради него канал на два десятка кораблей незачем.
+ */
+test('кнопки не встают встык с содержимым, даже когда списку тесно', async ({ page }) => {
+    await openChannel(page, DEMO, ALBATROS);
+    await page.setViewportSize(STANDING);
+    await page.waitForTimeout(600);
+    await openSheet(page);
+
+    const scroller = listRegion(page).locator('[class*="list_"]').first();
+    await scroller.evaluate((node) => {
+        const row = node.querySelector('[class*="row_"]')!;
+        const gap = node.querySelector('[class*="gap_"]')!;
+        for (let i = 0; i < 20; i++) {
+            node.insertBefore(row.cloneNode(true), gap);
+        }
+        node.scrollTop = node.scrollHeight;
+    });
+    // Домотанный до конца список: полоса встала на своё место в потоке, и просвет над ней —
+    // тот самый, который в этом положении и пропадал.
+    await expect
+        .poll(async () => Math.round(await scroller.evaluate((node) => node.scrollHeight - node.clientHeight)), {
+            message: 'раздутому списку не стало тесно',
+        })
+        .toBeGreaterThan(0);
+
+    const rows = listRegion(page).locator('[class*="row_"], [class*="rowActive"]');
+    const last = (await rows.last().boundingBox())!;
+    const band = (await listRegion(page).locator('[class*="actions_"]').boundingBox())!;
+    expect(Math.round(band.y - (last.y + last.height)), 'кнопки встали встык с последней строчкой').toBe(20);
+});
+
+/**
+ * Место под полосу прокрутки держится всегда — и пока мотать нечего тоже.
+ *
+ * Полоса эта не поверх содержимого, а рядом с ним: появляясь, она отнимает у содержимого свою
+ * ширину, и то переверстывается под новую. Видно это было так: шторку приспустили, содержимому
+ * стало тесно по высоте, появилась полоса — и подпись под заголовком, помещавшаяся в строку,
+ * разъезжалась на две. То есть движение по вертикали перекладывало текст по горизонтали.
+ *
+ * Проверяется поэтому не сама полоса, а зазор между внешней шириной блока и той, что досталась
+ * содержимому: он обязан быть и там, где мотать нечего (список из трёх кораблей), и там,
+ * где есть (лента демо-канала). Правило общее и живёт в `ui/TopFade` — рядом с видом полосы.
+ */
+test('место под полосу прокрутки держится и в том, чему мотать нечего', async ({ page }) => {
+    /** Сколько ширины блок отдал полосе прокрутки, px. */
+    const gutter = (selector: string): Promise<number> =>
+        page
+            .locator(selector)
+            .first()
+            .evaluate((node) => node.getBoundingClientRect().width - node.clientWidth);
+
+    await openChannel(page, DEMO, ALBATROS);
+    expect(await gutter('main [class*="list_"]'), 'лента не оставила места под полосу').toBe(8);
+
+    await openSheet(page);
+    expect(
+        await gutter('section[aria-label="Корабли на связи"] [class*="list_"]'),
+        'список из трёх кораблей не держит места под полосу'
+    ).toBe(8);
+});
+
 /** Сила полоски у верхней кромки: 0 — её нет вовсе, 1 — стоит в полную. */
 const fadeStrength = (page: Page, inside: 'list' | 'content'): Promise<number> =>
     (inside === 'list' ? listRegion(page) : page.locator('main'))

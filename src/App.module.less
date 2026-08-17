@@ -1,6 +1,9 @@
 // @column-width, @scene-min-height, @scene-min-share и @chat-overlap подставляются в каждый
 // .less из src/config/layout.ts — см. vite.config.ts.
 
+// Сброс браузерной кнопки: нажимают саму картинку, а не оправу вокруг неё, — см. button.less.
+@import '@/button.less';
+
 // Секунды и кривая разворота — общие со сценой, см. motion.less.
 @import '@/motion.less';
 // Числа с двумя концами — телефонным и десктопным, — см. fluid.less и --wide в index.less.
@@ -228,9 +231,9 @@
     overflow: clip;
     border: 1px solid var(--color-border);
     border-bottom: 0;
-    border-radius: 16px 16px 0 0;
+    border-radius: var(--radius-plate) var(--radius-plate) 0 0;
     background: var(--color-bg-chat);
-    box-shadow: 0 -8px 40px rgba(0, 0, 0, 0.5);
+    box-shadow: var(--shadow-sheet);
     transform: translateY(0);
     // Приспуск — отдельным свойством, а не тем же transform. Свойства эти складываются
     // (сперва translate, потом transform), и потому каждое может ехать само по себе: transform
@@ -373,26 +376,8 @@
     // Палец по коридору тянет разговор, а не мотает страницу под ним.
     touch-action: none;
 
-    // Черта под указателем. Постоянной ей быть нельзя: она встала бы вторым бортиком
-    // рядом с настоящей кромкой разговора, и та перестала бы читаться кромкой.
-    //
-    // Стоит по середине коридора, а не по его краю: середина коридора и есть кромка разговора,
-    // и подсветка обязана лечь на неё, а не рядом.
-    &::after {
-        content: '';
-        position: absolute;
-        background: var(--color-accent);
-        opacity: 0;
-        transition: opacity 0.15s ease;
-    }
-
-    &:hover::after,
-    &:focus-visible::after {
-        opacity: 0.6;
-    }
-
-    // Обводка тут не нужна: у коридора её показала бы та же черта, только с трёх сторон
-    // сразу — а он во всю кромку разговора.
+    // Обводка тут не нужна: у коридора её показала бы рамка с трёх сторон сразу —
+    // а он во всю кромку разговора.
     &:focus-visible {
         outline: none;
     }
@@ -407,9 +392,28 @@
     transition: right var(--chat-move) @expand-easing;
     cursor: ew-resize;
 
+    // Черта под указателем. Есть она только сбоку: там кромку панели ничем больше не выдать —
+    // рисочки-ручки поперёк на боковой кромке не бывает, она врала бы про сторону движения.
+    // Под кадром черты нет: там вдоль той же кромки лежит ручка (.sheetHandle), и светящаяся
+    // полоска рядом с ней говорила бы то же самое во второй раз.
+    //
+    // Постоянной ей быть нельзя и сбоку: она встала бы вторым бортиком рядом с настоящей
+    // кромкой разговора, и та перестала бы читаться кромкой. Стоит она по середине коридора,
+    // а не по его краю: середина коридора и есть кромка разговора, и подсветка обязана лечь
+    // на неё, а не рядом.
     &::after {
+        content: '';
+        position: absolute;
         inset: 0 auto 0 ~'calc(50% - 1px)';
         width: 2px;
+        background: var(--color-accent);
+        opacity: 0;
+        transition: opacity 0.15s ease;
+    }
+
+    &:hover::after,
+    &:focus-visible::after {
+        opacity: 0.6;
     }
 }
 
@@ -426,11 +430,6 @@
     margin-inline: auto;
     transition: bottom var(--chat-move) @expand-easing;
     cursor: ns-resize;
-
-    &::after {
-        inset: ~'calc(50% - 1px)' 0 auto;
-        height: 2px;
-    }
 }
 
 // Пока тянут: курсор один на всё окно, и выделение не набирается. Движение указателя в эти
@@ -585,9 +584,9 @@
     overflow: clip;
     border: 1px solid var(--color-border);
     border-bottom: 0;
-    border-radius: 16px 16px 0 0;
+    border-radius: var(--radius-plate) var(--radius-plate) 0 0;
     background: var(--color-bg-chat);
-    box-shadow: 0 -8px 40px rgba(0, 0, 0, 0.5);
+    box-shadow: var(--shadow-sheet);
     transform: translateY(0);
     // Приспуск — тем же отдельным свойством, что и у разговора под ней, и тем же числом:
     // коробка внизу экрана у них одна, и едут они вместе. Тянут её как раз за форму (см. `lower`
@@ -660,11 +659,12 @@
     // слой бывает шириной в треть окна, и двадцать пикселей с каждого бока отнимали бы у строчек
     // как раз то, чего им там не хватает.
     --sheet-pad: 12px;
-    // Слот под кнопки (см. ui/Actions). Отступ сверху — auto: слой ростом во всю коробку
-    // разговора, и с тремя кораблями полоса иначе повисала бы сразу за последней строчкой,
-    // а под ней оставалось бы пустое поле. В шторке этого не было: она росла ровно
+    // Слот под кнопки (см. ui/Actions). Прижата полоса к нижней кромке через auto: слой ростом
+    // во всю коробку разговора, и с тремя кораблями полоса иначе повисала бы сразу за последней
+    // строчкой, а под ней оставалось бы пустое поле. В шторке этого не было: она росла ровно
     // по содержимому, и низ содержимого был её низом. Набралось кораблей на всю высоту —
-    // auto обращается в ноль, и полоса прилипает к нижней кромке.
+    // auto обращается в ноль, и полоса встаёт сразу за списком; воздух над кнопками при этом
+    // остаётся — он у полосы свой.
     --actions-top: auto;
     --actions-side: var(--sheet-pad);
     --actions-pad: ~'calc(16px + env(safe-area-inset-bottom))';
@@ -768,18 +768,13 @@
 // незачем, когда обе ведут в одно место. Кнопка поэтому колонкой, а не строкой, и во всю
 // ширину блока — чтобы поле нажатия и правда было блоком, а не двумя полосками по буквам.
 .chatTitleButton {
-    display: flex;
+    .bare-button();
+
     flex-direction: column;
     align-items: flex-start;
     width: 100%;
     margin: 0;
-    padding: 0;
-    border: 0;
-    background: transparent;
-    color: inherit;
-    font: inherit;
     text-align: left;
-    cursor: pointer;
     // Нажатия ловит она сама: полоса шапки их пропускает насквозь (см. .headerBar).
     pointer-events: auto;
 

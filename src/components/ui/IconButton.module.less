@@ -30,7 +30,7 @@
     }
 
     &:active {
-        transform: scale(0.92);
+        transform: scale(var(--press-scale-round));
     }
 
     &:disabled {
@@ -97,7 +97,7 @@
 .inField {
     width: 34px;
     height: 34px;
-    border-radius: 9px;
+    border-radius: var(--radius-control);
     background: transparent;
     color: var(--color-accent);
 

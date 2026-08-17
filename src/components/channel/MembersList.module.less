@@ -1,3 +1,6 @@
+// Сброс браузерной кнопки: нажимают саму картинку, а не оправу вокруг неё, — см. button.less.
+@import '@/button.less';
+
 // Колонка списка со своей прокруткой. Поля приходят от того, кто список показывает, —
 // от слоя в блоке разговора (--sheet-pad и --actions-pad, см. .list в App.module.less):
 // полоса кнопок внизу считает по ним свои, и разойтись им нельзя.
@@ -51,7 +54,7 @@
     gap: 12px;
     flex: none;
     padding: 8px;
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     color: var(--color-text);
     text-align: left;
     cursor: pointer;
@@ -109,12 +112,12 @@
 // по рисунку, без своих полей и фона: это отметка у позывного, а не действие в строке,
 // и выглядеть она должна вымпелом, а не кнопкой с вымпелом внутри.
 .pennantButton {
+    .bare-button();
+
     flex: none;
     align-self: center;
-    padding: 0;
-    border: 0;
-    background: none;
-    cursor: pointer;
+    // Вымпел — картинка, и строка под ней ни к чему: без этого её базовая линия отводила бы
+    // значку место под хвостики букв, которых тут нет.
     line-height: 0;
 }
 
@@ -140,7 +143,7 @@
     flex: none;
     margin-left: auto;
     padding: 1px 8px;
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     background: var(--color-accent-faint);
     color: var(--color-accent);
     font-size: var(--font-size-caption);

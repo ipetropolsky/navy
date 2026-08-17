@@ -23,12 +23,19 @@ interface ActionsProps {
  * шторка, плашка формы, слой в блоке разговора. Он объявляет три числа разом на всё своё
  * содержимое: `--actions-side` (боковые поля, которые полоса гасит, чтобы дойти фоном
  * до краёв), `--actions-pad` (нижнее, которое прилипшие кнопки уносят с собой)
- * и `--actions-top` (отступ сверху; `auto` прижимает полосу к нижней кромке хозяина).
- * Подробности — в стилях.
+ * и `--actions-top` (чем полосу прижать к нижней кромке: `auto` у хозяина во всю высоту).
+ * Воздух над кнопками у полосы свой и постоянный. Подробности — в стилях.
  */
 export default function Actions({ children, pinned = false, aboveFooter = false }: ActionsProps) {
     const look = [styles.actions, pinned && styles.actionsPinned, aboveFooter && styles.actionsAboveFooter]
         .filter(Boolean)
         .join(' ');
-    return <div className={look}>{children}</div>;
+    return (
+        <>
+            {/* Просвет над полосой: пустая строчка в потоке, чтобы кнопки не вставали встык
+                с последней строкой содержимого. Почему строчкой, а не полем полосы, — в стилях. */}
+            <div className={styles.gap} aria-hidden="true" />
+            <div className={look}>{children}</div>
+        </>
+    );
 }

@@ -1,3 +1,6 @@
+// Сброс браузерной кнопки: нажимают саму картинку, а не оправу вокруг неё, — см. button.less.
+@import '@/button.less';
+
 .list {
     flex: 1 1 auto;
     // Своей нижней мерки у ленты нет: рост блока контента задаёт приложение (см. --content-height
@@ -20,7 +23,7 @@
     align-self: center;
     margin-bottom: 8px;
     padding: 4px 12px;
-    border-radius: 12px;
+    border-radius: var(--radius-control);
     background: var(--color-bg-raised);
     color: var(--color-text-muted);
     font-size: var(--font-size-base);
@@ -52,8 +55,8 @@
     margin: 0;
     padding: 8px 12px;
     border: 0;
-    border-radius: 15px;
-    border-bottom-left-radius: 5px;
+    border-radius: var(--radius-plate);
+    border-bottom-left-radius: var(--radius-tiny);
     background: var(--color-bubble-in);
     color: var(--color-text);
     font: inherit;
@@ -65,8 +68,8 @@
 .bubbleOwn {
     .bubble();
 
-    border-radius: 15px;
-    border-bottom-right-radius: 5px;
+    border-radius: var(--radius-plate);
+    border-bottom-right-radius: var(--radius-tiny);
     background: var(--color-bubble-out);
 }
 
@@ -101,8 +104,8 @@
 .systemNoteOwn {
     .systemNote();
 
-    border-radius: 15px;
-    border-bottom-right-radius: 5px;
+    border-radius: var(--radius-plate);
+    border-bottom-right-radius: var(--radius-tiny);
 }
 
 // Утопленная плашка: так она выглядит, пока её держат нажатой.
@@ -117,7 +120,7 @@
 // Правило стоит ниже всех плашек нарочно: вес у селекторов одинаковый, и спор о `transform`
 // выигрывает записанный последним.
 .pressed {
-    transform: scale(0.98);
+    transform: scale(var(--press-scale));
 }
 
 // Позывной с вымпелом над служебной строчкой. Стоит он здесь всегда — и над своей строчкой,
@@ -132,13 +135,7 @@
 // Вымпел нажимается: тычок отвечает, что он значит. Кнопка без всякой кнопочности — вымпел
 // и есть всё, что от неё видно.
 .pennantButton {
-    display: flex;
-    padding: 0;
-    border: 0;
-    background: none;
-    color: inherit;
-    font: inherit;
-    cursor: pointer;
+    .bare-button();
 }
 
 // Цитата в пузыре: сама цитата — общий компонент, здесь только её место и предел ширины,
