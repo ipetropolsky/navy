@@ -111,19 +111,33 @@ export const ALBATROS = 'm-albatros';
 export const VYMPEL = 'm-vympel';
 
 /**
- * Дождаться, пока сцена проступит. Картинки грузятся все разом и показываются только вместе:
- * пока последняя не пришла, в кадре темно (см. `data-scene-painted` в SeaScene).
+ * Сколько идёт проявление сцены, мс: те же 600 мс из стилей, поделённые на скорость времени,
+ * плюс запас на кадр-другой. Считается из длительности, а не берётся круглым числом, — сбавят
+ * проявление в стилях, сбавится и тут.
+ */
+const FADE_MS = 600 / TIME_SCALE + 100;
+
+/**
+ * Дождаться, пока сцена проступит и станет пригодной для нажатий.
  *
- * Ждём признак, а не время: он приходит ровно тогда, когда задники готовы, и ждать дольше
- * незачем. Само проявление — переход, и по ускоренному времени оно короткое.
+ * Признаков два, и приходят они порознь. `data-scene-painted` — задники: картинки грузятся все
+ * разом и показываются только вместе, пока последняя не пришла, в кадре темно.
+ * `data-scene-ready` — сам канал: флот пришёл с «сервера», встал на места, разметка свободных
+ * мест посчитана. До этого сцена уже в разметке, но вода в ней пустая, и целиться проверке
+ * не во что — ни в корабль, ни в точку места.
  *
- * Срок тут свой, а не общий: картинки берутся с уже поднятой сборки, и приходят они за десятые
- * доли секунды — трёх хватает с запасом даже на холодную вкладку. Больше ставить бессмысленно:
+ * Срок у ожидания свой, а не общий: и картинки, и «сервер» — местные, счёт идёт на десятые доли
+ * секунды, трёх хватает с запасом даже на холодную вкладку. Больше ставить бессмысленно:
  * у самой проверки сроку пять секунд, и ожидание длиннее до конца всё равно не доживёт.
+ *
+ * А вот конец проявления приходится пережидать временем: признака «проступило» у перехода нет.
+ * Спросить о нём саму страницу (`getAnimations`) не выходит — к этому мигу переход может ещё
+ * не начаться, и тогда ждать нечего; по прозрачности слоёв тоже не понять — облака и на
+ * проступившей сцене стоят полупрозрачными, такими они и нарисованы.
  */
 const sceneReady = async (page: Page): Promise<void> => {
-    await page.locator('[data-scene-painted]').first().waitFor({ timeout: 3_000 });
-    await page.waitForTimeout(600 / TIME_SCALE + 100);
+    await page.locator('[data-scene-painted][data-scene-ready]').first().waitFor({ timeout: 3_000 });
+    await page.waitForTimeout(FADE_MS);
 };
 
 /**
@@ -160,17 +174,67 @@ export const openNewChannel = async (page: Page, slug: string): Promise<void> =>
 };
 
 /**
- * Сколько ждём, пока «сервер» запишет отправленное, мс.
+ * Отметка «как было до отправки»: сколько записей лежит в лентах всех каналов, а заодно —
+ * пометка на плашке, которая висит сейчас. Нужна, чтобы дождаться исхода по признаку,
+ * а не по времени, — см. `awaitWrite` ниже.
+ *
+ * Плашку метим, а не считаем: она на экране всегда одна, следующая вытесняет предыдущую
+ * (см. Snackbar), — счёт от этого не меняется. Зато меняется сам узел: у нового сообщения
+ * свой `key`, и React кладёт в разметку другой элемент, без нашей пометки.
+ */
+const before = (page: Page): Promise<number> =>
+    page.evaluate(() => {
+        document.querySelector('[role="status"]')?.setAttribute('data-seen', '');
+        // eslint-disable-next-line no-restricted-syntax -- взгляд снаружи, а не код приложения
+        const raw = localStorage.getItem('kilvater.state');
+        const state = raw ? (JSON.parse(raw) as StoredState) : undefined;
+        return Object.values(state?.channels ?? {}).reduce((count, channel) => count + channel.messages.length, 0);
+    });
+
+/**
+ * Дождаться, пока «сервер» запишет отправленное.
  *
  * Запись идёт не в тот же тик, что нажатие: сперва общая очередь на запись, потом сама запись
  * (см. exclusive в localBackend). «Сервер» при этом живёт в самой вкладке — уйти с неё на другой
  * адрес раньше, чем очередь дошла до записи, значит унести отправленное с собой. Человек столько
  * не успевает, а проверка, у которой следом стоит переход, успевает всегда.
  *
- * 300 мс — с запасом: сама задержка эмулятора 40 мс, очередь при незанятом замке проходится
- * за такт.
+ * Признак — прибавка в ленте: и вход, и переоснащение, и уход пишут о себе строчку канала,
+ * и она ложится в хранилище той же записью, что и сама перемена. Ждать её честнее, чем ждать
+ * время: прежде тут стояла глухая пауза в 300 мс, и платила её каждая постановка в строй,
+ * хотя сама запись укладывается в сорок.
+ *
+ * Ждём в самой странице (`waitForFunction` опрашивает по кадрам), а не заходами снаружи:
+ * каждый заход стоит миллисекунд, и на частом опросе они складываются в ту же паузу.
+ *
+ * Отказ считается тем же концом ожидания, что и запись: занятый позывной или чужой номер
+ * «сервер» отбивает, в ленте от этого не прибавляется ничего, а на экране всплывает плашка
+ * (`role=status`). Проверкам на отказы нужен именно этот исход — ждать от них записи значит
+ * ждать того, чего не будет. Плашка считается новой по пометке, которую перед отправкой
+ * поставили на прежнюю (см. `before`): висящая с прошлого отказа за ответ не сойдёт.
+ *
+ * Обе развилки смотрим одним ожиданием, а не гонкой двух: гонка оставляет позади проигравшее
+ * ожидание, и падает оно потом, посреди чужого шага.
  */
-const WRITE_MS = 300;
+const awaitWrite = async (page: Page, was: number): Promise<void> => {
+    await page.waitForFunction(
+        (mark) => {
+            if (document.querySelector('[role="status"]:not([data-seen])')) {
+                return true;
+            }
+            // eslint-disable-next-line no-restricted-syntax -- взгляд снаружи, а не код приложения
+            const raw = localStorage.getItem('kilvater.state');
+            const state = raw ? (JSON.parse(raw) as StoredState) : undefined;
+            const now = Object.values(state?.channels ?? {}).reduce(
+                (count, channel) => count + channel.messages.length,
+                0
+            );
+            return now > mark;
+        },
+        was,
+        { timeout: 3_000 }
+    );
+};
 
 /**
  * Открыть форму постановки в строй. Канал по ссылке встречает гостя закрытой формой — пустой
@@ -194,6 +258,7 @@ export const join = async (page: Page, name: string, hullNumber: string, shipKin
     if (await page.getByRole('button', { name: 'Встать на рейд' }).isVisible()) {
         await openJoinForm(page);
     }
+    const mark = await before(page);
     const form = page.locator('form').filter({ has: page.getByPlaceholder('Гром') });
     await page.getByPlaceholder('Гром').fill(name);
     await page.locator('input[inputmode="numeric"]').fill(hullNumber);
@@ -201,7 +266,7 @@ export const join = async (page: Page, name: string, hullNumber: string, shipKin
         await page.getByText(shipKind, { exact: true }).click();
     }
     await form.locator('button[type=submit]').click();
-    await page.waitForTimeout(WRITE_MS);
+    await awaitWrite(page, mark);
 };
 
 /**
@@ -245,10 +310,11 @@ export const leaveButton = (page: Page) => page.getByRole('button', { name: /^У
  */
 export const leaveRaid = async (page: Page, course = 'В Кронштадт'): Promise<void> => {
     await openSheet(page);
+    const mark = await before(page);
     await leaveButton(page).click();
     await page.getByLabel('Задайте новый курс').fill(course);
     await page.getByRole('button', { name: 'Курс верный' }).click();
-    await page.waitForTimeout(WRITE_MS);
+    await awaitWrite(page, mark);
 };
 
 /**
