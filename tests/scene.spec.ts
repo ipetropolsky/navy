@@ -1187,28 +1187,28 @@ test('строчка списка открывает корабль, а ават
     await openChannel(page, DEMO, ALBATROS);
     await watchLamps(page);
     await openSheet(page);
-    const sheet = page.getByRole('region', { name: 'Корабли на связи' });
+    const list = page.getByRole('region', { name: 'Корабли на связи' });
 
     // Аватарка: корабль отзывается лампой, карточка не открывается, список остаётся на месте.
-    await sheet.locator('button[title="Окликнуть «Вымпел»"]').click();
+    await list.locator('button[title="Окликнуть «Вымпел»"]').click();
     await expect
         .poll(async () => (await flashes(page))['Корабль «Вымпел»'], 'корабль не отозвался на оклик из списка')
         .toBeGreaterThanOrEqual(3);
     await expect(page.getByRole('region', { name: 'Корабль' }), 'оклик из списка открыл карточку').toBeHidden();
-    await expect(sheet, 'оклик закрыл список').toBeVisible();
+    await expect(list, 'оклик закрыл список').toBeVisible();
 
     // Строчка чужого — карточка, и того самого корабля.
-    await sheet.getByRole('button', { name: 'Корабль «Вымпел»' }).click();
+    await list.getByRole('button', { name: 'Корабль «Вымпел»' }).click();
     const card = page.getByRole('region', { name: 'Корабль' });
     await expect(card).toContainText('Вымпел');
     // Закрыли карточку — и вернулись в список, из которого её открыли: она лежала поверх него,
     // а не вместо него.
     await card.getByRole('button', { name: 'Закрыть' }).click();
     await expect(card).toBeHidden();
-    await expect(sheet, 'карточка закрылась не в список').toBeVisible();
+    await expect(list, 'карточка закрылась не в список').toBeVisible();
 
     // Строчка своего — форма настройки, та же, что и по щелчку по своему кораблю в кадре.
-    await sheet.getByRole('button', { name: 'Корабль «Альбатрос»' }).click();
+    await list.getByRole('button', { name: 'Корабль «Альбатрос»' }).click();
     await expect(page.getByPlaceholder('Гром'), 'своя строчка не открыла форму').toBeVisible();
 });
 
