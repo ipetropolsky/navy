@@ -30,6 +30,7 @@ import { FEED_MIN, SHEET_HANDLE } from '@/config/layout';
 import { HAIL_SIGNAL, morseDuration } from '@/hooks/morse';
 import { useChannel } from '@/hooks/useChannel';
 import { chatMagnets, useLayout } from '@/hooks/useLayout';
+import { useSettled } from '@/hooks/useSettled';
 import { useSlide } from '@/hooks/useSlide';
 import { useSwipe } from '@/hooks/useSwipe';
 import { channelLink, useRoute } from '@/routing';
@@ -158,7 +159,13 @@ export default function App() {
     // вверх и он ещё не дорос. Выглядит он в этом случае одинаково — ручка и плашка ввода, —
     // а ленты нет вовсе, см. FEED_MIN в config/layout и .contentTight в стилях. Сбоку такого
     // не бывает: там разговор либо во всю высоту окна, либо убран целиком.
-    const tight = !atSide && size - layout.floor < FEED_MIN;
+    //
+    // Решение это про коробку, какой она станет, а рисуем по тому, какая она сейчас: коробка
+    // едет к своему размеру полсекунды, и лента, погашенная в начале дороги, пропадала бы
+    // из ещё полной коробки. `useSettled` придерживает признак до конца движения; там, где
+    // движения нет — коробку ведут пальцем, — он срабатывает сразу.
+    const contentRef = useRef<HTMLElement>(null);
+    const tight = useSettled(!atSide && size - layout.floor < FEED_MIN, contentRef);
 
     const sceneRef = useRef<HTMLDivElement>(null);
 
@@ -277,7 +284,7 @@ export default function App() {
     // остаётся на экране, см. useSlide. Поднявшая панель форма своего хода не имеет вовсе:
     // её везёт панель (см. `openLayer`).
     const formOpen = editing && inChat;
-    const formSlide = useSlide(formOpen, broughtPanel);
+    const formSlide = useSlide(formOpen);
 
     /**
      * Список кораблей — второй такой же слой той же коробки, а не шторка поверх всего.
@@ -292,7 +299,7 @@ export default function App() {
      * и без своего движения: показывать выезд снизу тому, кто и не уезжал, незачем.
      */
     const listOpen = sheetOpen && inChat;
-    const listSlide = useSlide(listOpen, broughtPanel);
+    const listSlide = useSlide(listOpen);
 
     // Место на рейде выбирают в форме корабля и только в ней: это её поле, просто вынесенное
     // на воду. На главной канала ещё нет, вставать некуда и не в чем — там рейд пустой
@@ -1022,6 +1029,7 @@ export default function App() {
                 ни чтению вслух. Свёрнутый до пола разговор, наоборот, остаётся живым: плашка
                 ввода на экране, и писать в неё можно, ничего не разворачивая. */}
             <main
+                ref={contentRef}
                 className={[styles.content, atSide ? styles.contentSide : '', tight ? styles.contentTight : '']
                     .filter(Boolean)
                     .join(' ')}
@@ -1069,36 +1077,30 @@ export default function App() {
                 />
             )}
             {/* Список кораблей — вторым слоем той же коробки, где стоит разговор, и тем же
-                выездом снизу, что и форма своего корабля. Шторкой поверх всего он был раньше,
-                и это было неправдой про него: шторка затемняет под собой экран, потому что пока
-                она открыта, разговор идёт только про неё, — а список кораблей про рейд, и гасить
-                рейд ради него незачем. В коробке он никого не загораживает: сцена остаётся живой
-                и открытой в обеих раскладках.
+                выездом снизу, что и форма своего корабля. Шторкой он не стал нарочно: шторка
+                затемняет под собой экран, потому что пока она открыта, разговор идёт только
+                про неё, — а список кораблей про рейд, и гасить рейд ради него незачем. В коробке
+                он никого не загораживает: сцена остаётся живой и открытой в обеих раскладках.
 
                 Отсюда и раскладок ему не нужно двух: коробка сама стоит там, где ей положено, —
                 под кадром на телефоне, панелью справа на десктопе, — и список едет вместе с ней.
                 Вместе с ней он и убирается за кромку, и глохнет там (inert), — как форма своего
-                корабля рядом. */}
+                корабля рядом.
+
+                Своей ручки у него нет: ручка — это кромка коробки, а список приезжает внутрь
+                коробки, под неё. Хват на кромке остаётся один и тот же, и коробку с открытым
+                списком тянут ровно тем же движением, что и без него. */}
             {listSlide.mounted && (
                 <section
+                    ref={listSlide.ref}
                     className={[styles.list, listOpen ? '' : styles.listLeaving, broughtPanel ? styles.layerStill : '']
                         .filter(Boolean)
                         .join(' ')}
                     aria-label="Корабли на связи"
-                    onTransitionEnd={listSlide.onTransitionEnd}
                     // Глохнет он не только за кромкой, но и под накрывшей его формой: видно
                     // из-под неё нечего, а фокус по Tab уходил бы в невидимое.
                     inert={!shown || formOpen}
                 >
-                    {/* Ручка — та же, что и у разговора под ним, и тянет она то же самое:
-                        размер коробки. Список занял её собой, но кромка у коробки прежняя,
-                        и двигают её тем же движением. У убранного разговора размера нет,
-                        и тянуть не за что — там нет и коридора вдоль кромки. */}
-                    {!atSide && shown && (
-                        <div className={styles.sheetHandle} aria-hidden="true" {...gripHandlers}>
-                            <span className={styles.sheetGrip} />
-                        </div>
-                    )}
                     {/* Крестик — там же, где у шторки. Закрывается список ещё и названием канала
                         в шапке, тем же нажатием, каким его открыли, — но искать выход в другом
                         конце экрана человек не обязан. */}
@@ -1136,8 +1138,9 @@ export default function App() {
                     />
                 </section>
             )}
-            {/* Форма своего корабля — верхний слой той же коробки, где стоит разговор, и ровно
-                её размера (--chat-box). Отсюда всё её поведение разом: тянут кромку — форма
+            {/* Форма своего корабля — верхний слой той же коробки, где стоит разговор, и ростом
+                в неё за вычетом ручки: ручка — кромка коробки, форма приезжает внутрь, под неё,
+                и своей ручки не заводит. Отсюда всё её поведение разом: тянут кромку — форма
                 меняет размер вместе с разговором под ней, убирают панель — уходит за кромку
                 вместе с ней и там глохнет (inert), как и разговор. Открыть форму в убранную
                 или свёрнутую панель нельзя — та сперва возвращается на экран (см. `openLayer`).
@@ -1151,21 +1154,12 @@ export default function App() {
                 и выезжающая снизу форма из него бы не высунулась. */}
             {formSlide.mounted && me && (
                 <div
+                    ref={formSlide.ref}
                     className={[styles.form, editing ? '' : styles.formLeaving, broughtPanel ? styles.layerStill : '']
                         .filter(Boolean)
                         .join(' ')}
-                    onTransitionEnd={formSlide.onTransitionEnd}
                     inert={!shown}
                 >
-                    {/* Ручка у формы — та же рисочка и тот же потяг, что и у разговора под ней:
-                        меняется размер всей коробки разом. Так рейд и разглядывают — коробку
-                        приспускают на точку ниже. Сбоку ручки нет — панель двигают за её
-                        кромку. */}
-                    {!atSide && (
-                        <div className={styles.sheetHandle} aria-hidden="true" {...gripHandlers}>
-                            <span className={styles.sheetGrip} />
-                        </div>
-                    )}
                     <MemberForm
                         mode="edit"
                         crew={members}

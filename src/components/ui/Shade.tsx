@@ -75,7 +75,7 @@ interface ShadeProps {
  * приспускают, чтобы разглядеть рейд под ней.
  */
 export default function Shade({ open, onClose, label, onScene = false, cover = false, children }: ShadeProps) {
-    const { mounted, onTransitionEnd } = useSlide(open);
+    const { mounted, ref } = useSlide(open);
     // Этаж в стопке: открытая позже лежит выше открытой раньше, а не так, как их написали
     // в разметке. Считает его ShadeStack, он же и закрывает нижние, если эта не `cover`.
     const floor = useShadeFloor(mounted, onClose, cover);
@@ -125,6 +125,7 @@ export default function Shade({ open, onClose, label, onScene = false, cover = f
                 onClick={onClose}
             />
             <section
+                ref={ref}
                 className={look}
                 style={
                     {
@@ -133,7 +134,6 @@ export default function Shade({ open, onClose, label, onScene = false, cover = f
                     } as CSSProperties
                 }
                 aria-label={label}
-                onTransitionEnd={onTransitionEnd}
             >
                 {/* Ручка — то самое место, за которое шторку тянут, и единственное. Кнопкой она
                     при этом не становится: нажимать её незачем и нечем — тому, у кого нет пальца,

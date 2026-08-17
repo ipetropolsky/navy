@@ -1665,9 +1665,9 @@ test('свёрнутый разговор форма своего корабля
     await page.waitForTimeout(600);
 
     // Разговор под формой развернулся в тот размер, в каком его оставили, — и форма встала
-    // ровно в него: коробка у них одна.
+    // ровно в него за вычетом ручки: коробка у них одна, а форма стоит внутри неё, под ручкой.
     const form = await boxOf(page, '[class*="form_"]');
-    expect(form.height, 'форма выехала не в размер развёрнутой панели').toBe(chatSize(PHONE));
+    expect(form.height, 'форма выехала не в размер развёрнутой панели').toBe(chatSize(PHONE) - SHEET_HANDLE);
     expect(form.top + form.height, 'форма не дошла до нижней кромки окна').toBe(PHONE.height);
     expect((await contentBox(page)).height, 'разговор под формой остался свёрнутым').toBe(chatSize(PHONE));
     await expect(page.getByRole('button', { name: 'Готово' }), 'в форме не видно кнопки готовности').toBeVisible();
@@ -2283,11 +2283,15 @@ test('в списке кораблей крестик стоит вровень 
         60
     );
 
-    // Стоячее окно: список встал под кадром, над содержимым появилась ручка, и крестик
-    // опустился ровно под неё.
+    // Стоячее окно: список встал под кадром. Ручка коробки осталась над ним — своей у слоя
+    // нет ни там, ни тут, — и крестик так же начинается от кромки слоя.
     await page.setViewportSize(STANDING);
     await page.waitForTimeout(600);
-    await expect(page.locator('section[aria-label="Корабли на связи"] [class*="sheetGrip"]')).toBeVisible();
+    await expect(
+        page.locator('section[aria-label="Корабли на связи"] [class*="sheetGrip"]'),
+        'у списка завелась своя ручка'
+    ).toHaveCount(0);
+    await expect(page.locator('main [class*="sheetGrip"]'), 'ручка коробки пропала').toBeVisible();
     await titleRow();
     await bandAtBottom();
 });
@@ -4541,8 +4545,8 @@ test('подведённая к правой кромке кромка убир�
  */
 
 /**
- * Ручка коробки внизу экрана: единственное место, за которое её тянут. Она есть у каждого слоя
- * и у самого разговора, и это одна и та же ручка — кромка у коробки одна.
+ * Ручка коробки внизу экрана: единственное место, за которое её тянут. Ручка одна на всю коробку
+ * и лежит на её кромке — своей у слоёв нет, слои приезжают внутрь коробки, ниже кромки.
  */
 const boxGrip = async (page: Page, within: string): Promise<{ x: number; y: number }> => {
     const box = (await page.locator(`${within} [class*="sheetHandle"]`).first().boundingBox())!;
@@ -4568,7 +4572,7 @@ const leadBox = async (page: Page, within: string, by: number): Promise<void> =>
 };
 
 /**
- * Ручка формы тянет ту же коробку и теми же правилами, что и коридор над разговором: вверх
+ * Ручка коробки тянет её с открытой формой теми же правилами, что и коридор над разговором: вверх
  * на точку выше, вниз на точку ниже. Проверяется вся дорога целиком — подняли, опустили,
  * бросили вниз со всей силы, — и на каждом шаге форма стоит ровно в коробке: своего размера
  * и своего места у неё нет.
@@ -4597,26 +4601,35 @@ test('коробку с формой тянут за ручку в обе сто
     expect(stood.top + stood.height, 'форма встала не на нижнюю кромку окна').toBe(PHONE.height);
     expect(await chatHeight(page), 'коробка с формой открылась не в свою треть').toBe(third);
 
-    // Вверх: ручка формы ведёт коробку на точку выше — ровно так же, как коридор над разговором.
-    await leadBox(page, '[class*="form_"]', -150);
+    // Своей ручки у формы нет: ручка — это кромка коробки, а форма приезжает внутрь коробки,
+    // под кромку. Ручка поэтому остаётся видна над формой, и тянут коробку за неё.
+    await expect(page.locator('[class*="form_"] [class*="sheetHandle"]'), 'у формы завелась своя ручка').toHaveCount(0);
+    await expect(page.locator('main [class*="sheetHandle"]'), 'ручка коробки пропала').toBeVisible();
+    expect(stood.top - (await boxOf(page, 'main')).top, 'форма встала не под ручкой коробки').toBe(SHEET_HANDLE);
+
+    // Вверх: ручка коробки ведёт её на точку выше — ровно так же, как коридор над разговором.
+    await leadBox(page, 'main', -150);
     expect(await chatHeight(page), 'коробка не поднялась на точку выше').toBe(two);
-    expect((await boxOf(page, '[class*="form_"]')).height, 'форма выросла не вместе с коробкой').toBe(two);
+    expect((await boxOf(page, '[class*="form_"]')).height, 'форма выросла не вместе с коробкой').toBe(
+        two - SHEET_HANDLE
+    );
 
     // Вниз тем же хватом — обратно на треть, и кадр забирает ровно то, что коробка отдала.
-    await leadBox(page, '[class*="form_"]', 150);
+    await leadBox(page, 'main', 150);
     expect(await chatHeight(page), 'коробка не вернулась на треть').toBe(third);
     expect((await boxOf(page, 'header')).height, 'кадр не вернулся в свой рост').toBe(sceneStood);
-    // Разговор под формой всё это время едет вместе с ней: коробка внизу экрана у них одна.
-    expect((await boxOf(page, 'main')).top, 'разговор разошёлся с формой над ним').toBe(stood.top);
+    // Разговор под формой всё это время едет вместе с ней: коробка внизу экрана у них одна,
+    // и форма стоит в ней на ручку ниже.
+    expect((await boxOf(page, 'main')).top, 'разговор разошёлся с формой над ним').toBe(stood.top - SHEET_HANDLE);
     // Отметки мест разъезжаются вместе с кадром — ради этого движение и затеяно.
-    await leadBox(page, '[class*="form_"]', -150);
+    await leadBox(page, 'main', -150);
     expect(await berthSpan(page), 'отметки мест не сошлись под поднятой коробкой').toBeLessThan(spanStood);
-    await leadBox(page, '[class*="form_"]', 150);
+    await leadBox(page, 'main', 150);
 
     // Брошенная вниз со всей силы, коробка со слоем встаёт на ту же треть: пола под формой нет —
     // плашки ввода в ней не стоит, и в полоску ручки она не помещается. Форму бросок не закрывает
     // вовсе: закрывают её крестиком и «Отменой».
-    const grip = await boxGrip(page, '[class*="form_"]');
+    const grip = await boxGrip(page, 'main');
     await flingAt(page, grip.x, grip.y, 160);
     // Ждём, а не меряем сразу: палец отпускают на ходу, и обратно к своей точке коробка едет
     // переходом. Замер в тот же миг попадал бы на середину дороги.
@@ -4684,11 +4697,9 @@ test('сбоку форму двигают полоской, а движение
     const frameStood = (await boxOf(page, 'header')).width;
     expect(stood.right, 'форма встала не у правой кромки окна').toBe(WIDE.width);
 
-    // Ручки у формы сбоку нет вовсе: коробку там двигают полоской на кромке.
-    await expect(
-        page.locator('[class*="form_"] [class*="sheetHandle"]'),
-        'сбоку у формы осталась ручка для хвата'
-    ).toHaveCount(0);
+    // Своей ручки у формы нет нигде, а сбоку нет и чужой: коробку там двигают полоской
+    // на кромке, как всякую панель.
+    await expect(page.locator('[class*="sheetHandle"]'), 'сбоку на экране осталась ручка для хвата').toHaveCount(0);
 
     // Ведём указатель по форме вправо — она остаётся на месте: тянуть её так больше нечем.
     const title = (await page.getByRole('heading', { name: 'Настроить корабль' }).boundingBox())!;
