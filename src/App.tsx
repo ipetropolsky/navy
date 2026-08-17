@@ -12,7 +12,7 @@ import {
 
 import { ChannelDraft, ChannelError, MemberDraft, backend, freeBerths, suggestBerth } from '@/backend';
 import { DEMO_CHANNEL_SLUG } from '@/backend/seed';
-import SeaScene from '@/components/SeaScene/SeaScene';
+import SeaScene, { BerthChoice } from '@/components/SeaScene/SeaScene';
 import CreateChannel from '@/components/channel/CreateChannel';
 import LeaveRaid from '@/components/channel/LeaveRaid';
 import MemberForm from '@/components/channel/MemberForm';
@@ -375,13 +375,24 @@ export default function App() {
      * на выбранном месте нарисована стрелка курса, и менять курс естественнее там же, где он
      * и показан. Место при этом остаётся выбранным — уйти с него можно, ткнув в другое.
      */
-    const handlePickBerth = (berth: Berth) => {
-        if (pickedBerth && isSameBerth(berth, pickedBerth)) {
-            setPickedFacing(otherSide(facing));
-            return;
-        }
-        setPickedBerth(berth);
-    };
+    const handlePickBerth = useCallback(
+        (berth: Berth) => {
+            if (pickedBerth && isSameBerth(berth, pickedBerth)) {
+                setPickedFacing(otherSide(facing));
+                return;
+            }
+            setPickedBerth(berth);
+        },
+        [pickedBerth, facing]
+    );
+
+    // Выбор мест уходит в кадр одним свойством и тоже запоминанием: кадр перерисовывается
+    // только когда меняется то, что на нём нарисовано, а не всякий раз, когда приложению
+    // случилось отрисоваться.
+    const berths: BerthChoice | undefined = useMemo(
+        () => (picking ? { options: berthOptions, picked: pickedBerth, facing, onPick: handlePickBerth } : undefined),
+        [picking, berthOptions, pickedBerth, facing, handlePickBerth]
+    );
 
     // Показать карточку чужого корабля. Список кораблей при этом не трогаем: карточка ложится
     // поверх него (см. cover у Shade), и закрыв её, человек возвращается туда, откуда открыл.
@@ -445,15 +456,23 @@ export default function App() {
 
     // Лампа мигает у того, кто печатает, — и у своего корабля тоже: событие о печати
     // приходит от бэкенда одинаково, своё оно или чужое.
-    const morseFeeds: Partial<Record<string, MorseFeed>> = {};
-    if (typing) {
-        morseFeeds[typing.memberId] = typing.feed;
-    }
-    // Оклик поверх печати: окликнули печатающего — лампа передаст и то и другое, очередь у неё
-    // общая. А вот запись о печати затёрла бы оклик молча, поэтому он и ставится последним.
-    if (hail) {
-        morseFeeds[hail.memberId] = hail.feed;
-    }
+    //
+    // Собирается запоминанием: это входное свойство кадра, и новый объект на каждую отрисовку
+    // означал бы, что кадр перерисовывается вместе со всем приложением — в том числе на каждом
+    // шаге пальца по кромке разговора, где до ламп никому нет дела.
+    const morseFeeds = useMemo(() => {
+        const feeds: Partial<Record<string, MorseFeed>> = {};
+        if (typing) {
+            feeds[typing.memberId] = typing.feed;
+        }
+        // Оклик поверх печати: окликнули печатающего — лампа передаст и то и другое, очередь
+        // у неё общая. А вот запись о печати затёрла бы оклик молча, поэтому он и ставится
+        // последним.
+        if (hail) {
+            feeds[hail.memberId] = hail.feed;
+        }
+        return feeds;
+    }, [typing, hail]);
 
     const handleSend = (text: string) => {
         // Отказ показываем снекбаром: у бэкенда для него уже есть человеческий текст,
@@ -496,12 +515,12 @@ export default function App() {
      * Помним это про нынешний слой, а не про панель вообще: перешли из формы в список — панель
      * уже не поднятая ради слоя, а просто открытая, и закрывать её за человека не за что.
      */
-    const openLayer = () => {
+    const openLayer = useCallback(() => {
         setBroughtPanel(!talking);
         if (!talking) {
             setBringing(true);
         }
-    };
+    }, [talking]);
     useEffect(() => {
         if (!bringing) {
             return undefined;
@@ -565,14 +584,14 @@ export default function App() {
 
     // Список кораблей открывается названием канала. Поверх списка может стоять форма своего
     // корабля, и тогда то же нажатие снимает её — возвращает к списку, из которого её и позвали.
-    const handleShips = () => {
+    const handleShips = useCallback(() => {
         const opening = editing || !sheetOpen;
         setEditing(false);
         setSheetOpen(opening);
         if (opening) {
             openLayer();
         }
-    };
+    }, [editing, sheetOpen, openLayer]);
 
     /**
      * Настроить свой корабль: та же форма и из кадра, и из списка кораблей.
@@ -583,11 +602,11 @@ export default function App() {
      * затемнение, см. .backdrop в Shade), и останься она поверх выехавшей формы, то накрыла бы
      * собой ровно то, ради чего по кораблю и нажали.
      */
-    const handleEditShip = () => {
+    const handleEditShip = useCallback(() => {
         setShownId(null);
         setEditing(true);
         openLayer();
-    };
+    }, [openLayer]);
 
     // Уход с рейда спрашивает новый курс — куда корабль пошёл. Молча корабль не пропадает:
     // остальным виден только опустевший рейд, и курс — единственное, что от ушедшего
@@ -904,11 +923,7 @@ export default function App() {
                         // А щелчок по чужому — его карточку: своим на рейде распоряжаются,
                         // чужой разглядывают.
                         onShowShip={atGate ? undefined : handleShowShip}
-                        berths={
-                            picking
-                                ? { options: berthOptions, picked: pickedBerth, facing, onPick: handlePickBerth }
-                                : undefined
-                        }
+                        berths={berths}
                     />
                 </div>
                 <div className={styles.headerBar}>
