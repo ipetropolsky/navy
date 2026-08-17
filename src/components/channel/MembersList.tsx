@@ -65,7 +65,8 @@ interface MembersListProps {
  * когда сам список становится узок (@container в стилях). Разметка про это не знает, и порога
  * «телефон ли это» здесь нет — дело только в ширине блока, в котором список показывают.
  *
- * Сам по себе список — только колонка со своей прокруткой. Показывает его слой в блоке
+ * Сам по себе список — колонка из двух частей: строчки со своей прокруткой и полоса кнопок
+ * под ними. Показывает его слой в блоке
  * разговора: он выезжает снизу тем же движением, что и форма своего корабля, и встаёт ровно
  * туда, где только что была лента. Шторкой поверх всего список не показывают нарочно — шторка
  * гасит под собой экран, а список кораблей про рейд, и гасить рейд ради него незачем
@@ -134,105 +135,107 @@ export default function MembersList({
 
     return (
         <div className={styles.list}>
-            <div className={styles.title}>На связи</div>
-            <div className={styles.hint}>Каждый корабль говорит из своей вкладки</div>
-            {members.map((member) => {
-                const mine = member.memberId === myId;
-                const senior = member.memberId === seniorId;
-                return (
-                    <div
-                        key={member.memberId}
-                        role="button"
-                        tabIndex={0}
-                        // Название строчке даём своё: собранное из содержимого, оно вышло бы
-                        // из позывного, типа корабля, звания и подписей всех вложенных кнопок
-                        // разом — читать такое с экрана невозможно.
-                        aria-label={`Корабль «${member.name}»`}
-                        className={mine ? styles.rowActive : styles.row}
-                        onPointerDown={(event: PointerEvent<HTMLDivElement>) => {
-                            pressRef.current = startPress(event);
-                        }}
-                        onClick={(event) => handleTap(event, member)}
-                        onKeyDown={(event) => handleKey(event, member)}
-                    >
-                        {/* В списке аватарка окликает, а не открывает корабль: оклик и есть ответ
+            {/* Мотаются только строчки: полоса кнопок стоит под ними своей строкой и с места
+                не уходит (см. ui/Actions). */}
+            <div className={styles.body}>
+                <div className={styles.title}>На связи</div>
+                <div className={styles.hint}>Каждый корабль говорит из своей вкладки</div>
+                {members.map((member) => {
+                    const mine = member.memberId === myId;
+                    const senior = member.memberId === seniorId;
+                    return (
+                        <div
+                            key={member.memberId}
+                            role="button"
+                            tabIndex={0}
+                            // Название строчке даём своё: собранное из содержимого, оно вышло бы
+                            // из позывного, типа корабля, звания и подписей всех вложенных кнопок
+                            // разом — читать такое с экрана невозможно.
+                            aria-label={`Корабль «${member.name}»`}
+                            className={mine ? styles.rowActive : styles.row}
+                            onPointerDown={(event: PointerEvent<HTMLDivElement>) => {
+                                pressRef.current = startPress(event);
+                            }}
+                            onClick={(event) => handleTap(event, member)}
+                            onKeyDown={(event) => handleKey(event, member)}
+                        >
+                            {/* В списке аватарка окликает, а не открывает корабль: оклик и есть ответ
                             на вопрос «который из них», и строчка вокруг неё отвечает на него хуже
                             — она уводит от кадра, в котором корабль и надо было увидеть. */}
-                        <Avatar
-                            number={member.hullNumber}
-                            large
-                            action={{ title: `Окликнуть «${member.name}»`, onClick: () => onHail(member.memberId) }}
-                        />
-                        <span className={styles.info}>
-                            <span className={styles.nameRow}>
-                                <MemberName name={member.name} color={member.color} />
-                                {mine && <span className={styles.you}> — ты</span>}
-                                {/* Отвечает званием всегда: снекбар с тем же словом лишним
+                            <Avatar
+                                number={member.hullNumber}
+                                large
+                                action={{ title: `Окликнуть «${member.name}»`, onClick: () => onHail(member.memberId) }}
+                            />
+                            <span className={styles.info}>
+                                <span className={styles.nameRow}>
+                                    <MemberName name={member.name} color={member.color} />
+                                    {mine && <span className={styles.you}> — ты</span>}
+                                    {/* Отвечает званием всегда: снекбар с тем же словом лишним
                                     не бывает, а проверка «видна ли подпись» стоила бы порога
                                     на пустом месте. */}
-                                {senior && (
-                                    <button
-                                        type="button"
-                                        className={styles.pennantButton}
-                                        aria-label={SENIOR_TITLE}
-                                        title={SENIOR_TITLE}
-                                        onClick={() => notify(SENIOR_TITLE)}
-                                    >
-                                        <Pennant />
-                                    </button>
-                                )}
+                                    {senior && (
+                                        <button
+                                            type="button"
+                                            className={styles.pennantButton}
+                                            aria-label={SENIOR_TITLE}
+                                            title={SENIOR_TITLE}
+                                            onClick={() => notify(SENIOR_TITLE)}
+                                        >
+                                            <Pennant />
+                                        </button>
+                                    )}
+                                </span>
+                                <span className={styles.kind}>{SHIP_KIND_LABELS[member.shipKind]}</span>
                             </span>
-                            <span className={styles.kind}>{SHIP_KIND_LABELS[member.shipKind]}</span>
-                        </span>
-                        {/* Прячет подпись не разметка, а сам список: хватает ли ей места —
+                            {/* Прячет подпись не разметка, а сам список: хватает ли ей места —
                             вопрос его ширины, и отвечает на него @container в стилях. */}
-                        {senior && <span className={styles.badge}>{SENIOR_TITLE}</span>}
-                        {mine && (
-                            <IconButton
-                                variant="muted"
-                                onClick={onEditMe}
-                                aria-label="Настроить корабль"
-                                title="Настроить корабль"
-                            >
-                                <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-                                    <path
-                                        d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4zM19.4 15a1.6 1.6 0 0 0 .32 1.77l.06.06a1.9 1.9 0 1 1-2.7 2.7l-.05-.06a1.6 1.6 0 0 0-1.78-.32 1.6 1.6 0 0 0-.97 1.47v.17a1.9 1.9 0 1 1-3.8 0v-.09a1.6 1.6 0 0 0-1.05-1.46 1.6 1.6 0 0 0-1.77.32l-.06.06a1.9 1.9 0 1 1-2.7-2.7l.06-.06a1.6 1.6 0 0 0 .32-1.77 1.6 1.6 0 0 0-1.47-.98h-.17a1.9 1.9 0 1 1 0-3.8h.09a1.6 1.6 0 0 0 1.46-1.04 1.6 1.6 0 0 0-.32-1.78l-.06-.06a1.9 1.9 0 1 1 2.7-2.7l.06.06a1.6 1.6 0 0 0 1.77.32H9a1.6 1.6 0 0 0 .97-1.47v-.17a1.9 1.9 0 0 1 3.8 0v.09a1.6 1.6 0 0 0 .98 1.46 1.6 1.6 0 0 0 1.77-.32l.06-.06a1.9 1.9 0 1 1 2.7 2.7l-.06.06a1.6 1.6 0 0 0-.32 1.77V9a1.6 1.6 0 0 0 1.47.97h.17a1.9 1.9 0 0 1 0 3.8h-.09a1.6 1.6 0 0 0-1.46.98z"
-                                        stroke="currentColor"
-                                        strokeWidth="1.6"
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        fill="none"
-                                    />
-                                </svg>
-                            </IconButton>
-                        )}
-                        {iAmSenior && !mine && (
-                            <IconButton
-                                variant="muted"
-                                onClick={() => onKick(member.memberId)}
-                                aria-label={`Высадить «${member.name}»`}
-                                title="Высадить с рейда"
-                            >
-                                <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-                                    <path
-                                        d="M9 4h6M4 7h16M7 7l1 12.5a1.5 1.5 0 0 0 1.5 1.5h5a1.5 1.5 0 0 0 1.5-1.5L17 7M10.5 10.5v7M13.5 10.5v7"
-                                        stroke="currentColor"
-                                        strokeWidth="1.7"
-                                        strokeLinecap="round"
-                                        fill="none"
-                                    />
-                                </svg>
-                            </IconButton>
-                        )}
-                    </div>
-                );
-            })}
+                            {senior && <span className={styles.badge}>{SENIOR_TITLE}</span>}
+                            {mine && (
+                                <IconButton
+                                    variant="muted"
+                                    onClick={onEditMe}
+                                    aria-label="Настроить корабль"
+                                    title="Настроить корабль"
+                                >
+                                    <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+                                        <path
+                                            d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4zM19.4 15a1.6 1.6 0 0 0 .32 1.77l.06.06a1.9 1.9 0 1 1-2.7 2.7l-.05-.06a1.6 1.6 0 0 0-1.78-.32 1.6 1.6 0 0 0-.97 1.47v.17a1.9 1.9 0 1 1-3.8 0v-.09a1.6 1.6 0 0 0-1.05-1.46 1.6 1.6 0 0 0-1.77.32l-.06.06a1.9 1.9 0 1 1-2.7-2.7l.06-.06a1.6 1.6 0 0 0 .32-1.77 1.6 1.6 0 0 0-1.47-.98h-.17a1.9 1.9 0 1 1 0-3.8h.09a1.6 1.6 0 0 0 1.46-1.04 1.6 1.6 0 0 0-.32-1.78l-.06-.06a1.9 1.9 0 1 1 2.7-2.7l.06.06a1.6 1.6 0 0 0 1.77.32H9a1.6 1.6 0 0 0 .97-1.47v-.17a1.9 1.9 0 0 1 3.8 0v.09a1.6 1.6 0 0 0 .98 1.46 1.6 1.6 0 0 0 1.77-.32l.06-.06a1.9 1.9 0 1 1 2.7 2.7l-.06.06a1.6 1.6 0 0 0-.32 1.77V9a1.6 1.6 0 0 0 1.47.97h.17a1.9 1.9 0 0 1 0 3.8h-.09a1.6 1.6 0 0 0-1.46.98z"
+                                            stroke="currentColor"
+                                            strokeWidth="1.6"
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                            fill="none"
+                                        />
+                                    </svg>
+                                </IconButton>
+                            )}
+                            {iAmSenior && !mine && (
+                                <IconButton
+                                    variant="muted"
+                                    onClick={() => onKick(member.memberId)}
+                                    aria-label={`Высадить «${member.name}»`}
+                                    title="Высадить с рейда"
+                                >
+                                    <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+                                        <path
+                                            d="M9 4h6M4 7h16M7 7l1 12.5a1.5 1.5 0 0 0 1.5 1.5h5a1.5 1.5 0 0 0 1.5-1.5L17 7M10.5 10.5v7M13.5 10.5v7"
+                                            stroke="currentColor"
+                                            strokeWidth="1.7"
+                                            strokeLinecap="round"
+                                            fill="none"
+                                        />
+                                    </svg>
+                                </IconButton>
+                            )}
+                        </div>
+                    );
+                })}
+            </div>
 
             {/* Ряд кнопок тот же, что внизу форм и карточки корабля: одна механика на всё
-                приложение — как они делят ширину и когда переносятся. Прилипший, потому что
-                список длинный: с десятком кораблей выход уезжает под обрез, и человек листает
-                до конца, чтобы его найти. */}
-            <Actions pinned>
+                приложение — как они делят ширину и когда переносятся. */}
+            <Actions>
                 <Button variant="secondary" onClick={onCopyLink}>
                     <LinkIcon />
                     {/* На широком списке подписи целиком, узкому хватает первого слова: рейд
