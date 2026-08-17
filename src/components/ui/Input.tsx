@@ -51,7 +51,12 @@ export default function Input({
     ]
         .filter(Boolean)
         .join(' ');
-    const input = <input {...rest} value={value} type={type} className={className} />;
+    // Подсказок браузера полям в приложении не нужно ни одному: ни адресов с телефонами,
+    // ни прежде набранного. На телефоне за подсказки платят экраном — над клавиатурой встаёт
+    // ещё одна панель и съедает те строчки разговора, ради которых поле и открывали.
+    // Написано до `rest`: понадобится где-то настоящее автозаполнение — поле скажет своё,
+    // и оно перебьёт это.
+    const input = <input autoComplete="off" {...rest} value={value} type={type} className={className} />;
 
     if (!action) {
         return input;

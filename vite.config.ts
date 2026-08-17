@@ -9,10 +9,10 @@ import {
     CHAT_GRIP,
     CHAT_OVERLAP,
     COLUMN_WIDTH,
-    FADE_HEIGHT,
     MOBILE_MAX_WIDTH,
     SCENE_MIN_HEIGHT,
     SCENE_MIN_SHARE,
+    SHEET_HANDLE,
     SHEET_INSET,
     SHEET_TOP_GAP,
     SHEET_WIDTH,
@@ -36,7 +36,7 @@ export default defineConfig({
                     `@sheet-width: ${SHEET_WIDTH}px;\n` +
                     `@sheet-inset: ${SHEET_INSET}px;\n` +
                     `@sheet-top-gap: ${SHEET_TOP_GAP}px;\n` +
-                    `@fade-height: ${FADE_HEIGHT}px;\n` +
+                    `@sheet-handle: ${SHEET_HANDLE}px;\n` +
                     `@chat-grip: ${CHAT_GRIP}px;\n`,
             },
         },

@@ -50,7 +50,10 @@ describe('normalizeMagnets', () => {
 
     test('одна точка остаётся одна, ни с кем не спорит', () => {
         expect(normalizeMagnets(['100%'], 300)).toEqual([300]);
-        expect(normalizeMagnets([], 300)).toEqual([]);
+    });
+
+    test('без заданных точек шторка получает обычные две: закрыта и по содержимому', () => {
+        expect(normalizeMagnets([], 300)).toEqual([0, 300]);
     });
 });
 
@@ -101,21 +104,11 @@ describe('settleMagnet', () => {
         expect(settleMagnet({ from: 600, to: 460, velocity: 1, points: CHAT })).toBe(600);
     });
 
-    test('вольная шторка встаёт на точку, только если та рядом', () => {
-        const free = { from: 900, points: CHAT, free: true };
-        expect(settleMagnet({ ...free, to: 320, velocity: 0 })).toBe(300);
-        expect(settleMagnet({ ...free, to: 450, velocity: 0 })).toBe(450);
-    });
-
-    test('вольную шторку усилие тоже уносит — и там она магнитится', () => {
-        expect(settleMagnet({ from: 900, to: 720, velocity: -3, points: CHAT, free: true })).toBe(300);
-        expect(settleMagnet({ from: 900, to: 800, velocity: -2, points: CHAT, free: true })).toBe(500);
-    });
-
-    test('дальнобойность магнита своя у каждой шторки', () => {
-        const free = { from: 900, to: 450, velocity: 0, points: CHAT, free: true };
-        expect(settleMagnet({ ...free, pull: 200 })).toBe(300);
-        expect(settleMagnet({ ...free, pull: 10 })).toBe(450);
+    test('между точками шторка не встаёт никогда', () => {
+        // Куда бы палец ни привёл, ответом будет одна из точек: посередине шторке стоять негде.
+        for (const to of [320, 450, 470, 610, 880]) {
+            expect(CHAT).toContain(settleMagnet({ from: 900, to, velocity: 0, points: CHAT }));
+        }
     });
 
     test('две точки — это обычное «открыта или закрыта»', () => {

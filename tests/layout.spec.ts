@@ -6,7 +6,6 @@ import {
     CHAT_OVERLAP,
     CHAT_SHARE,
     COLUMN_WIDTH,
-    FADE_HEIGHT,
     MOBILE_MAX_WIDTH,
     SCENE_MIN_HEIGHT,
     SCENE_MIN_SHARE,
@@ -1117,11 +1116,12 @@ test('кнопка убирает разговор с экрана и возвр
 /* eslint-enable no-await-in-loop */
 
 /**
- * Свайп по кадру: провести пальцем и получить ту же смену раскладки, что и кнопкой.
+ * Свайп по кадру: провести пальцем и сдвинуть разговор на соседнюю ступеньку.
  *
- * Дальше по нему проверяется и обратное — что чужие движения кадр не забирает. Поэтому
- * возвращается не «сработало ли», а отменено ли движение пальца: именно отмена запрещает
- * браузеру тянуть страницу к обновлению, и на чужом жесте её быть не должно.
+ * Возвращается, отменил ли кадр движение пальца: отменять он не должен ничего. Отменённое
+ * касание уносит с собой и нажатие, которое браузер выдаёт следом, — а по кадру нажимают
+ * по кораблям и по местам на рейде. Вертикаль вместо этого отдана нам стилями
+ * (`touch-action` у .scene), и отбирать её у браузера уже незачем.
  */
 const swipeScene = (page: Page, by: number): Promise<boolean> =>
     page.evaluate((shift) => {
@@ -1147,42 +1147,52 @@ const swipeScene = (page: Page, by: number): Promise<boolean> =>
     }, by);
 
 /**
- * Свайп по кадру убирает разговор и возвращает его — и только в свою сторону. Сторона своя
- * на каждое положение: палец ведёт сам разговор, а тот лежит снизу, так что движение вниз
- * его отталкивает, а движение вверх притягивает обратно.
+ * Свайп по кадру ведёт разговор по его же ступенькам: вверх — на одну выше, вниз — на одну
+ * ниже, вплоть до нуля, где разговора на экране нет. Ступенька, а не «убрать-вернуть»: палец
+ * ведёт сам разговор, а положений у того четыре.
  *
- * Обратное движение кадр не забирает, и это здесь половина проверки: на движении вниз браузер
- * тянет страницу к обновлению, и жест, забранный во все стороны, забрал бы заодно и его.
+ * Движение пальца при этом не отменяется ни в какую сторону — иначе кадр терял бы вместе с ним
+ * нажатия по кораблям.
  */
-test('свайп по кадру убирает разговор в свою сторону, а обратное движение отдаёт системе', async ({ page }) => {
+test('свайп по кадру ведёт разговор по ступенькам и не отменяет касания', async ({ page }) => {
     const phone = { width: MOBILE_MAX_WIDTH - 90, height: 844 };
     await page.setViewportSize(phone);
     await openChannel(page, DEMO, ALBATROS);
+    const room = phone.height - SHEET_TOP_GAP;
     const chat = chatSize(phone);
     await expect
         .poll(async () => (await contentBox(page)).height, { message: 'разговор встал не в свою долю' })
         .toBe(chat);
 
-    // Вверх по кадру с разговором — чужое движение: на экране всё то же, отмены нет.
-    expect(await swipeScene(page, -120), 'кадр отменил чужое движение пальца').toBe(false);
-    await page.waitForTimeout(400);
-    expect((await contentBox(page)).height, 'разговор уехал от чужого движения').toBe(chat);
+    // Вверх — на ступеньку выше: с трети на две трети.
+    expect(await swipeScene(page, -120), 'кадр отменил движение пальца').toBe(false);
+    await expect
+        .poll(async () => (await contentBox(page)).height, { message: 'разговор не поднялся на ступеньку' })
+        .toBe(Math.round(room * (2 / 3)));
 
-    // Вниз — своё: разговор уходит, и свайп страницы к обновлению на нём запрещён.
-    expect(await swipeScene(page, 120), 'кадр не отменил своё движение пальца').toBe(true);
+    // Вниз дважды — обратно на треть и совсем с экрана.
+    expect(await swipeScene(page, 120), 'кадр отменил движение пальца').toBe(false);
+    await expect
+        .poll(async () => (await contentBox(page)).height, { message: 'разговор не опустился на ступеньку' })
+        .toBe(chat);
+    expect(await swipeScene(page, 120), 'кадр отменил движение пальца').toBe(false);
     await expect
         .poll(async () => (await boxOf(page, 'header')).height, { message: 'кадр не занял окно после свайпа вниз' })
         .toBe(phone.height);
 
-    // И обратно: к убранному разговору своё движение — вверх.
-    expect(await swipeScene(page, 120), 'кадр без разговора забрал движение вниз').toBe(false);
-    expect(await swipeScene(page, -120), 'кадр не отменил своё движение пальца').toBe(true);
+    // С нижней ступеньки вниз идти некуда: разговора и так нет.
+    await swipeScene(page, 120);
+    await page.waitForTimeout(400);
+    expect((await contentBox(page)).height, 'убранный разговор что-то вернуло на экран').toBe(0);
+
+    // И обратно вверх — на ту же треть, с которой уходили.
+    await swipeScene(page, -120);
     await expect
         .poll(async () => (await contentBox(page)).height, { message: 'разговор не вернулся от свайпа вверх' })
         .toBe(chat);
 
     // Короткое движение — не свайп: так кадр возит палец, который просто ткнули мимо корабля.
-    expect(await swipeScene(page, 24), 'короткий свайп убрал разговор').toBe(true);
+    await swipeScene(page, 24);
     await page.waitForTimeout(400);
     expect((await contentBox(page)).height, 'разговор ушёл от короткого движения').toBe(chat);
 });
@@ -1532,6 +1542,12 @@ const openCard = async (page: Page): Promise<void> => {
 /** Что мотается внутри шторки: у карточки корабля — она сама целиком, от позывного до кнопок. */
 const SHEET_BODY = '[class*="shade_"] [class*="card_"]';
 
+/** Ручка шторки: единственное место, за которое её тянут. */
+const shadeGrip = async (page: Page): Promise<{ x: number; y: number }> => {
+    const box = (await shadeRegion(page).locator('[class*="handle_"]').first().boundingBox())!;
+    return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+};
+
 /**
  * Раздуть содержимое шторки так, чтобы оно перестало помещаться в окно: строчка с типом корабля
  * размножается копиями. Заводить ради проверки роста настоящую карточку в полсотни строк
@@ -1570,10 +1586,6 @@ const dragAt = async (page: Page, x: number, y: number, by: number): Promise<voi
     await page.waitForTimeout(200);
     await page.mouse.up();
 };
-
-/** Потянуть за середину блока: за ручку, за заголовок — за что дали. */
-const dragBox = (page: Page, box: { x: number; y: number; width: number; height: number }, by: number) =>
-    dragAt(page, box.x + box.width / 2, box.y + box.height / 2, by);
 
 /**
  * Короткий рывок вниз: палец уходит недалеко, но быстро, и отпускается на ходу.
@@ -1725,11 +1737,11 @@ test('открытая шторка забирает экран себе, и ш�
 });
 
 /**
- * Выходов из шторки три: крестик в верхнем углу, нажатие мимо и свайп вниз. Тянут за любое
- * место, у которого нет своей прокрутки и которое не текстовое поле, — попадать пальцем
- * в полоску шириной в палец занятие для тех, кому некуда спешить.
+ * Выходов из шторки три: крестик в верхнем углу, нажатие мимо и свайп вниз за ручку. Ручка —
+ * единственное место, за которое шторку тянут: внутри неё нажимают кнопки, мотают содержимое
+ * и выделяют текст, и отбирать у них движение пальца нечем.
  *
- * Потяг закрывает не всякий: увёл больше трети высоты — закрылась, меньше — вернулась.
+ * Свайп закрывает не всякий: увёл больше трети высоты — закрылась, меньше — вернулась.
  * Недоведённое движение бывает и промахом, и шторка на своём положении держится.
  *
  * А вот короткий, но резкий рывок закрывает и с четверти пути: шторка считает не только
@@ -1737,7 +1749,7 @@ test('открытая шторка забирает экран себе, и ш�
  * иначе зацепилась бы (см. `@/utils/magnet`). Так её и закрывают одним движением, не отводя
  * палец до самого низа экрана.
  */
-test('шторку закрывают крестиком, нажатием мимо, свайпом вниз и коротким рывком', async ({ page }) => {
+test('шторку закрывают крестиком, нажатием мимо, свайпом за ручку и коротким рывком', async ({ page }) => {
     await openChannel(page, DEMO, ALBATROS);
 
     await openCard(page);
@@ -1749,23 +1761,22 @@ test('шторку закрывают крестиком, нажатием ми�
     await page.mouse.click(60, 300);
     await expect(shadeRegion(page), 'нажатие мимо не закрыло шторку').toHaveCount(0);
 
-    // Строка с позывным — то самое «любое место»: своей прокрутки у неё нет.
     await openCard(page);
     const before = await shadeBox(page);
-    const title = shadeRegion(page).locator('[class*="title_"]').first();
-    await dragBox(page, (await title.boundingBox())!, Math.round(before.height * 0.2));
+    const grip = await shadeGrip(page);
+    await dragAt(page, grip.x, grip.y, Math.round(before.height * 0.2));
     await expect(shadeRegion(page), 'недоведённый свайп закрыл шторку').toHaveCount(1);
     await expect
         .poll(async () => (await shadeBox(page)).top, { message: 'шторка не вернулась на место после свайпа' })
         .toBe(before.top);
 
-    await dragBox(page, (await title.boundingBox())!, Math.round(before.height * 0.6));
+    await dragAt(page, grip.x, grip.y, Math.round(before.height * 0.6));
     await expect(shadeRegion(page), 'свайп вниз не закрыл шторку').toHaveCount(0);
 
     // Тот же путь, что и в первый раз, но пройденный рывком и отпущенный на ходу.
     await openCard(page);
-    const box = (await title.boundingBox())!;
-    await flingAt(page, box.x + box.width / 2, box.y + box.height / 2, Math.round(before.height * 0.2));
+    const again = await shadeGrip(page);
+    await flingAt(page, again.x, again.y, Math.round(before.height * 0.2));
     await expect(shadeRegion(page), 'короткий рывок не закрыл шторку').toHaveCount(0);
 });
 
@@ -1784,9 +1795,7 @@ test('свайп вверх не двигает шторку', async ({ page }) 
     await openCard(page);
 
     const before = await shadeBox(page);
-    const box = (await shadeRegion(page).locator('[class*="title_"]').first().boundingBox())!;
-    const x = box.x + box.width / 2;
-    const y = box.y + box.height / 2;
+    const { x, y } = await shadeGrip(page);
     await page.mouse.move(x, y);
     await page.mouse.down();
     await page.mouse.move(x, y - Math.round(before.height * 0.5), { steps: 12 });
@@ -1819,18 +1828,11 @@ test('свайп вверх не двигает шторку', async ({ page }) 
 });
 
 /**
- * Прокрутка главнее свайпа ровно до тех пор, пока ей есть куда мотаться: содержимое шторки
- * и всё, что мотается само, обязано мотаться, а не превращать движение пальца в закрытие.
- * А домотанное до верха вниз больше не едет — движение по нему осталось бы ничьим, и свайп
- * поэтому достаётся шторке.
- *
- * Колесом же шторка не двигается вовсе — прежде накрученное переставляло её на соседнюю ступень,
- * но ступеней больше нет, а закрывать шторку случайной прокруткой мыши над ней — худшее, что
- * можно сделать с содержимым, которое человек читает.
+ * Внутри шторки движение пальца принадлежит содержимому, и только ему: там мотают, нажимают
+ * и выделяют текст. Ни свайп по карточке, ни колесо над ней шторку не двигают — а закрывать
+ * её случайной прокруткой мыши над содержимым, которое человек читает, худшее из возможного.
  */
-test('шторка тянется с домотанной до верха прокрутки, с недомотанной — нет, а колесо её не трогает', async ({
-    page,
-}) => {
+test('движение по содержимому шторки достаётся содержимому, а не шторке', async ({ page }) => {
     await openChannel(page, DEMO, ALBATROS);
     await openCard(page);
     // Содержимое длиннее шторки: иначе мотать нечего и правило не на чем проверить.
@@ -1848,27 +1850,24 @@ test('шторка тянется с домотанной до верха про
         .toBeGreaterThan(0);
     expect((await shadeBox(page)).top, 'колесо сдвинуло шторку').toBe(before.top);
 
-    // Смотанное содержимое забирает свайп себе: под пальцем ещё есть что мотать вверх.
+    // Свайп по смотанному содержимому мотает его же.
     await dragAt(page, box.x + box.width / 2, box.y + 40, Math.round(before.height * 0.6));
-    await expect(shadeRegion(page), 'свайп по смотанной карточке закрыл шторку вместо прокрутки').toHaveCount(1);
+    await expect(shadeRegion(page), 'свайп по карточке закрыл шторку вместо прокрутки').toHaveCount(1);
 
-    // Домотали до верха — и тот же свайп достаётся шторке.
+    // И по домотанному до верха — тоже: шторке достаётся только ручка.
     await body.evaluate((node) => node.scrollTo(0, 0));
     await dragAt(page, box.x + box.width / 2, box.y + 40, Math.round(before.height * 0.6));
-    await expect(shadeRegion(page), 'свайп по домотанной до верха карточке не закрыл шторку').toHaveCount(0);
+    await expect(shadeRegion(page), 'свайп по домотанной карточке закрыл шторку').toHaveCount(1);
 });
 
 /**
- * То же правило глазами того, ради кого оно и переделано: карточка корабля в коротком окне.
+ * Ручка достаётся пальцу и там, где шторке тесно: в коротком окне карточка перерастает экран
+ * и мотается сама, но ручка лежит над её прокруткой и спорить ей не с кем.
  *
- * Стоит содержимому перерасти окно, как своя прокрутка появляется у всей карточки — то есть
- * у всего, что в шторке видно, от позывного до кнопок внизу. Потяг вниз доставался ей отовсюду,
- * и закрыть шторку выходило только за рисочку ручки или крестиком: на телефоне это и читалось
- * как «шторка не закрывается».
- *
- * Окно тут короткое нарочно — мышью на просторном это не воспроизводится вовсе.
+ * Окно тут короткое нарочно: на просторном карточка помещается целиком, своей прокрутки
+ * не заводит, и проверять было бы нечего.
  */
-test('карточка корабля в коротком окне закрывается свайпом вниз из середины', async ({ page }) => {
+test('карточка корабля закрывается за ручку и в коротком окне', async ({ page }) => {
     await openChannel(page, DEMO, ALBATROS);
     await openShipCard(page, 'Вымпел');
     // Узкое и короткое окно: карточке в нём тесно, и она мотается сама. Ширина заметно меньше
@@ -1883,19 +1882,16 @@ test('карточка корабля в коротком окне закрыв�
 
     const card = page.getByRole('region', { name: 'Корабль' });
     const body = card.locator('[class*="card_"]');
-    // Проверка держится на том, что карточка и правда мотается сама: не мотайся она, свайп
-    // достался бы шторке и без всякой починки.
+    // Проверка держится на том, что карточка и правда мотается сама: не мотайся она,
+    // и спорить ручке было бы не с чем.
     expect(
         await body.evaluate((node) => node.scrollHeight - node.clientHeight),
         'карточка в коротком окне не переросла окно, и проверять нечего'
     ).toBeGreaterThan(0);
 
-    // От середины карточки до нижней кромки окна: дальше курсор не увести, а этого пути
-    // с запасом хватает на треть высоты шторки, за которой она и закрывается.
-    const box = (await body.boundingBox())!;
-    const startY = Math.round(box.y + box.height / 2);
-    await dragAt(page, box.x + box.width / 2, startY, page.viewportSize()!.height - 10 - startY);
-    await expect(card, 'свайп вниз по карточке её не закрыл').toHaveCount(0);
+    const { x, y } = await shadeGrip(page);
+    await dragAt(page, x, y, page.viewportSize()!.height - 10 - Math.round(y));
+    await expect(card, 'свайп за ручку не закрыл карточку').toHaveCount(0);
 });
 
 /**
@@ -2055,7 +2051,7 @@ test('кнопки не встают встык с содержимым, даж�
  *
  * Проверяется поэтому не сама полоса, а зазор между внешней шириной блока и той, что досталась
  * содержимому: он обязан быть и там, где мотать нечего (список из трёх кораблей), и там,
- * где есть (лента демо-канала). Правило общее и живёт в `ui/TopFade` — рядом с видом полосы.
+ * где есть (лента демо-канала). Правило общее и живёт в `scroll.less` — рядом с видом полосы.
  */
 test('место под полосу прокрутки держится и в том, чему мотать нечего', async ({ page }) => {
     /** Сколько ширины блок отдал полосе прокрутки, px. */
@@ -2075,48 +2071,6 @@ test('место под полосу прокрутки держится и в �
     ).toBe(8);
 });
 
-/** Сила полоски у верхней кромки: 0 — её нет вовсе, 1 — стоит в полную. */
-const fadeStrength = (page: Page, inside: 'list' | 'content'): Promise<number> =>
-    (inside === 'list' ? listRegion(page) : page.locator('main'))
-        .locator('[class*="fade"]')
-        .first()
-        .evaluate((node) => Number(getComputedStyle(node).opacity));
-
-/**
- * Полоска у верхней кромки, под которую уходит прокручиваемое. Без неё содержимое обрывается
- * по кромке ровной линией: реплика срезана пополам, и срез читается краем разметки, а не
- * продолжением списка.
- *
- * Полоска одна на всех (`ui/TopFade`) — и в разговоре, и в слое со списком кораблей, и в шторке,
- * — поэтому проверяется её правило, а не сам градиент: под уехавшим содержимым она в полную силу,
- * домотали до верха — её нет, а мотать нечего — нет и подавно.
- */
-test('содержимое уходит под полоску, а домотанное до верха её убирает', async ({ page }) => {
-    await openChannel(page, DEMO, ALBATROS);
-    // Стоячее окно: разговор встаёт под кадром на треть высоты, и вся лента в него не влезает
-    // — ей есть куда уходить. В лежачем разговор во весь рост окна, семь демо-реплик
-    // помещаются целиком, и полоске там взяться неоткуда — это не поломка, а то же правило.
-    await page.setViewportSize(STANDING);
-
-    // Лента открывается низом, на последней реплике: старое уже ушло под кромку.
-    await expect
-        .poll(() => fadeStrength(page, 'content'), { message: 'под уехавшей лентой полоски нет' })
-        .toBeGreaterThan(0.9);
-
-    const feed = page.locator('[class*="dateChip"]').locator('xpath=..');
-    await feed.evaluate((node) => {
-        node.scrollTop = 0;
-    });
-    await expect
-        .poll(() => fadeStrength(page, 'content'), { message: 'в начале ленты полоска осталась висеть' })
-        .toBeLessThan(0.05);
-
-    // В слое со списком кораблей та же полоска и то же правило. Трём кораблям в нём тесно
-    // не бывает: мотать нечего, и полоске взяться неоткуда.
-    await openSheet(page);
-    expect(await fadeStrength(page, 'list'), 'полоска встала над списком, который весь на виду').toBe(0);
-});
-
 /** Отступы дорожки полосы прокрутки у первого прокручиваемого блока внутри `selector`, px. */
 const trackInset = (page: Page, selector: string): Promise<{ top: number; bottom: number }> =>
     page
@@ -2127,35 +2081,37 @@ const trackInset = (page: Page, selector: string): Promise<{ top: number; bottom
             return { top: parseFloat(track.marginTop), bottom: parseFloat(track.marginBottom) };
         });
 
+/** Радиус скругления плашек, px: тем же числом поджата и дорожка полосы прокрутки. */
+const plateRadius = (page: Page): Promise<number> =>
+    page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--radius-plate')));
+
 /**
- * Полоса прокрутки не заезжает под скруглённый угол панели: сверху её поджимает ровно то же
- * число, что и рост полоски (FADE_HEIGHT), — под полоской ей делать нечего, а угол она резала
- * бы наискось.
+ * Полоса прокрутки не заезжает под скруглённый угол панели: сверху её поджимает ровно радиус
+ * этого угла — иначе полоса резала бы его наискось.
  *
- * Правило это ничьё в отдельности: оно живёт в блоке с полоской (`ui/TopFade`) и достаётся
- * любому прокручиваемому внутри — ленте, списку кораблей, форме корабля. Раньше оно стояло
- * у ленты, и форма его не получала: её полоса начиналась от самой кромки.
+ * Правило это ничьё в отдельности: оно живёт в `scroll.less`, рядом с самим `overflow`,
+ * и достаётся любому прокручиваемому блоку — ленте, списку кораблей, форме корабля.
  *
  * Снизу у каждого своё: полоса доходит дотуда же, докуда доходит текст, а поля у ленты, списка
  * и формы разные. Это число блок объявляет о себе сам — `--scrollbar-bottom`.
  */
 test('полосу прокрутки поджимает сверху у любого содержимого панели, а снизу — по полям хозяина', async ({ page }) => {
     await openChannel(page, DEMO, ALBATROS);
+    const radius = await plateRadius(page);
 
     const feed = await trackInset(page, 'main [class*="list_"]');
-    expect(feed.top, 'полоса ленты полезла под скруглённый угол').toBeCloseTo(FADE_HEIGHT, 0);
+    expect(feed.top, 'полоса ленты полезла под скруглённый угол').toBeCloseTo(radius, 0);
     expect(feed.bottom, 'полоса ленты не отбита снизу').toBeGreaterThan(0);
 
     await openSheet(page);
     const crew = await trackInset(page, 'section[aria-label="Корабли на связи"] [class*="list_"]');
-    expect(crew.top, 'полоса списка кораблей полезла под скруглённый угол').toBeCloseTo(FADE_HEIGHT, 0);
+    expect(crew.top, 'полоса списка кораблей полезла под скруглённый угол').toBeCloseTo(radius, 0);
 
     await page.getByRole('button', { name: 'Настроить корабль' }).click();
-    // Форма живёт не внутри блока разговора, а соседом ему (см. `--form-to`), — поэтому
-    // и селектор без `main`. Правило от этого не поменялось: полоску даёт TopFade, и достаётся
-    // она любому прокручиваемому внутри, где бы тот ни стоял.
+    // Форма живёт не внутри блока разговора, а соседом ему, — поэтому и селектор без `main`.
+    // Правило от этого не меняется: оно у самого прокручиваемого блока, где бы тот ни стоял.
     const form = await trackInset(page, 'form[class*="card"]');
-    expect(form.top, 'полоса формы полезла под скруглённый угол').toBeCloseTo(FADE_HEIGHT, 0);
+    expect(form.top, 'полоса формы полезла под скруглённый угол').toBeCloseTo(radius, 0);
     // Поля у формы шире, чем у ленты: полоса кончается там же, где кончается текст.
     expect(form.bottom, 'полоса формы кончается не по её полям').toBeGreaterThan(feed.bottom);
 });
@@ -3691,8 +3647,8 @@ test('портрет корабля приближается по нажатию
  * с экрана по его концу. Выходило, что крестик гасил затемнение, а шторка висела на экране
  * до перезагрузки и на следующем открытии молча подменяла корабль в себе на другой.
  *
- * Обрыв здесь настоящий: pointerdown и pointermove шторка получает, а pointerup не получает
- * вовсе — ровно как при отпускании мыши за краем окна.
+ * Обрыв здесь настоящий: ручка получает нажатие и движение, а отпускания не получает вовсе —
+ * ровно как при отпускании мыши за краем окна.
  */
 test('шторка уходит с экрана и после оборванного свайпа', async ({ page }) => {
     await openChannel(page, DEMO, ALBATROS);
@@ -3700,41 +3656,24 @@ test('шторка уходит с экрана и после оборванно
     const card = page.getByRole('region', { name: 'Корабль' });
     await expect(card).toBeVisible();
 
-    // Тянем за верхнюю кромку: своей прокрутки у неё нет, а значит свайп достаётся шторке.
     const top = (await card.boundingBox())!.y;
-    await page.evaluate(() => {
-        const shade = document.querySelector('[aria-label="Корабль"]')!;
-        const box = shade.getBoundingClientRect();
-        const x = Math.round(box.left + box.width / 2);
-        const y = Math.round(box.top + 8);
-        const at = (offset: number, type: string) =>
-            new PointerEvent(type, {
-                bubbles: true,
-                cancelable: true,
-                pointerId: 1,
-                pointerType: 'mouse',
-                button: 0,
-                buttons: 1,
-                clientX: x,
-                clientY: y + offset,
-            });
-        shade.dispatchEvent(at(0, 'pointerdown'));
-        for (const step of [10, 40, 80]) {
-            window.dispatchEvent(at(step, 'pointermove'));
-        }
-        // Отпускания нет нарочно: указатель «ушёл» за окно.
-    });
+    const { x, y } = await shadeGrip(page);
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x, y + 80, { steps: 8 });
+    // Отпускания нет нарочно: указатель «ушёл» за окно.
     await expect
         .poll(async () => Math.round(((await card.boundingBox())?.y ?? top) - top), {
             message: 'шторка не поехала за пальцем — тянуть было не за что',
         })
         .toBeGreaterThan(0);
 
-    // Крестик нажимаем с клавиатуры: обычное нажатие мышью само послало бы pointerup,
+    // Крестик нажимаем с клавиатуры: обычное нажатие мышью само послало бы отпускание,
     // которого шторка и ждёт, и оборванное движение чинилось бы им же — а чинить его должно
     // само закрытие.
     await card.getByRole('button', { name: 'Закрыть' }).press('Enter');
     await expect(card, 'шторка осталась на экране после крестика').toBeHidden();
+    await page.mouse.up();
 
     // И следующее открытие показывает тот корабль, который открыли, а не оставшийся с прошлого.
     // Список под карточкой никуда не делся — открываем из него, второй раз его не зовём.
@@ -3765,9 +3704,9 @@ test('шторка уходит с экрана и там, где переход
  * Разговор под кадром — нижняя шторка.
  *
  * Тянут его за тот же коридор, что и сбоку, только положенный поперёк, а отпущенный он
- * приезжает к своей точке (`CHAT_POINTS`): ноль, треть, две трети, весь рост. Между точками
- * он стоять волен — человек ставит его туда, где ему видно и рейд, и последние реплики, —
- * и точки только помогают попасть в привычное.
+ * приезжает к своей точке (`CHAT_POINTS`): ноль, треть, две трети, весь рост. Положений
+ * у него ровно столько, сколько точек, и между ними он не встаёт: точка — это положение,
+ * а промежуток между двумя точками — дорога.
  */
 
 /** Весь ход разговора под кадром в этом окне, px: всё, что осталось под шапкой. */
@@ -3839,24 +3778,24 @@ test('под кадром коридор лежит поперёк, вдоль �
 });
 
 /**
- * Отпущенный разговор приезжает к ближней точке, а вдали от точек остаётся там, где его
- * оставили. Это и есть «тянется произвольно, магнитится на точки»: точки помогают попасть
- * в привычное, но не отбирают у человека промежуточных положений.
+ * Отпущенный разговор всегда оказывается на точке — на той, к которой его довели, или на той,
+ * с которой он не ушёл. Промежуточных положений у него нет вовсе.
  */
-test('разговор под кадром тянут произвольно, а к точкам он притягивается', async ({ page }) => {
+test('разговор под кадром встаёт только на свои точки', async ({ page }) => {
     await page.setViewportSize(PHONE);
     await openChannel(page, DEMO, ALBATROS);
     const room = chatRoom(PHONE);
+    const two = Math.round(room * 2 * CHAT_SHARE);
     expect(await chatHeight(page), 'разговор открылся не в свою треть').toBe(chatSize(PHONE));
 
-    // Далеко от точек: 260 + 150 = 410, а соседние точки в 260 и 520 — до обеих больше,
-    // чем дотягивается притяжение (MAGNET_PULL).
+    // Довели до середины между третью и двумя третями — и он ушёл к двум третям: доля пути,
+    // за которой точка перестаёт держать, пройдена (MAGNET_ESCAPE).
     await leadChat(page, 150);
-    expect(await chatHeight(page), 'разговор не остался там, куда его привели').toBe(chatSize(PHONE) + 150);
+    expect(await chatHeight(page), 'разговор застрял между точками').toBe(two);
 
-    // А теперь рядом: 410 + 90 = 500, и до двух третей всего двадцать пикселей.
-    await leadChat(page, 90);
-    expect(await chatHeight(page), 'разговор не притянулся к двум третям').toBe(Math.round(room * 2 * CHAT_SHARE));
+    // Чуть-чуть не дотянули до следующей — своя точка удержала.
+    await leadChat(page, 40);
+    expect(await chatHeight(page), 'разговор ушёл от короткого движения').toBe(two);
 
     // Вверх до упора: выше низа шапки разговор не поднимается, и точка там как раз.
     await leadChat(page, 400);
@@ -3928,11 +3867,12 @@ test('кадр берёт остаток окна с заездом, а ниже
     expect(stood.scene, 'кадр взял не остаток окна').toBeCloseTo(PHONE.height - stood.chat + CHAT_OVERLAP, 0);
     expect(stood.overlap, 'кадр заехал под разговор не на свою полоску').toBeCloseTo(CHAT_OVERLAP, 0);
 
-    // Подняли разговор на полсотни — кадр отдал ровно столько же и не пиксели сверх того.
-    await leadChat(page, 50);
+    // Подняли разговор на ступеньку — кадр отдал ровно столько же и не пиксели сверх того.
+    const step = Math.round(chatRoom(PHONE) * 2 * CHAT_SHARE) - chatSize(PHONE);
+    await leadChat(page, step);
     const raised = await stack(page);
-    expect(raised.chat, 'разговор не пошёл за указателем').toBeCloseTo(stood.chat + 50, 0);
-    expect(raised.scene, 'кадр отдал не то, что взял разговор').toBeCloseTo(stood.scene - 50, 0);
+    expect(raised.chat, 'разговор не встал на следующую точку').toBeCloseTo(stood.chat + step, 0);
+    expect(raised.scene, 'кадр отдал не то, что взял разговор').toBeCloseTo(stood.scene - step, 0);
     expect(raised.overlap, 'полоска заезда переменилась').toBeCloseTo(CHAT_OVERLAP, 0);
 
     // А теперь во весь рост: кадру осталось бы восемь десятков пикселей, и он вместо этого
@@ -4042,25 +3982,27 @@ const leadSide = async (page: Page, by: number): Promise<void> => {
     await page.waitForTimeout(600);
 };
 
-test('разговор сбоку притягивается к точкам, а между ними стоит где поставили', async ({ page }) => {
+test('разговор сбоку встаёт только на свои точки', async ({ page }) => {
     await page.setViewportSize(LYING);
     await openChannel(page, DEMO, ALBATROS);
 
     const third = Math.round(LYING.width * CHAT_SHARE);
+    const wall = LYING.width - SCENE_MIN_WIDTH;
     expect(await chatWidth(page), 'разговор открылся не третью ширины').toBe(third);
 
-    // Подвели почти к трети — приехал на треть: тридцать пикселей это ближе `MAGNET_PULL`.
+    // Подвели почти к трети — на трети и остался: своей точки он от короткого движения
+    // не покидает.
     await leadSide(page, -30);
     expect(await chatWidth(page), 'разговор не вернулся на треть').toBe(third);
 
-    // Подвели на сотню шире — там до точек далеко в обе стороны, и разговор остался на месте.
+    // Подвели на сотню шире — до упора оттуда ближе, чем осталось до трети, и разговор
+    // уходит к нему: между точками ему стоять негде.
     await leadSide(page, 100);
-    expect(await chatWidth(page), 'разговор не удержался между точками').toBe(third + 100);
+    expect(await chatWidth(page), 'разговор застрял между точками').toBe(wall);
 
-    // Дальше к упору: две трети ширины кадру не оставили бы и шестисот, и точка стоит
-    // на самом упоре.
+    // Дальше упора не пускает кадр: меньше шестисот ему не отдают.
     await leadSide(page, 200);
-    expect(await chatWidth(page), 'разговор встал не на упор').toBe(LYING.width - SCENE_MIN_WIDTH);
+    expect(await chatWidth(page), 'разговор встал не на упор').toBe(wall);
 });
 
 /**
@@ -4103,9 +4045,12 @@ test('подведённая к правой кромке кромка убир�
  * из-под неё показался бы он, а не рейд.
  */
 
-/** Заголовок формы: за него её и берут — это ни поле, ни кнопка. */
-const formGrip = async (page: Page, title: string): Promise<{ x: number; y: number }> => {
-    const box = (await page.getByRole('heading', { name: title }).boundingBox())!;
+/**
+ * Ручка коробки внизу экрана: единственное место, за которое её тянут. У формы своего корабля
+ * она своя, у формы постановки в строй — ручка самого блока, в котором та стоит.
+ */
+const boxGrip = async (page: Page, within: string): Promise<{ x: number; y: number }> => {
+    const box = (await page.locator(`${within} [class*="sheetHandle"]`).first().boundingBox())!;
     return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
 };
 
@@ -4113,10 +4058,10 @@ const formGrip = async (page: Page, title: string): Promise<{ x: number; y: numb
  * Приспустить форму на `by` пикселей и поставить.
  *
  * Перед отпусканием палец стоит дольше отрезка, на котором меряется усилие (`FLING_MS`), —
- * то есть форму именно подвели, а не бросили, и приезжает она туда, куда её привели.
+ * то есть форму именно подвели, а не бросили, и приезжает она к той точке, к которой её привели.
  */
-const lowerForm = async (page: Page, title: string, by: number): Promise<void> => {
-    const { x, y } = await formGrip(page, title);
+const lowerForm = async (page: Page, by: number): Promise<void> => {
+    const { x, y } = await boxGrip(page, '[class*="form_"]');
     await page.mouse.move(x, y);
     await page.mouse.down();
     await page.mouse.move(x, y + by, { steps: 12 });
@@ -4126,13 +4071,14 @@ const lowerForm = async (page: Page, title: string, by: number): Promise<void> =
 };
 
 /**
- * Потяг за форму отдаёт кадру ровно то, на сколько форму увели, — и отдаёт это сразу, пока
- * палец ещё ведёт. Проверяется вся дорога целиком: приспустили, кадр раздался, отметки мест
- * разъехались, разговор поехал вместе с формой; подвели обратно к кромке — форма встала
- * на место; утянули до конца — закрылась совсем.
+ * Свайп за ручку формы отдаёт кадру ровно то, на сколько форму увели. Проверяется вся дорога
+ * целиком: приспустили до половины, кадр раздался, отметки мест разъехались, разговор поехал
+ * вместе с формой; подвели обратно к кромке — форма встала на место; утянули до конца —
+ * закрылась совсем.
  *
- * Точек у формы две, закрыто и на месте, а между ними она вольна стоять где угодно (`free`):
- * рейд разглядывают на любую нужную глубину, а не на одну заранее выбранную.
+ * Положений у формы три: наверху, вполовину и закрыта (`FORM_MAGNET`). Половина — то самое,
+ * ради чего свайп и затеян: отметки ближних мест отходят от кромки настолько, чтобы в них
+ * попасть.
  */
 test('приспущенная форма отдаёт кадру своё место, а отпущенная у кромки встаёт обратно', async ({ page }) => {
     await page.setViewportSize(PHONE);
@@ -4146,27 +4092,27 @@ test('приспущенная форма отдаёт кадру своё ме�
     const spanStood = await berthSpan(page);
     expect(stood.top + stood.height, 'форма встала не на нижнюю кромку окна').toBe(PHONE.height);
 
-    // Ведём форму вниз на 120: до обеих её точек оттуда далеко, и она остаётся, где поставили.
-    await lowerForm(page, 'Настроить корабль', 120);
+    // Ведём форму вниз ровно на половину её роста — на её среднюю точку.
+    const half = Math.round(stood.height / 2);
+    await lowerForm(page, half);
 
     const low = await boxOf(page, '[class*="form_"]');
-    expect(low.top - stood.top, 'форма не поехала за пальцем').toBe(120);
+    expect(low.top - stood.top, 'форма не встала на половину').toBe(half);
     // Кадр раздаётся ровно на то, что форма отдала: щели между ними не бывает.
-    expect((await boxOf(page, 'header')).height - sceneStood, 'кадр не забрал освободившееся').toBe(120);
+    expect((await boxOf(page, 'header')).height - sceneStood, 'кадр не забрал освободившееся').toBe(half);
     // Рейд разъезжается вместе с кадром — ради этого свайп и затеян.
     expect(await berthSpan(page), 'отметки мест не разъехались').toBeGreaterThan(spanStood);
     // Разговор едет вместе с формой: коробка внизу экрана у них одна. Уйди форма одна,
     // из-под неё показался бы он, а не рейд.
-    expect((await boxOf(page, 'main')).top - stood.top, 'разговор остался стоять под приспущенной формой').toBe(120);
+    expect((await boxOf(page, 'main')).top - stood.top, 'разговор остался стоять под приспущенной формой').toBe(half);
 
-    // Подвели обратно к кромке — форма встала на место: двадцать оставшихся пикселей ближе
-    // к точке, чем MAGNET_PULL.
-    await lowerForm(page, 'Настроить корабль', -100);
+    // Подвели обратно к кромке — форма встала на место.
+    await lowerForm(page, -half);
     expect((await boxOf(page, '[class*="form_"]')).top, 'форма не вернулась на место').toBe(stood.top);
     expect((await boxOf(page, 'header')).height, 'кадр не отдал место обратно').toBe(sceneStood);
 
     // Утянутая до конца — закрывается совсем, и разговор остаётся там же, где стоял.
-    const grip = await formGrip(page, 'Настроить корабль');
+    const grip = await boxGrip(page, '[class*="form_"]');
     await flingAt(page, grip.x, grip.y, 160);
     await expect(page.getByRole('heading', { name: 'Настроить корабль' }), 'форма не закрылась').toHaveCount(0);
     // Ждём, а не меряем сразу: форму снимают, когда доехала она, а приспуск с разговора сходит
@@ -4191,7 +4137,7 @@ test('форму постановки в строй закрывает тот ж
     await openJoinForm(page);
     await page.getByPlaceholder('Гром').fill('Гроза');
 
-    const grip = await formGrip(page, 'Встать на рейд');
+    const grip = await boxGrip(page, 'main');
     await flingAt(page, grip.x, grip.y, 160);
 
     await expect(page.getByRole('button', { name: 'Встать на рейд' }), 'форма не свернулась').toBeVisible();
@@ -4220,9 +4166,16 @@ test('сбоку форму двигают полоской, а движение
     const frameStood = (await boxOf(page, 'header')).width;
     expect(stood.right, 'форма встала не у правой кромки окна').toBe(WIDE.width);
 
+    // Ручки у формы сбоку нет вовсе: коробку там двигают полоской на кромке.
+    await expect(
+        page.locator('[class*="form_"] [class*="sheetHandle"]'),
+        'сбоку у формы осталась ручка для хвата'
+    ).toHaveCount(0);
+
     // Ведём указатель по форме вправо — она остаётся на месте: тянуть её так больше нечем.
-    await lowerForm(page, 'Настроить корабль', 0);
-    const { x, y } = await formGrip(page, 'Настроить корабль');
+    const title = (await page.getByRole('heading', { name: 'Настроить корабль' }).boundingBox())!;
+    const x = title.x + title.width / 2;
+    const y = title.y + title.height / 2;
     await page.mouse.move(x, y);
     await page.mouse.down();
     await page.mouse.move(x + 120, y, { steps: 12 });

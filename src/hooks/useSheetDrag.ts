@@ -1,66 +1,25 @@
-import {
-    MouseEvent as ReactMouseEvent,
-    PointerEvent as ReactPointerEvent,
-    useCallback,
-    useEffect,
-    useRef,
-    useState,
-} from 'react';
+import { PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from 'react';
 
-import { isTextField } from '@/utils/keyboard';
 import { MagnetSettings, normalizeMagnets, settleMagnet, trackFling } from '@/utils/magnet';
 
 /**
- * Потяг за коробку, которую двигают пальцем: сколько её видно, куда она приедет, когда её
- * отпустят, и что при этом достаётся прокрутке внутри.
+ * Потяг за ручку коробки, которую двигают пальцем: куда она едет и где встанет, когда её
+ * отпустят.
  *
- * Механика одна на всех, кого в приложении тянут: на шторки (список кораблей, карточка корабля,
- * прощание с рейдом) и на форму своего корабля, которую приспускают, чтобы разглядеть рейд
- * под ней. Различаются они только точками магнита, а правила движения у них общие, и общими
- * они должны и остаться: разойдись они хоть чем, один и тот же бросок пальца закрывал бы одно
+ * Механика одна на всех, кого в приложении тянут: на шторки (карточка корабля, прощание
+ * с рейдом) и на форму своего корабля, которую приспускают, чтобы разглядеть рейд под ней.
+ * Различаются они только точками магнита, а правила движения у них общие, и общими они должны
+ * и остаться: разойдись они хоть чем, один и тот же бросок пальца закрывал бы одно
  * и не закрывал другое.
  *
- * Тянут всегда вниз. Сбоку, в боковой панели на десктопе, коробку двигают за полоску на её
- * кромке — так двигают панели все настольные приложения (см. коридор в App.tsx). Прежде её
- * там тянули за любое место вбок, и это движение спорило с выделением текста: вдоль строки
- * ходят оба, и различать их приходилось по тому, попал ли указатель в букву. Полоска
- * этот спор снимает целиком.
+ * Тянут за ручку, и только за неё. Внутри коробки живут кнопки, поля, ссылки и текст, который
+ * выделяют, — и всё это устроено браузером как надо ровно до тех пор, пока движение пальца
+ * по ним ничего не значит. Ручка же не значит ничего другого: на ней нет ни нажатия, ни текста,
+ * и спорить за движение с ней некому.
  *
  * Считается всё в открытости: сколько коробки видно над её кромкой. Наружу отдаётся обратное —
  * сдвиг от раскрытого положения: рисуют коробку именно им.
  */
-
-/**
- * Сколько палец должен пройти, чтобы это считалось перетаскиванием, px. Меньше — нажатие:
- * попасть в шторку и не сдвинуть её на пиксель-другой невозможно, и без этого зазора каждое
- * нажатие оборачивалось бы рывком. Тем же зазором отделяется нажатие на кнопку внутри шторки
- * от свайпа за то место, где она лежит.
- */
-const DRAG_SLOP = 4;
-
-/** Мотается ли этот блок сам: и разрешено, и есть что мотать. */
-const scrolls = (node: Element): boolean => {
-    const room = node.scrollHeight - node.clientHeight;
-    const overflow = getComputedStyle(node).overflowY;
-    return (overflow === 'auto' || overflow === 'scroll') && room > 0;
-};
-
-/**
- * Ближайшая своя прокрутка под указателем — где-то между ним и самой коробкой.
- *
- * Тянуть коробку можно за любое место, но список и всё, что мотается само, должны мотаться,
- * а не превращать каждое движение пальца в закрытие. Смотрим поэтому не на то, где именно
- * лежит ручка, а на то, есть ли под пальцем что мотать, — и кому достанется движение, решаем
- * уже по нему (см. `move` ниже).
- */
-const ownScroller = (target: EventTarget | null, root: HTMLElement): HTMLElement | null => {
-    for (let node = target instanceof Element ? target : null; node && node !== root; node = node.parentElement) {
-        if (node instanceof HTMLElement && scrolls(node)) {
-            return node;
-        }
-    }
-    return null;
-};
 
 export interface SheetDragSettings {
     /**
@@ -71,7 +30,7 @@ export interface SheetDragSettings {
     /** Что делать, когда коробку утянули до конца. */
     onClose: () => void;
     /** Где ей позволено останавливаться (см. `@/utils/magnet`). */
-    magnet: MagnetSettings;
+    magnet?: MagnetSettings;
 }
 
 export interface SheetDrag {
@@ -86,40 +45,46 @@ export interface SheetDrag {
      * встала не на верхнюю точку, а вот переход снимается ровно на время движения пальца.
      */
     dragging: boolean;
-    /** Что повесить на саму коробку. */
+    /**
+     * Что повесить на ручку. Ручка обязана лежать прямо в той коробке, которую двигает:
+     * ход меряется её ростом, а рост берётся с родителя ручки.
+     */
     handlers: {
         onPointerDown: (event: ReactPointerEvent<HTMLElement>) => void;
-        onClickCapture: (event: ReactMouseEvent<HTMLElement>) => void;
+        onPointerMove: (event: ReactPointerEvent<HTMLElement>) => void;
+        onPointerUp: (event: ReactPointerEvent<HTMLElement>) => void;
+        onPointerCancel: (event: ReactPointerEvent<HTMLElement>) => void;
+        onLostPointerCapture: (event: ReactPointerEvent<HTMLElement>) => void;
     };
 }
 
+/** Незаконченное движение: всё, что о нём нужно помнить между событиями указателя. */
+interface Run {
+    pointerId: number;
+    /** Где палец взял ручку, px по вертикали окна. */
+    startAt: number;
+    /** Сколько коробки было видно в этот миг, px. */
+    startOpen: number;
+    /** Весь ход коробки, px: её собственный рост. */
+    run: number;
+    /** Точки остановки в пикселях открытости, по порядку. */
+    points: number[];
+    /** Сдвинулся ли палец хоть раз: без этого отпускание — просто нажатие по ручке. */
+    moved: boolean;
+    /** Куда увели коробку, px сдвига. */
+    shift: number;
+    fling: ReturnType<typeof trackFling>;
+}
+
 /**
- * Тянут коробку за любое место, кроме текстового поля, — попадать пальцем в полоску шириной
- * в палец занятие для тех, кому некуда спешить. Своя прокрутка внутри забирает движение себе,
- * пока ей есть куда мотаться: домотанный до верха список вниз больше не едет, и свайп с него
- * достаётся коробке.
- *
- * Ход коробки — её собственный размер: она приезжает из-за кромки, и раскрыта ровно тогда, когда
- * видна целиком. Меряется он на каждый свайп заново — по тому самому блоку, за который взялись:
- * содержимое могло вырасти, а окно смениться.
+ * Ход коробки — её собственный размер: она приезжает из-за кромки и раскрыта ровно тогда, когда
+ * видна целиком. Меряется он на каждый свайп заново — по той самой коробке, в которой лежит
+ * ручка: содержимое могло вырасти, а окно смениться.
  */
 export const useSheetDrag = ({ open, onClose, magnet }: SheetDragSettings): SheetDrag => {
     const [shift, setShift] = useState<number | null>(null);
     const [dragging, setDragging] = useState(false);
-    // Перетаскивание кончается тем же click, что и нажатие, — и кончается им где угодно,
-    // хоть на кнопке внутри коробки. Флаг гасит этот click: без него свайп за строку списка
-    // заодно нажимал бы то, с чего начали.
-    const draggedRef = useRef(false);
-    // Чем оборвать незаконченный свайп снаружи. Пишется на время движения, зовётся при закрытии.
-    const dropDragRef = useRef<() => void>(() => undefined);
-
-    /** Бросить всё: оборвать незаконченное движение и поставить коробку на её место по стилям. */
-    const drop = useCallback(() => {
-        dropDragRef.current();
-        dropDragRef.current = () => undefined;
-        setDragging(false);
-        setShift(null);
-    }, []);
+    const runRef = useRef<Run | null>(null);
 
     /**
      * Закрытие отменяет свайп, чем бы тот ни кончился.
@@ -128,151 +93,107 @@ export const useSheetDrag = ({ open, onClose, magnet }: SheetDragSettings): Shee
      * забрал браузер, вкладку увели. После такого обрыва на коробке остаётся и сдвиг, и снятый
      * на время движения переход — и оба спорят с уходом. Сдвиг стоит в стиле самого блока
      * и оказывается сильнее ухода из класса, а без перехода уход не начинается вовсе; между тем
-     * снимают шторку с экрана именно по концу этого перехода. Выходило, что затемнение гасло,
-     * а шторка оставалась висеть навсегда — и на следующем открытии молча подменяла корабль
-     * в себе на другой.
+     * снимают шторку с экрана именно по концу этого перехода.
      */
     useEffect(() => {
         if (!open) {
-            drop();
+            runRef.current = null;
+            setDragging(false);
+            setShift(null);
         }
-    }, [open, drop]);
+    }, [open]);
 
     const onPointerDown = (event: ReactPointerEvent<HTMLElement>) => {
-        // Блок, за который взялись. Запоминаем его сразу: обработчики ниже зовутся уже после
-        // того, как React прибрал за собой событие, и `currentTarget` в них пуст.
-        const box = event.currentTarget;
-        // Вторичные кнопки мыши коробку не тянут: у правой своё дело — меню. Текстовое поле
-        // тоже не тянет: движение по нему ставит курсор и выделяет набранное.
-        if (event.button !== 0 || isTextField(event.target)) {
+        // Вторичные кнопки мыши коробку не тянут: у правой своё дело — меню.
+        if (event.button !== 0) {
             return;
         }
-        // Что мотается под пальцем, если мотается вообще. Само по себе оно свайп не отменяет:
-        // кому достанется движение, видно только по его направлению и по тому, домотано ли
-        // содержимое до верха, — а этого в момент нажатия ещё не знает никто. Решение поэтому
-        // отложено до первого шага (см. `move`).
-        const scroller = ownScroller(event.target, box);
-        // Где палец по вертикали: «ниже» значит «коробки видно меньше».
-        const along = (point: { clientY: number }) => point.clientY;
-        const startAt = along(event);
+        const grip = event.currentTarget;
+        const box = grip.parentElement ?? grip;
         const run = box.getBoundingClientRect().height;
-        const points = normalizeMagnets(magnet.points ?? [], run, magnet.gap);
-        const lowest = points.length ? points[0] : 0;
-        const highest = points.length ? points[points.length - 1] : run;
-        // Открытость на момент, когда коробку взяли: сколько её видно.
-        const startOpen = run - (shift ?? 0);
-        const drag = { moved: false, shift: shift ?? 0 };
-        // Чем кончилось движение пальца: по последним его отметкам и считается скорость
-        // в момент отпускания. Мерка общая со всеми, кого тянут, — см. `trackFling`.
-        const fling = trackFling();
-
-        const move = (moveEvent: PointerEvent) => {
-            if (moveEvent.pointerId !== event.pointerId) {
-                return;
-            }
-            if (!drag.moved) {
-                const way = along(moveEvent) - startAt;
-                if (Math.abs(way) <= DRAG_SLOP) {
-                    return;
-                }
-                // Прокрутка главнее ровно до тех пор, пока ей есть куда мотаться: назад она
-                // забирает движение, пока коробка стоит на своём месте, вперёд — пока
-                // не домотана до начала. Домотанный список вниз больше не едет, и движение
-                // по нему остаётся ничьим — а человек в этот момент тянет шторку и ждёт,
-                // что она закроется.
-                //
-                // Заметнее всего это на карточке корабля: стоит содержимому перерасти короткое
-                // окно, как своя прокрутка появляется у всей карточки — то есть у всего, что
-                // в шторке видно. Потяг вниз доставался ей отовсюду, и закрыть шторку выходило
-                // только за рисочку ручки или крестиком.
-                //
-                // Сдвинутая коробка забирает себе движение обратно, чего бы там ни мотала
-                // прокрутка: сперва коробка встаёт на место, и только потом мотается содержимое.
-                // Иначе приспущенную форму нечем было бы вернуть — прокрутка у неё своя и есть
-                // почти всегда, и всякий свайп вверх доставался бы ей. Шторок это правило
-                // не касается вовсе: они стоят на верхней точке всегда, кроме как под пальцем.
-                //
-                // Направление и место прокрутки смотрим один раз, на первом шаге: перехватывать
-                // движение посреди пути нельзя — палец у нижнего края то листал бы, то закрывал.
-                if (scroller && (way < 0 ? startOpen >= highest : scroller.scrollTop > 0)) {
-                    // eslint-disable-next-line @typescript-eslint/no-use-before-define -- отписка объявлена ниже, а зовётся отсюда уже после
-                    stopListening();
-                    return;
-                }
-                drag.moved = true;
-                setDragging(true);
-                // Выделение, начатое этим же движением, снимаем: тянут коробку, а не выделяют
-                // текст. Дальше его не даёт набрать `user-select` (см. .shadeDragging).
-                window.getSelection()?.removeAllRanges();
-            }
-            // Отмечаем то, куда палец увёл коробку, а не то, где он сам: скорость считается
-            // в открытости, и упереться в предел она не должна — брошенная за нижнюю точку
-            // коробка обязана долететь до конца, а не потерять на упоре весь разгон.
-            fling.mark(startOpen - (along(moveEvent) - startAt), moveEvent.timeStamp);
-            // За пределы своих точек коробка не выходит ни туда, ни сюда: выше верхней её
-            // и так видно целиком, ниже нижней — не видно вовсе.
-            const opened = Math.min(Math.max(startOpen - (along(moveEvent) - startAt), lowest), highest);
-            drag.shift = run - opened;
-            setShift(drag.shift);
+        const points = normalizeMagnets(magnet?.points ?? [], run, magnet?.gap);
+        runRef.current = {
+            pointerId: event.pointerId,
+            startAt: event.clientY,
+            // Открытость на момент, когда коробку взяли: сколько её видно.
+            startOpen: run - (shift ?? 0),
+            run,
+            points,
+            moved: false,
+            shift: shift ?? 0,
+            // Чем кончилось движение пальца: по последним его отметкам и считается скорость
+            // в момент отпускания. Мерка общая со всеми, кого тянут, — см. `trackFling`.
+            fling: trackFling(),
         };
+        // Захват указателя: дальше события приходят ручке, куда бы палец ни ушёл, — а первый же
+        // шаг выносит его за её кромку. Отпускается захват сам, вместе с нажатием.
+        grip.setPointerCapture(event.pointerId);
+        setDragging(true);
+    };
 
-        // Отписка объявлена раньше самих обработчиков: она им и нужна — движение кончается тем,
-        // что мы перестаём его слушать.
-        const stopListening = () => {
-            window.removeEventListener('pointermove', move);
-            // eslint-disable-next-line @typescript-eslint/no-use-before-define -- взаимная ссылка: отписка снимает обработчик, обработчик её зовёт
-            window.removeEventListener('pointerup', up);
-            // eslint-disable-next-line @typescript-eslint/no-use-before-define -- то же самое
-            window.removeEventListener('pointercancel', up);
-        };
-
-        const up = (upEvent: PointerEvent) => {
-            stopListening();
-            setDragging(false);
-            if (!drag.moved) {
-                return;
-            }
-            draggedRef.current = true;
-            const settled = settleMagnet({
-                from: startOpen,
-                to: run - drag.shift,
-                velocity: fling.speed(upEvent.timeStamp),
-                points,
-                free: magnet.free,
-                pull: magnet.pull,
-            });
-            // Закрытой коробки на месте не бывает: съехавшую в ноль убирают совсем, и уезжает
-            // она обычным уходом — сдвиг с неё поэтому снимаем, иначе он спорил бы с ним.
-            if (settled <= 0) {
-                setShift(null);
-                onClose();
-                return;
-            }
-            setShift(settled >= run ? null : run - settled);
-        };
-
-        // Слушаем окно, а не саму коробку: первый же шаг выносит палец за её кромку,
-        // и обработчик на ней не увидел бы дальше ничего. Захват указателя
-        // (setPointerCapture) вместо этого не годится — он уводит к коробке и нажатия,
-        // и ни одна кнопка внутри неё больше не нажималась бы.
-        window.addEventListener('pointermove', move);
-        window.addEventListener('pointerup', up);
-        window.addEventListener('pointercancel', up);
-        dropDragRef.current = stopListening;
+    const onPointerMove = (event: ReactPointerEvent<HTMLElement>) => {
+        const drag = runRef.current;
+        if (drag?.pointerId !== event.pointerId) {
+            return;
+        }
+        drag.moved = true;
+        const way = event.clientY - drag.startAt;
+        // Отмечаем то, куда палец увёл коробку, а не то, где он сам: скорость считается
+        // в открытости, и упереться в предел она не должна — брошенная за нижнюю точку
+        // коробка обязана долететь до конца, а не потерять на упоре весь разгон.
+        drag.fling.mark(drag.startOpen - way, event.timeStamp);
+        // За пределы своих точек коробка не выходит ни туда, ни сюда: выше верхней её
+        // и так видно целиком, ниже нижней — не видно вовсе.
+        const lowest = drag.points[0];
+        const highest = drag.points[drag.points.length - 1];
+        const opened = Math.min(Math.max(drag.startOpen - way, lowest), highest);
+        drag.shift = drag.run - opened;
+        setShift(drag.shift);
     };
 
     /**
-     * Нажатие, которым кончилось перетаскивание, до содержимого не доходит: тянут коробку
-     * за любое место, в том числе за кнопку. Ловится оно на погружении — до всех обработчиков
-     * внутри.
+     * Отпустили — коробка приезжает к своей точке. Сюда же приходит и обрыв: касание забрал
+     * браузер, окно потеряло захват. Скорости в этом случае нет, и коробка встаёт на ближнюю
+     * точку, а не отматывается назад — отматывать её человек не просил.
      */
-    const onClickCapture = (event: ReactMouseEvent<HTMLElement>) => {
-        if (draggedRef.current) {
-            draggedRef.current = false;
-            event.preventDefault();
-            event.stopPropagation();
+    const onPointerUp = (event: ReactPointerEvent<HTMLElement>) => {
+        const drag = runRef.current;
+        if (drag?.pointerId !== event.pointerId) {
+            return;
         }
+        runRef.current = null;
+        setDragging(false);
+        if (!drag.moved) {
+            return;
+        }
+        const settled = settleMagnet({
+            from: drag.startOpen,
+            to: drag.run - drag.shift,
+            velocity: drag.fling.speed(event.timeStamp),
+            points: drag.points,
+        });
+        // Закрытой коробки на месте не бывает: съехавшую в ноль убирают совсем, и уезжает
+        // она обычным уходом — сдвиг с неё поэтому снимаем, иначе он спорил бы с ним.
+        if (settled <= 0) {
+            setShift(null);
+            onClose();
+            return;
+        }
+        setShift(settled >= drag.run ? null : drag.run - settled);
     };
 
-    return { shift, dragging, handlers: { onPointerDown, onClickCapture } };
+    return {
+        shift,
+        dragging,
+        handlers: {
+            onPointerDown,
+            onPointerMove,
+            onPointerUp,
+            onPointerCancel: onPointerUp,
+            // Захват теряется и без отпускания — ручку сняли с экрана посреди движения.
+            // Событие приходит и на обычном отпускании, но там движение уже закрыто,
+            // и второй заход ничего не делает.
+            onLostPointerCapture: onPointerUp,
+        },
+    };
 };
