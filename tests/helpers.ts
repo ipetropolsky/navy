@@ -105,6 +105,16 @@ export const openSheet = async (page: Page): Promise<void> => {
 };
 
 /**
+ * Кнопка выхода внизу списка кораблей.
+ *
+ * Ищется по первому слову: второе — «с рейда» — стоит только там, где список широк, а на узком
+ * от подписи остаётся одно «Уйти» (см. `.wide` в MembersList.module.less). Ширину списку задаёт
+ * разговор, и в боковой раскладке он и в треть окна бывает — рассчитывать на полную подпись
+ * нельзя нигде.
+ */
+export const leaveButton = (page: Page) => page.getByRole('button', { name: /^Уйти/ });
+
+/**
  * Уйти с рейда: кнопка внизу списка кораблей, а следом — новый курс в шторке прощания.
  *
  * Курс обязателен: молча с рейда не уходят, и без набранного курса подтверждение недоступно.
@@ -113,7 +123,7 @@ export const openSheet = async (page: Page): Promise<void> => {
  */
 export const leaveRaid = async (page: Page, course = 'В Кронштадт'): Promise<void> => {
     await openSheet(page);
-    await page.getByRole('button', { name: 'Уйти с рейда' }).click();
+    await leaveButton(page).click();
     await page.getByLabel('Задайте новый курс').fill(course);
     await page.getByRole('button', { name: 'Курс верный' }).click();
     await page.waitForTimeout(WRITE_MS);

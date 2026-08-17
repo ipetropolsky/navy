@@ -8,6 +8,7 @@ import {
     bubbles,
     clickShip,
     join,
+    leaveButton,
     leaveRaid,
     openChannel,
     openJoinForm,
@@ -264,7 +265,7 @@ test('ушедший корабль остаётся в ленте с авата
 test('уход спрашивает курс, и без него не уйти, а «Полный назад» оставляет на рейде', async ({ page }) => {
     await openChannel(page, DEMO, ALBATROS);
     await openSheet(page);
-    await page.getByRole('button', { name: 'Уйти с рейда' }).click();
+    await leaveButton(page).click();
 
     const shade = page.getByRole('region', { name: 'Вы уходите с рейда' });
     await expect(shade, 'шторка прощания не открылась').toBeVisible();

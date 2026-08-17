@@ -512,14 +512,24 @@ const measureHeights = async (page: Page, width: number, heights: number[]) => {
 };
 /* eslint-enable no-await-in-loop */
 
-/** Плашка формы: её ширина и скругление и отличают мобильный вид от десктопного. */
+/** Показана ли лента: свёрнутый до пола разговор убирает её вовсе (см. FEED_MIN). */
+const feedShown = (page: Page): Promise<boolean> =>
+    page.locator('main [class*="_list_"]').evaluate((node) => getComputedStyle(node).display !== 'none');
+
+/**
+ * Плашка формы: её ширина и скругление и отличают мобильный вид от десктопного.
+ *
+ * Хозяина меряем по внутренней кромке (`clientWidth`), а не по внешней: во внешнюю входят
+ * и рамка блока контента, и место, отложенное под полосу прокрутки, — а занять их плашке
+ * нечем. «Во всю ширину» значит во всю ширину внутри хозяина.
+ */
 const panelBox = (page: Page): Promise<{ width: number; radius: number; parentWidth: number }> =>
     page.evaluate(() => {
         const panel = document.querySelector('[class*="card"]')!;
         return {
             width: Math.round(panel.getBoundingClientRect().width),
             radius: parseFloat(getComputedStyle(panel).borderTopLeftRadius),
-            parentWidth: Math.round(panel.parentElement!.getBoundingClientRect().width),
+            parentWidth: Math.round(panel.parentElement!.clientWidth),
         };
     });
 
@@ -528,7 +538,7 @@ interface ActionsBar {
     width: number;
     /** Ширина полосы целиком: она доходит фоном и чертой до краёв хозяина. */
     bandWidth: number;
-    /** Ширина хозяина по внешней кромке: до неё полосе и положено доходить. */
+    /** Ширина хозяина по внутренней кромке: до неё полосе и положено доходить. */
     ownerWidth: number;
     /** Толщина черты сверху: полоса отбита ею так же, как панель с полем ввода. */
     rule: number;
@@ -547,6 +557,9 @@ interface ActionsBar {
  * и своими полями, и «кнопки взяли всю ширину» значит всю ширину внутри неё. Саму полосу
  * меряем отдельно: ей положено доходить фоном и чертой до краёв хозяина, гася его поля
  * отрицательными margin и возвращая их своими padding.
+ *
+ * Хозяин при этом меряется по `clientWidth`: форма мотает себя сама и держит место под полосу
+ * прокрутки, и это место — не её ширина. Полосе кнопок туда не дотянуться, да и незачем.
  */
 const actionsBar = (page: Page): Promise<ActionsBar> =>
     page.evaluate(() => {
@@ -559,7 +572,7 @@ const actionsBar = (page: Page): Promise<ActionsBar> =>
         return {
             width: right - left,
             bandWidth: box.width,
-            ownerWidth: bar.parentElement!.getBoundingClientRect().width,
+            ownerWidth: bar.parentElement!.clientWidth,
             rule: Number.parseFloat(style.borderTopWidth),
             background: style.backgroundColor,
             position: style.position,
@@ -809,12 +822,13 @@ test.describe('десктоп', () => {
     });
 
     // Плашка формы одна на все экраны: карточки по центру на широком больше нет. Тянется
-    // за ней не всё — поле на одно слово держит половину ширины, но не уже 350px, иначе
-    // строка под позывной читалась бы полем для абзаца.
+    // за ней не всё — поле на одно слово держит половину ширины, но не уже 350px и не шире
+    // самой формы (`min(100%, max(50%, 350px))` в Input.module.less), иначе строка под позывной
+    // читалась бы полем для абзаца.
     //
-    // Обе мерки на десктопной колонке сошлись почти в одну: блок контента шириной 744px даёт
-    // форме 694 внутри, то есть 347 на половину, — и нижняя мерка перевешивает её на три
-    // пикселя. Проверяется поэтому само правило, а не та его половина, которая сейчас победила.
+    // Проверяется само правило целиком, а не та его мерка, которая победила на этом окне:
+    // форма стоит в боковой панели, панель по умолчанию в треть окна, и от ширины окна
+    // зависит, чья возьмёт.
     test('форма занимает ширину целиком, а поле на одно слово — половину', async ({ page }) => {
         await openChannel(page, DEMO);
         await openJoinForm(page);
@@ -827,7 +841,10 @@ test.describe('десктоп', () => {
             const inner = form.clientWidth - 2 * parseFloat(getComputedStyle(form).paddingLeft);
             return { width: input.getBoundingClientRect().width, inner };
         });
-        expect(field.width, 'поле позывного взяло не свою ширину').toBeCloseTo(Math.max(350, field.inner / 2), 0);
+        expect(field.width, 'поле позывного взяло не свою ширину').toBeCloseTo(
+            Math.min(field.inner, Math.max(350, field.inner / 2)),
+            0
+        );
     });
 
     test('в форме кнопки делят ширину так же, как на телефоне', async ({ page }) => {
@@ -996,6 +1013,15 @@ const contentBox = async (page: Page): Promise<{ width: number; height: number; 
     };
 };
 
+/**
+ * Пол разговора под кадром, px: ручка и плашка ввода под ней.
+ *
+ * Числом он не записан нигде — плашка бывает разной высоты, с ответом над полем и с вырезом
+ * экрана под ним, — и меряется здесь так же, как в самом приложении: по живой разметке.
+ */
+const chatFloor = async (page: Page): Promise<number> =>
+    SHEET_HANDLE + (await page.locator('[class*="composer"]').first().boundingBox())!.height;
+
 /** Коробка блока в координатах окна — со всеми четырьмя кромками сразу. */
 const boxOf = (page: Page, selector: string) =>
     page.locator(selector).evaluate((node) => {
@@ -1008,6 +1034,23 @@ const boxOf = (page: Page, selector: string) =>
             height: Math.round(rect.height),
         };
     });
+
+/**
+ * Стоит ли разговор сбоку — по форме окна, а не по тому, что видно на экране.
+ *
+ * Спрашивается это ровно тем же правилом, что и в самом приложении (`chatMode` в hooks/useLayout):
+ * лежачее окно — сбоку, стоячее — под кадром. Искать вместо этого кнопку панели нельзя: сразу
+ * после смены размера окна на экране ещё стоит разметка прежней раскладки, и проверка успевала
+ * найти кнопку, которой через кадр не станет, — нажатие после этого ждало исчезнувший узел
+ * до самого срока.
+ */
+const sideLaid = (page: Page): boolean => {
+    const view = page.viewportSize()!;
+    return view.width > view.height;
+};
+
+/** Кнопка возврата убранной панели. Она же примета того, что панели сейчас на экране нет. */
+const panelButtonBack = (page: Page) => page.getByRole('button', { name: 'Вернуть панель' });
 
 /**
  * Отдать кадру всё, что разговор может отдать, — и вернуть обратно.
@@ -1023,10 +1066,15 @@ const boxOf = (page: Page, selector: string) =>
  * Обе стороны движения ждут не срока, а конца перехода — его ловит уже сам вызывающий.
  */
 const freeFrame = async (page: Page): Promise<void> => {
-    const hide = page.getByRole('button', { name: 'Убрать панель' });
-    if (await hide.count()) {
-        await hide.click();
-        await expect(page.getByRole('button', { name: 'Вернуть панель' }), 'панель не ушла с экрана').toBeVisible();
+    if (sideLaid(page)) {
+        const hide = page.getByRole('button', { name: 'Убрать панель' });
+        await expect(hide.or(panelButtonBack(page)), 'боковая раскладка не доехала').toBeVisible();
+        // Панели может уже и не быть — например, её убрали на прошлом окне, а тут только
+        // повернули. Требовать нажатия в таком случае значит требовать сделать сделанное.
+        if (await hide.isVisible()) {
+            await hide.click();
+            await expect(panelButtonBack(page), 'панель не ушла с экрана').toBeVisible();
+        }
         return;
     }
     const grip = page.locator('[role="separator"]');
@@ -1036,10 +1084,14 @@ const freeFrame = async (page: Page): Promise<void> => {
 
 /** Вернуть разговору место, отданное `freeFrame`: тем же способом, что и отдавали. */
 const fillFrame = async (page: Page): Promise<void> => {
-    const show = page.getByRole('button', { name: 'Вернуть панель' });
-    if (await show.count()) {
-        await show.click();
-        await expect(page.getByRole('button', { name: 'Убрать панель' }), 'панель не вернулась').toBeVisible();
+    if (sideLaid(page)) {
+        const show = panelButtonBack(page);
+        const hide = page.getByRole('button', { name: 'Убрать панель' });
+        await expect(hide.or(show), 'боковая раскладка не доехала').toBeVisible();
+        if (await show.isVisible()) {
+            await show.click();
+            await expect(hide, 'панель не вернулась').toBeVisible();
+        }
         return;
     }
     const grip = page.locator('[role="separator"]');
@@ -1075,13 +1127,11 @@ test('раскладку выбирает форма окна: лежачее �
 
     const under = await contentBox(page);
     expect(under.height, 'под кадром разговор встал не в свою долю места под шапкой').toBe(chatSize(STANDING));
-    // Ширина отмерена от окна за вычетом шторочной полоски: разговор под кадром — такая же
-    // шторка, как список кораблей, и по её краям видно море, а не кромку окна.
-    expect(under.width, 'под кадром разговор взял не ширину шторки').toBe(
-        Math.min(STANDING.width - SHEET_INSET, COLUMN_WIDTH)
-    );
-    // Полоска ровно поровну с обеих сторон: шторку центрует поле, а не прижимает к одному краю.
-    expect(under.left, 'разговор встал не посередине').toBe((STANDING.width - under.width) / 2);
+    // Ширина — всё окно, от кромки до кромки. Разговор под кадром хоть и шторка, но самая
+    // нижняя: полоски по бокам показывают, что под шторкой что-то лежит, а под этой лежит
+    // только край экрана. Полоску отдают тем, кто ложится поверх (см. `--shade-steps`).
+    expect(under.width, 'под кадром разговор взял не всю ширину окна').toBe(STANDING.width);
+    expect(under.left, 'разговор встал не от левой кромки окна').toBe(0);
     // А вот снизу поля нет: шторки в приложении прижаты к нижней кромке окна.
     expect(under.top + under.height, 'разговор не дошёл до нижней кромки окна').toBe(STANDING.height);
     const overFrame = await boxOf(page, 'header');
@@ -1199,8 +1249,8 @@ const swipeScene = (page: Page, by: number): Promise<boolean> =>
 
 /**
  * Свайп по кадру ведёт разговор по его же ступенькам: вверх — на одну выше, вниз — на одну
- * ниже, вплоть до нуля, где разговора на экране нет. Ступенька, а не «убрать-вернуть»: палец
- * ведёт сам разговор, а положений у того четыре.
+ * ниже, вплоть до пола, где от разговора остаётся ручка с плашкой ввода. Ступенька, а не
+ * «убрать-вернуть»: палец ведёт сам разговор, а положений у того четыре.
  *
  * Движение пальца при этом не отменяется ни в какую сторону — иначе кадр терял бы вместе с ним
  * нажатия по кораблям.
@@ -1211,6 +1261,7 @@ test('свайп по кадру ведёт разговор по ступень
     await openChannel(page, DEMO, ALBATROS);
     const room = phone.height - SHEET_TOP_GAP;
     const chat = chatSize(phone);
+    const floor = Math.round(await chatFloor(page));
     await expect
         .poll(async () => (await contentBox(page)).height, { message: 'разговор встал не в свою долю' })
         .toBe(chat);
@@ -1221,20 +1272,25 @@ test('свайп по кадру ведёт разговор по ступень
         .poll(async () => (await contentBox(page)).height, { message: 'разговор не поднялся на ступеньку' })
         .toBe(Math.round(room * (2 / 3)));
 
-    // Вниз дважды — обратно на треть и совсем с экрана.
+    // Вниз дважды — обратно на треть и до самого пола.
     expect(await swipeScene(page, 120), 'кадр отменил движение пальца').toBe(false);
     await expect
         .poll(async () => (await contentBox(page)).height, { message: 'разговор не опустился на ступеньку' })
         .toBe(chat);
     expect(await swipeScene(page, 120), 'кадр отменил движение пальца').toBe(false);
     await expect
-        .poll(async () => (await boxOf(page, 'header')).height, { message: 'кадр не занял окно после свайпа вниз' })
-        .toBe(phone.height);
+        .poll(async () => (await contentBox(page)).height, { message: 'разговор не свернулся до пола' })
+        .toBe(floor);
+    // Кадру достаётся всё, кроме пола: свёрнутый разговор — ручка с плашкой ввода, и больше окна
+    // он не занимает ничем. Не «ровно столько», а «не меньше»: кромкой кадр заезжает под него.
+    expect((await boxOf(page, 'header')).height, 'кадр не занял окно после свайпа вниз').toBeGreaterThanOrEqual(
+        phone.height - floor
+    );
 
-    // С нижней ступеньки вниз идти некуда: разговора и так нет.
+    // С нижней ступеньки вниз идти некуда: разговор и так свёрнут до пола.
     await swipeScene(page, 120);
     await page.waitForTimeout(400);
-    expect((await contentBox(page)).height, 'убранный разговор что-то вернуло на экран').toBe(0);
+    expect((await contentBox(page)).height, 'свёрнутый разговор свайп унёс ещё ниже').toBe(floor);
 
     // И обратно вверх — на ту же треть, с которой уходили.
     await swipeScene(page, -120);
@@ -1494,18 +1550,23 @@ const PHONE = { width: MOBILE_MAX_WIDTH - 90, height: 844 };
 
 test('со свёрнутым разговором форма своего корабля всё равно выезжает', async ({ page }) => {
     await page.setViewportSize(PHONE);
-    await openChannel(page, DEMO, ALBATROS);
+    // Свой канал с единственным кораблём: форму открываем нажатием по нему в кадре, и накрыть
+    // его тут некому. В демо-эскадре места раздаются всякий раз заново, и ближний корабль
+    // запросто встаёт поверх дальнего (см. `openShipForm` в helpers).
+    await openNewChannel(page, 'gruz-form');
+    await join(page, 'Гроза', '317');
 
     await freeFrame(page);
-    const folded = await contentBox(page);
+    // Ждём конца свёртывания и только потом запоминаем: снятая на ходу коробка — это кадр
+    // движения, и сверять с ним то, что будет стоять на месте, значит сверять с чем попало.
     await expect
         .poll(async () => (await contentBox(page)).height, { message: 'разговор не свернулся до пола' })
         .toBeLessThan(chatSize(PHONE) / 2);
 
-    // Открываем форму на почти голом кадре: список кораблей достают из шапки, и он от разговора
-    // не зависит вовсе.
-    await openSheet(page);
-    await page.getByRole('button', { name: 'Настроить корабль' }).click();
+    // Открываем форму на почти голом кадре — нажатием по своему кораблю. Именно этой дорогой:
+    // список кораблей разговор за собой достаёт (ему в свёрнутом негде показаться), а форма
+    // не достаёт нарочно — она сама себе слой и стоит соседом разговору, а не в нём.
+    await clickShip(page, page.locator('[class*="shipMine"]'));
     await page.waitForTimeout(600);
 
     const form = await boxOf(page, '[class*="form_"]');
@@ -1523,7 +1584,13 @@ test('со свёрнутым разговором форма своего ко�
     // собой.
     await page.getByRole('button', { name: 'Отмена' }).click();
     await page.waitForTimeout(600);
-    expect(await contentBox(page), 'форма развернула разговор').toEqual(folded);
+    const after = await contentBox(page);
+    // Сверяем не пиксель в пиксель с тем, что было до формы: пол разговора — это ручка плюс
+    // живая высота плашки ввода, а она у пустой и у заполненной формы разная. Свёрнутость
+    // видна не числом, а тем, что разговор прижат к нижней кромке и ленты в нём нет.
+    expect(after.height, 'форма развернула разговор').toBeLessThan(chatSize(PHONE) / 2);
+    expect(after.top + after.height, 'разговор отошёл от нижней кромки окна').toBe(PHONE.height);
+    expect(await feedShown(page), 'у свёрнутого разговора вернулась лента').toBe(false);
 });
 
 /**
@@ -1607,9 +1674,16 @@ const openCard = async (page: Page): Promise<void> => {
 /** Что мотается внутри шторки: у карточки корабля — она сама целиком, от позывного до кнопок. */
 const SHEET_BODY = '[class*="shade_"] [class*="card_"]';
 
-/** Ручка шторки: единственное место, за которое её тянут. */
+/**
+ * Ручка шторки: единственное место, за которое её тянут.
+ *
+ * Целимся в саму рисочку, а не в середину области хвата: область заходит на содержимое сверху
+ * вниз, и первое, на что она заходит, — строка позывного. Та стоит выше ручки нарочно (см.
+ * `.title` в ShipCard.module.less): в ней нажимают вымпел старшего, и доставаться этот тычок
+ * должен вымпелу, а не свайпу. Середина области хвата приходится ровно на эту строку.
+ */
 const shadeGrip = async (page: Page): Promise<{ x: number; y: number }> => {
-    const box = (await shadeRegion(page).locator('[class*="handle_"]').first().boundingBox())!;
+    const box = (await shadeRegion(page).locator('[class*="grip_"]').first().boundingBox())!;
     return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
 };
 
@@ -1735,9 +1809,9 @@ test('шторка в просторном окне уже своей полос
  * Шторка отступает не от окна, а от того, на чём лежит: под кадром под ней всегда разговор —
  * такая же шторка, — и по её краям должно быть видно не только море, но и он.
  *
- * Проверяется это разностью, а не числами: разговор и шторка стоят по центру одного и того же
- * окна, и «уже на 10px с каждого края» тут значит ровно то, что края разошлись на @sheet-inset
- * с обеих сторон.
+ * Проверяется это разностью, а не числами: разговор стоит во всю ширину окна, а шторка внутри
+ * него — уже на полоску с каждого края, и «уже» тут значит ровно то, что края разошлись
+ * на @sheet-inset с обеих сторон.
  *
  * Второй этаж стопки прибавляет ещё одну полоску, и его приходится ставить руками: карточка
  * с прощанием — единственные нынешние шторки, и обе открывают из списка, из-под которого
@@ -1752,10 +1826,8 @@ test('шторка стоит внутри разговора, а вложенн
 
     const box = await boxOf(page, 'main');
     const shade = await shadeBox(page);
-    expect(Math.round(shade.left) - box.left, 'шторка встала вровень с левым краем разговора').toBe(SHEET_INSET / 2);
-    expect(box.right - Math.round(shade.left + shade.width), 'шторка встала вровень с правым краем').toBe(
-        SHEET_INSET / 2
-    );
+    expect(Math.round(shade.left) - box.left, 'шторка встала вровень с левым краем разговора').toBe(SHEET_INSET);
+    expect(box.right - Math.round(shade.left + shade.width), 'шторка встала вровень с правым краем').toBe(SHEET_INSET);
 
     // Этаж повыше: та же шторка, но с чужим номером этажа под собой.
     const floored = await page.locator('[class*="shade_"]').evaluate((node) => {
@@ -2806,7 +2878,19 @@ const headerSize = (page: Page) =>
             padding: style.padding,
             // Круг кнопки берётся мерой, а не самой кнопкой: в шапке их то нет вовсе, то одна,
             // то другая, — а мера объявлена на полосе и достаётся каждой (см. .headerBar).
-            button: parseFloat(style.getPropertyValue('--icon-button-size')),
+            //
+            // Меряется мера подставной полоской, а не чтением значения: у переменной, никем
+            // не объявленной через @property, вычисленное значение — не число, а сам текст
+            // `calc(...)`, и числом оно становится только тогда, когда браузер применит его
+            // к настоящему свойству настоящего узла.
+            button: (() => {
+                const probe = document.createElement('span');
+                probe.style.cssText = 'display:block;width:var(--icon-button-size)';
+                bar.appendChild(probe);
+                const size = probe.getBoundingClientRect().width;
+                probe.remove();
+                return size;
+            })(),
         };
     });
 
@@ -3256,7 +3340,7 @@ test('повёрнутое окно само уводит разговор по�
     await page.waitForTimeout(700);
 
     const content = await boxOf(page, 'main');
-    expect(content.width, 'разговор остался в боковой ширине').toBe(Math.min(TURNED.width - SHEET_INSET, COLUMN_WIDTH));
+    expect(content.width, 'разговор остался в боковой ширине').toBe(TURNED.width);
     expect(content.height, 'под кадром разговор встал не в свою долю').toBe(chatSize(TURNED));
     expect(content.top + content.height, 'разговор не дошёл до нижней кромки окна').toBe(TURNED.height);
     await expect(
@@ -3357,11 +3441,11 @@ test('повёрнутое окно не поджимает разговор, а
 const sideWidth = async (page: Page): Promise<number> => (await boxOf(page, 'main')).width;
 
 /**
- * Подвести коридор на `by` пикселей вправо (влево — отрицательное) и поставить.
+ * Подвести коридор на `by` пикселей вправо (влево — отрицательное) и отпустить.
  *
  * Палец перед отпусканием стоит дольше отрезка, на котором меряется усилие (`FLING_MS`):
- * коридор именно подводят, а не бросают. Сбоку у разговора тоже есть точки, и брошенный
- * он улетал бы к ближней из них — а здесь проверяется, что кромка идёт за указателем.
+ * коридор именно подводят, а не бросают. Брошенный улетал бы дальше подведённого — усилие
+ * добавляется к пройденному пути (см. `settleMagnet`), — а тут проверяется само приземление.
  */
 const dragGrip = async (page: Page, by: number): Promise<void> => {
     const grip = await boxOf(page, '[role="separator"]');
@@ -3375,15 +3459,36 @@ const dragGrip = async (page: Page, by: number): Promise<void> => {
 };
 
 /**
- * Ширину бокового разговора меняют свайпом за коридор вдоль его кромки. Упоров два, и оба
- * не про разговор один: уже своего минимума он не бывает, а шире — только пока кадру рядом
- * остаётся его собственный минимум. Рейд про ширину, и отдать её всю разговору значит
- * оставить от рейда вертикальную полоску.
+ * Ширина разговора под пальцем: коридор ведут на `by` пикселей вправо и меряют, не отпуская.
  *
- * Уводить разговор с экрана упоры при этом не мешают: утянутый за нулевую отметку — то есть
- * за саму кромку окна, а не просто в узкую полосу — он уходит целиком. Это не поломка упора,
- * а третий его исход: «стать уже трёхсот» и «уйти вовсе» — разные просьбы, и первая упирается,
- * а вторая исполняется.
+ * Отпускают палец там же, где взяли: отпустить его на полпути значит отдать разговор точке,
+ * а тут смотрят ровно на ход — то единственное место, где упоры и видно. Стоять между точками
+ * разговор умеет только пока его держат.
+ */
+const widthWhileDragging = async (page: Page, by: number): Promise<number> => {
+    const grip = await boxOf(page, '[role="separator"]');
+    const x = grip.left + grip.width / 2;
+    const y = grip.top + grip.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x + by, y, { steps: 8 });
+    const width = await sideWidth(page);
+    await page.mouse.move(x, y, { steps: 8 });
+    await page.waitForTimeout(FLING_MS * 3);
+    await page.mouse.up();
+    await page.waitForTimeout(400);
+    return width;
+};
+
+/**
+ * Ширину бокового разговора меняют свайпом за коридор вдоль его кромки. Под пальцем кромка идёт
+ * за указателем ровно и упирается в два упора, и оба не про разговор один: уже своего минимума
+ * он не бывает, а шире — только пока кадру рядом остаётся его собственный минимум. Рейд про
+ * ширину, и отдать её всю разговору значит оставить от рейда вертикальную полоску.
+ *
+ * Отпущенный разговор при этом встаёт не там, где палец: сбоку у него точки, как и под кадром,
+ * и между ними он не стоит никогда. В окне 1400 их три — убрать, треть и верхний упор, — и уйти
+ * с экрана разговор умеет тем же свайпом: нижняя точка сбоку значит «нет вовсе».
  */
 test('разговор тянут за коридор вдоль кромки, и упирается он в свои пределы', async ({ page }) => {
     await openSide(page);
@@ -3394,21 +3499,23 @@ test('разговор тянут за коридор вдоль кромки, �
     expect(grip.height, 'коридор не во всю высоту разговора').toBe(WIDE.height);
     expect(grip.left, 'коридор встал не у кромки разговора').toBeLessThan(WIDE.width - SIDE_AT_WIDE + CHAT_GRIP);
 
-    // Разговор справа: влево — шире. Тянем на столько, чтобы до упоров было далеко: здесь
-    // проверяется, что он идёт за указателем ровно, а упоры проверяются ниже.
+    // Разговор справа: влево — шире. Тянем на столько, чтобы до упоров было далеко.
+    expect(await widthWhileDragging(page, -60), 'кромка не пошла за указателем').toBe(SIDE_AT_WIDE + 60);
+
+    // Нижний упор: 467 - 300 = 167, и это уже той ширины, в которой помещается лента.
+    expect(await widthWhileDragging(page, 300), 'разговор ужался ниже своего минимума').toBe(SIDE_MIN_WIDTH);
+
+    // Отпущенный на полпути возвращается на свою точку: короткого хода мало, чтобы её покинуть.
     await dragGrip(page, -60);
-    expect(await sideWidth(page), 'разговор не пошёл за указателем').toBe(SIDE_AT_WIDE + 60);
+    expect(await sideWidth(page), 'разговор не удержался на своей точке').toBe(SIDE_AT_WIDE);
 
-    // Тянем в узкую полосу, но не за кромку окна: 527 - 300 = 227, и это ниже минимума.
-    await dragGrip(page, 300);
-    expect(await sideWidth(page), 'разговор ужался ниже своего минимума').toBe(SIDE_MIN_WIDTH);
-
+    // Верхний упор — мерка кадра, и он же верхняя точка: дальше тянуть некуда.
     await dragGrip(page, -900);
     expect(await sideWidth(page), 'разговор отнял у кадра его минимум').toBe(WIDE.width - SCENE_MIN_WIDTH);
 
-    // А теперь за саму кромку — разговор уходит с экрана, и коридора вместе с ним не остаётся:
-    // тянуть больше нечего, возвращают его кнопкой из шапки.
-    await dragGrip(page, 900);
+    // Уверенный свайп к кромке проходит все точки насквозь — разговор уходит с экрана,
+    // и коридора вместе с ним не остаётся: тянуть больше нечего, возвращают его кнопкой из шапки.
+    await dragGrip(page, 700);
     await expect(page.getByRole('button', { name: 'Вернуть панель' }), 'разговор не ушёл с экрана').toBeVisible();
     await expect(page.locator('[role="separator"]'), 'у убранного разговора остался коридор').toHaveCount(0);
 });
@@ -3425,23 +3532,22 @@ test('разговор тянут за коридор вдоль кромки, �
  */
 test('сузившееся окно урезает разговор, но выбора не переписывает', async ({ page }) => {
     await openSide(page);
-    // Две сотни, а не три: от трёхсот кромка встала бы в тридцати пикселях от упора, и точка
-    // притянула бы её к себе — проверялось бы уже не окно, а магнит.
-    await dragGrip(page, -200);
+    // Тянем до верхней точки: сбоку их в этом окне три — убрать, треть и упор, — и других
+    // ширин, кроме открывшейся трети, выбрать просто не из чего.
+    await dragGrip(page, -900);
     const chosen = await sideWidth(page);
-    expect(chosen, 'разговор не пошёл за указателем').toBe(SIDE_AT_WIDE + 200);
+    expect(chosen, 'разговор не встал на верхнюю точку').toBe(WIDE.width - SCENE_MIN_WIDTH);
 
     // Окно уже — разговор урезан ровно на столько, чтобы кадру остался его минимум.
     await page.setViewportSize({ width: 1000, height: 900 });
     await page.waitForTimeout(400);
     expect(await sideWidth(page), 'разговор не ужался вслед за окном').toBe(1000 - SCENE_MIN_WIDTH);
 
-    // Окно повернули — разговор под кадром, и ширина ему больше не мерка.
+    // Окно повернули — разговор под кадром, и ширина ему больше не мерка: там он лежит
+    // во всю ширину окна, какой бы она ни была.
     await page.setViewportSize(TURNED);
     await page.waitForTimeout(400);
-    expect(await sideWidth(page), 'разговор остался в боковой ширине').toBe(
-        Math.min(TURNED.width - SHEET_INSET, COLUMN_WIDTH)
-    );
+    expect(await sideWidth(page), 'разговор остался в боковой ширине').toBe(TURNED.width);
 
     // Окно раздалось обратно — вернулась и раскладка, и выбранная ширина.
     await page.setViewportSize(WIDE);
@@ -3459,9 +3565,9 @@ test('сузившееся окно урезает разговор, но выб
  */
 test('ширина сбоку помнится отдельно от высоты под кадром и переживает перезагрузку', async ({ page }) => {
     await openSide(page);
-    await dragGrip(page, -120);
+    await dragGrip(page, -900);
     const chosen = await sideWidth(page);
-    expect(chosen, 'разговор не пошёл за указателем').toBe(SIDE_AT_WIDE + 120);
+    expect(chosen, 'разговор не встал на верхнюю точку').toBe(WIDE.width - SCENE_MIN_WIDTH);
 
     // Поворот: под кадром разговор открывается своей долей, а не натянутой сбоку.
     await page.setViewportSize(TURNED);
@@ -3870,19 +3976,6 @@ test('разговор под кадром встаёт только на сво
     await leadChat(page, 400);
     expect(await chatHeight(page), 'разговор поднялся не во весь рост').toBe(room);
 });
-
-/**
- * Пол разговора под кадром, px: ручка и плашка ввода под ней.
- *
- * Числом он не записан нигде — плашка бывает разной высоты, с ответом над полем и с вырезом
- * экрана под ним, — и меряется здесь так же, как в самом приложении: по живой разметке.
- */
-const chatFloor = async (page: Page): Promise<number> =>
-    SHEET_HANDLE + (await page.locator('[class*="composer"]').first().boundingBox())!.height;
-
-/** Показана ли лента: свёрнутый до пола разговор убирает её вовсе (см. FEED_MIN). */
-const feedShown = (page: Page): Promise<boolean> =>
-    page.locator('main [class*="_list_"]').evaluate((node) => getComputedStyle(node).display !== 'none');
 
 /**
  * Короткий сильный рывок вниз сворачивает разговор до пола, не цепляясь за точки по дороге.
@@ -4304,14 +4397,13 @@ test('сбоку форму двигают полоской, а движение
     expect((await boxOf(page, 'header')).width, 'кадр раздался от движения по форме').toBe(frameStood);
 
     // Полоска на кромке двигает всю панель — вместе с формой в ней: ширина панели и есть
-    // то, чем меряется коробка сбоку. Ведём её вправо, панель сужается, кадр забирает
-    // освободившееся ровно на столько же — щели между ними не бывает.
-    await leadSide(page, -120);
+    // то, чем меряется коробка сбоку. Ведём её влево, панель раздаётся до своего упора, кадр
+    // отдаёт ровно столько же — щели между ними не бывает. Ведём широко: отпущенная панель
+    // встаёт на точку, и с трети её уводит только уверенное движение.
+    await leadSide(page, 400);
     const moved = await boxOf(page, '[class*="form_"]');
-    expect(moved.left - stood.left, 'форма не поехала за полоской').toBeGreaterThan(60);
-    expect((await boxOf(page, 'header')).width - frameStood, 'кадр не забрал освободившееся').toBe(
-        moved.left - stood.left
-    );
+    expect(stood.left - moved.left, 'форма не поехала за полоской').toBeGreaterThan(60);
+    expect(frameStood - (await boxOf(page, 'header')).width, 'кадр не отдал занятое').toBe(stood.left - moved.left);
 
     // А движение по буквам выделяет их — и по характеристикам корабля тоже: они для того
     // и написаны, чтобы их читали и сравнивали, а значит и утаскивали с собой.
