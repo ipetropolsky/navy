@@ -23,6 +23,7 @@ import { FLING_MS } from '@/utils/magnet';
 import {
     ALBATROS,
     DEMO,
+    SAIL_TIMEOUT,
     VYMPEL,
     bubbles,
     clickShip,
@@ -37,6 +38,7 @@ import {
     shipNames,
     ships,
     shipsButton,
+    takes,
     test,
     unhasten,
 } from '@tests/helpers';
@@ -698,6 +700,7 @@ test.describe('телефон', () => {
     // выходило 135px, в развёрнутом больше двух третей кадра, — а вместе с раскладками
     // разъезжались месяц, облака и снимок неба, каждый со своей телефонной поправкой.
     test('кадр на телефоне держит ту же пропорцию, что и на десктопе', async ({ page }) => {
+        takes(4);
         await openChannel(page, DEMO);
         const frames = await measureHeights(page, MOBILE_MAX_WIDTH - 90, [900, 700, 560, 440]);
         const [tall, high] = frames;
@@ -751,6 +754,7 @@ test.describe('десктоп', () => {
     // а тем, что концы рейда и берег приколочены к горизонту и к нижней кромке кадра и ужимаются
     // вместе с водой. Сама пропорция на десктопе неподвижна: 40 на 60 при любой высоте окна.
     test('кадр держит свою пропорцию, а рейд с берегом не съезжают на небо', async ({ page }) => {
+        takes(4);
         await openChannel(page, DEMO);
         // Разметку рейда — линии, по которым тут и видно, съехал он или нет, — показывает
         // открытая форма корабля, и открыть её надо до замеров: перемена окна её не трогает.
@@ -915,6 +919,7 @@ const islandBelowHorizon = (page: Page): Promise<{ px: number; share: number }> 
  * широкого кадра с узким при одной высоте окна и одной раскладке.
  */
 test('берег острова стоит на горизонте, а не отъезжает от него вместе с шириной экрана', async ({ page }) => {
+    takes(4);
     await openChannel(page, DEMO);
 
     // Замер после перемены окна — только когда кадр устоялся: и горизонт, и высота воды едут
@@ -967,6 +972,7 @@ const edgeGap = (page: Page): Promise<number> =>
     });
 
 test('корабль не встаёт бортом на обрез кадра, и поле у него одно на всех экранах', async ({ page }) => {
+    takes(5);
     await openNewChannel(page, 'polya');
     // Самый крупный корабль справочника стоит в списке первым: проекты идут по убыванию длины.
     await page.locator('[role="button"]:has([class*="portraitShip"])').first().click();
@@ -976,7 +982,9 @@ test('корабль не встаёт бортом на обрез кадра, 
     // корабль к кромке ближе, чем когда встанет. Ждём не срок, а конца хода — сцена сама
     // снимает пометку движения, когда корабль пришёл.
     await ships(page).first().waitFor();
-    await expect(page.locator('[data-motion]'), 'корабль так и не дошёл до места').toHaveCount(0, { timeout: 40000 });
+    await expect(page.locator('[data-motion]'), 'корабль так и не дошёл до места').toHaveCount(0, {
+        timeout: SAIL_TIMEOUT,
+    });
 
     // Допуск здесь и ниже — на качку: корпус на волне ещё и кренится, а прямоугольник вокруг
     // повёрнутой картинки шире самого корпуса. Замер даёт до трёх десятых процента кадра.
@@ -1555,6 +1563,7 @@ const berthSpan = (page: Page): Promise<number> =>
 const PHONE = { width: MOBILE_MAX_WIDTH - 90, height: 844 };
 
 test('со свёрнутым разговором форма своего корабля всё равно выезжает', async ({ page }) => {
+    takes(5);
     await page.setViewportSize(PHONE);
     // Свой канал с единственным кораблём: форму открываем нажатием по нему в кадре, и накрыть
     // его тут некому. В демо-эскадре места раздаются всякий раз заново, и ближний корабль
@@ -1572,6 +1581,12 @@ test('со свёрнутым разговором форма своего ко�
     // Открываем форму на почти голом кадре — нажатием по своему кораблю. Именно этой дорогой:
     // список кораблей разговор за собой достаёт (ему в свёрнутом негде показаться), а форма
     // не достаёт нарочно — она сама себе слой и стоит соседом разговору, а не в нём.
+    //
+    // Ждём, пока корабль встанет: идущий корабль формы не открывает, и метки `shipMine` на нём
+    // в это время нет (см. `canEdit` в SeaScene). Ожидание тут по делу, поэтому и срок ему свой.
+    await expect(page.locator('[data-motion]'), 'корабль так и не встал на место').toHaveCount(0, {
+        timeout: SAIL_TIMEOUT,
+    });
     await clickShip(page, page.locator('[class*="shipMine"]'));
     await page.waitForTimeout(600);
 
@@ -1893,6 +1908,7 @@ test('открытая шторка забирает экран себе, и ш�
  * палец до самого низа экрана.
  */
 test('шторку закрывают крестиком, нажатием мимо, свайпом за ручку и коротким рывком', async ({ page }) => {
+    takes(4);
     await openChannel(page, DEMO, ALBATROS);
 
     await openCard(page);
@@ -2282,6 +2298,7 @@ const headerButton = (page: Page, name: string): Promise<{ size: number; icon: n
  * во всю ширину, и укрупнять шапку от ухода разговора не за чем.
  */
 test('кнопки в шапке одного роста и вместе растут с шириной окна', async ({ page }) => {
+    takes(4);
     // Меряем выход с рейда: это единственная кнопка шапки, которая бывает в обоих окнах.
     // Кнопка панели — только боковая, а на телефоне в шапке кнопок нет вовсе, пока не открыта
     // форма своего корабля.
@@ -2521,6 +2538,7 @@ test('список и форма корабля приезжают поверх 
 const ORION_IN_TILE = { x: 0.4333, y: 0.3966 };
 
 test('Орион стоит в кадре на своём месте и ровно один', async ({ page }) => {
+    takes(5);
     await openChannel(page, DEMO, ALBATROS);
 
     const orions = () =>
@@ -2658,6 +2676,7 @@ test('плитки неба и воды заходят друг на друга,
  * для этого не жалко — обрезается он с боков, где запаса втрое.
  */
 test('снимок неба накрывает небо целиком, а не кончается на полпути', async ({ page }) => {
+    takes(7);
     await openChannel(page, DEMO, ALBATROS);
 
     // Плюс — над снимком осталась полоса голой подложки, ноль и минус — накрыл.
@@ -2776,6 +2795,7 @@ const skyFrames = async (page: Page) => {
  * см. --sky-tile.
  */
 test('небо опущено к воде, а месяц во всех раскладках стоит на своей доле неба', async ({ page }) => {
+    takes(4);
     const frames = await skyFrames(page);
 
     const expectDropped = (frame: Awaited<ReturnType<typeof skyFrame>>, drop: number, label: string): void => {
@@ -2833,6 +2853,7 @@ test('небо опущено к воде, а месяц во всех раск�
  * сдвига, и небо съезжало вниз сверх того, что и так уходит вместе с горизонтом.
  */
 test('уход разговора не двигает и не масштабирует небо', async ({ page }) => {
+    takes(4);
     const frames = await skyFrames(page);
 
     for (const [label, compact, full] of [
@@ -2860,6 +2881,7 @@ test('уход разговора не двигает и не масштабир
  * верхней кромкой.
  */
 test('облака держатся горизонта: одна высота на все четыре кадра', async ({ page }) => {
+    takes(4);
     const frames = await skyFrames(page);
     const all = [frames.desk, frames.deskFull, frames.phone, frames.phoneFull];
 
@@ -3497,6 +3519,7 @@ const widthWhileDragging = async (page: Page, by: number): Promise<number> => {
  * с экрана разговор умеет тем же свайпом: нижняя точка сбоку значит «нет вовсе».
  */
 test('разговор тянут за коридор вдоль кромки, и упирается он в свои пределы', async ({ page }) => {
+    takes(6);
     await openSide(page);
     expect(await sideWidth(page), 'разговор открылся не в свою ширину').toBe(SIDE_AT_WIDE);
 
@@ -3570,6 +3593,7 @@ test('сузившееся окно урезает разговор, но выб
  * третью ширины после поворота — число то же, место совсем другое.
  */
 test('ширина сбоку помнится отдельно от высоты под кадром и переживает перезагрузку', async ({ page }) => {
+    takes(5);
     await openSide(page);
     await dragGrip(page, -900);
     const chosen = await sideWidth(page);
@@ -3963,6 +3987,7 @@ test('под кадром коридор лежит поперёк, вдоль �
  * с которой он не ушёл. Промежуточных положений у него нет вовсе.
  */
 test('разговор под кадром встаёт только на свои точки', async ({ page }) => {
+    takes(5);
     await page.setViewportSize(PHONE);
     await openChannel(page, DEMO, ALBATROS);
     const room = chatRoom(PHONE);
@@ -4120,6 +4145,7 @@ const feedRolls = async (page: Page): Promise<number> => {
  * лента перестаёт ехать, и заметно это не сразу, а после нескольких манипуляций подряд.
  */
 test('лента мотается и после того, как разговор погоняли по точкам', async ({ page }) => {
+    takes(14);
     await page.setViewportSize(PHONE);
     await openChannel(page, DEMO, ALBATROS);
 
@@ -4210,6 +4236,10 @@ test('кадр берёт остаток окна с заездом, а ниже
  * встаёт в свой рост. Разъехаться они могут только между собой — и видно это только на стыке.
  */
 test('приезд разговора к точке раздаёт кадр без щели на стыке', async ({ page }) => {
+    // Время тут обычное: проверка смотрит на сам приезд покадрово, а ускоренный он идёт
+    // сорок миллисекунд — два-три кадра экрана, и съёмка застаёт уже приехавшее.
+    await unhasten(page);
+    takes(4);
     await page.setViewportSize(PHONE);
     await openChannel(page, DEMO, ALBATROS);
 
@@ -4300,6 +4330,7 @@ const leadSide = async (page: Page, by: number): Promise<void> => {
 };
 
 test('разговор сбоку встаёт только на свои точки', async ({ page }) => {
+    takes(5);
     await page.setViewportSize(LYING);
     await openChannel(page, DEMO, ALBATROS);
 
@@ -4398,6 +4429,7 @@ const lowerForm = async (page: Page, by: number): Promise<void> => {
  * попасть.
  */
 test('приспущенная форма отдаёт кадру своё место, а отпущенная у кромки встаёт обратно', async ({ page }) => {
+    takes(5);
     await page.setViewportSize(PHONE);
     await openChannel(page, DEMO, ALBATROS);
     await openSheet(page);
@@ -4474,6 +4506,7 @@ test('форму постановки в строй закрывает тот ж
  * выделяет их — где бы буквы ни лежали, хоть в заголовке, хоть в характеристиках корабля.
  */
 test('сбоку форму двигают полоской, а движение по ней достаётся выделению', async ({ page }) => {
+    takes(5);
     await openSide(page);
     await openSheet(page);
     await page.getByRole('button', { name: 'Настроить корабль' }).click();

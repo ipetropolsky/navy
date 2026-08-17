@@ -20,6 +20,7 @@ import {
     ships,
     shipsButton,
     systemLines,
+    takes,
     test,
 } from '@tests/helpers';
 
@@ -100,14 +101,15 @@ test('реплика уходит и привязывается ответом',
     // пузырю приходится как раз на этот прыжок. Промахнувшись, он достаётся соседнему пузырю
     // или своему собственному — и цитата над строкой ввода не появляется вовсе. Ловится это
     // только на неспешной машине и без окна на экране, поэтому щёлкаем с повтором: попытка
-    // засчитана, когда над строкой ввода встала цитата того самого сообщения.
+    // засчитана, когда над строкой ввода встала цитата того самого сообщения. Подходов три:
+    // прыжок ленты кончается за первый, и если цитата не встала и с третьего, дело не в прыжке.
     // Первая реплика, а не первое сообщение: лента начинается со строчек канала о входе,
     // и пузырей среди них нет — щёлкать в них не по чему.
     const target = (await readState(page)).channels['ch-demo'].messages.find((message) => message.text)!;
     await expect(async () => {
         await bubbles(page).first().click();
-        await expect(page.locator('[class*="replyBar"]')).toContainText(target.text!, { timeout: 2000 });
-    }, 'лента так и не показала, на что отвечает').toPass({ timeout: 20_000 });
+        await expect(page.locator('[class*="replyBar"]')).toContainText(target.text!, { timeout: 1_000 });
+    }, 'лента так и не показала, на что отвечает').toPass({ timeout: 3_000 });
     await send(page, 'Идём следом');
 
     // Ждём, а не читаем сразу: запись в состояние идёт через общую очередь (см. exclusive
@@ -386,8 +388,10 @@ test('строчка о корабле стоит по его сторону л�
     // И на неё отвечают, как на реплику: нажали — и цитата встала над строкой ввода.
     await expect(async () => {
         await note.click();
-        await expect(page.locator('[class*="replyBar"]')).toContainText('Сменил бортовой номер', { timeout: 2000 });
-    }, 'лента так и не показала, что отвечает на строчку канала').toPass({ timeout: 20_000 });
+        await expect(page.locator('[class*="replyBar"]')).toContainText('Сменил бортовой номер', {
+            timeout: 1_000,
+        });
+    }, 'лента так и не показала, что отвечает на строчку канала').toPass({ timeout: 3_000 });
     await send(page, 'Принял новый номер');
     await expect
         .poll(
@@ -515,6 +519,8 @@ test('вымпел старшего в карточке корабля отве�
 });
 
 test('не старшему высаживать нечем, а после его ухода старшинство переходит дальше', async ({ page }) => {
+    // Канал открывается дважды: сперва за одного, потом за другого.
+    takes(4);
     await openChannel(page, DEMO, VYMPEL);
     await shipsButton(page).click();
     await expect(page.getByLabel(/^Высадить/)).toHaveCount(0);
@@ -679,6 +685,7 @@ const ownBerth = async (page: Page): Promise<string> =>
     (await page.locator('[data-berth][aria-pressed="true"]').getAttribute('data-berth')) ?? 'ничего не выбрано';
 
 test('перестановка из соседней вкладки не затирает свою', async ({ context }) => {
+    takes(6);
     const mine = await context.newPage();
     const theirs = await context.newPage();
     await openChannel(mine, DEMO, ALBATROS);
@@ -726,6 +733,8 @@ test('перестановка из соседней вкладки не зат�
 });
 
 test('два корабля не встают на одно место, даже если выбрали его разом', async ({ context }) => {
+    // Две вкладки, и в каждой — свой заход на рейд с ходом по морю.
+    takes(8);
     const mine = await context.newPage();
     const theirs = await context.newPage();
     await openChannel(mine, DEMO, ALBATROS);
