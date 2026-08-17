@@ -1,4 +1,4 @@
-import { KeyboardEvent, MouseEvent, PointerEvent, useEffect, useLayoutEffect, useRef } from 'react';
+import { KeyboardEvent, MouseEvent, PointerEvent, memo, useEffect, useLayoutEffect, useRef } from 'react';
 
 import Avatar from '@/components/ships/Avatar';
 import CodePennant from '@/components/ships/CodePennant';
@@ -45,7 +45,7 @@ const STICK_SLOP = 24;
 const NOTICE_TITLE = 'Техническое сообщение';
 
 /** Лента сообщений в стиле Telegram: группировка по автору, ответы, тап по сообщению — ответить. */
-export default function MessageList({ messages, members, myId, onReply, onHail }: MessageListProps) {
+function MessageList({ messages, members, myId, onReply, onHail }: MessageListProps) {
     const listRef = useRef<HTMLDivElement>(null);
     const notify = useSnackbar();
 
@@ -259,6 +259,10 @@ export default function MessageList({ messages, members, myId, onReply, onHail }
      * и аватаркой. Сама запись о переоснащении остаётся в прежней цепочке: она про то,
      * что случилось с тем кораблём, а новый начинается после неё.
      */
+    // Цитируемое ищем по указателю, а не перебором: перебор внутри перебора — это квадрат
+    // от длины разговора, и на сотнях реплик он уже заметен.
+    const byMessageId = new Map(messages.map((message) => [message.messageId, message]));
+
     const eras = new Map<string, number>();
     const groupKeys = messages.map((message) => {
         const { memberId } = message.author;
@@ -352,9 +356,7 @@ export default function MessageList({ messages, members, myId, onReply, onHail }
                 );
 
                 const thread = system ? undefined : message.thread;
-                const replyTo = thread
-                    ? messages.find((candidate) => candidate.messageId === thread.messageId)
-                    : undefined;
+                const replyTo = thread ? byMessageId.get(thread.messageId) : undefined;
 
                 return (
                     <div key={message.messageId} className={own ? styles.rowOwn : styles.row}>
@@ -407,3 +409,12 @@ export default function MessageList({ messages, members, myId, onReply, onHail }
         </div>
     );
 }
+
+/**
+ * Лента перерисовывается только по своим входным данным.
+ *
+ * Растёт она без предела — сотни пузырей с аватарками, цитатами и вымпелами, — а стоит внутри
+ * коробки, которую человек постоянно тянет за кромку. Размер ленты задаёт раскладка, и от него
+ * в разметке пузырей не меняется ничего: перерисовывать её на каждый шаг пальца незачем.
+ */
+export default memo(MessageList);

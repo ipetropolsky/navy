@@ -1530,6 +1530,44 @@ test('лампа передаёт и то, что набрано поверх в
     await expect.poll(async () => (await flashes(page))[mine], 'набранное поверх выделения не ушло в лампу').toBe(10);
 });
 
+test('набранное уходит на рейд кусками, а не по букве', async ({ page }) => {
+    takes(5);
+    // Обычное время: срок накопления — треть секунды, а ускоренный вдесятеро он короче,
+    // чем промежуток между нажатиями клавиш в прогоне. Копить тогда нечего, и проверка
+    // мерила бы не накопление, а скорость набора.
+    await unhasten(page);
+    await openChannel(page, DEMO, ALBATROS);
+
+    // Слушаем тот же провод, по которому бэкенд разносит события между вкладками: печать
+    // никуда не оседает и увидеть её можно только здесь (см. setTyping в localBackend).
+    await page.evaluate(() => {
+        const heard: string[] = [];
+        (window as unknown as { heard: string[] }).heard = heard;
+        new BroadcastChannel('kilvater').addEventListener(
+            'message',
+            (message: MessageEvent<{ type: string; typing?: { chars: string } }>) => {
+                if (message.data.type === 'typing' && message.data.typing) {
+                    heard.push(message.data.typing.chars);
+                }
+            }
+        );
+    });
+
+    const letters = 'проверкабодрости';
+    await page.getByPlaceholder('Сообщение').pressSequentially(letters);
+    // Ждём хвост: последние буквы уходят по сроку, уже после того, как набор кончился.
+    await expect
+        .poll(async () => page.evaluate(() => (window as unknown as { heard: string[] }).heard.join('')))
+        .toBe(letters);
+
+    // Каждая буква — это событие на все вкладки, а событие перерисовывает там всё приложение:
+    // лампа Морзе живёт в кадре. Поэтому буквы копятся и уходят куском (см. TYPING_SEND_MS
+    // в Composer), и событий обязано быть заметно меньше, чем букв. Сравниваем с половиной,
+    // а не с точным числом: сколько именно кусков выйдет, зависит от скорости набора.
+    const sent = await page.evaluate(() => (window as unknown as { heard: string[] }).heard.length);
+    expect(sent, 'набранное ушло на рейд по букве, без накопления').toBeLessThanOrEqual(letters.length / 2);
+});
+
 test('в списке кораблей выбранный стоит под парами и отзывается лампой', async ({ page }) => {
     // Плашка корабля — `div` с ролью кнопки, а не `button`: из настоящей кнопки не выделишь
     // текст, а он в плашке главное (см. проверку про характеристики в channel.spec).

@@ -2,6 +2,7 @@ import {
     CSSProperties,
     MouseEvent,
     PointerEvent,
+    memo,
     useEffect,
     useLayoutEffect,
     useReducer,
@@ -273,7 +274,7 @@ interface SeaSceneProps {
 }
 
 /** Ночное море: слои неба, месяца, облаков, острова и воды с кораблями-участниками. */
-export default function SeaScene({ members, myId, morseFeeds, ready, berths, onEditShip, onShowShip }: SeaSceneProps) {
+function SeaScene({ members, myId, morseFeeds, ready, berths, onEditShip, onShowShip }: SeaSceneProps) {
     // Кто уже был в кадре. Заплывает только тот, кто вошёл при нас; те, что стояли на рейде
     // до нашего прихода, просто оказываются на месте — въезжать им неоткуда, мы пришли к ним.
     //
@@ -645,7 +646,10 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
         };
         document.addEventListener('visibilitychange', resync);
         return () => document.removeEventListener('visibilitychange', resync);
-    });
+        // Подписка одна на всю жизнь сцены: внутри только ссылки и разметка, свежее состояние
+        // сторожу не нужно. Без списка он переподписывался бы на каждую отрисовку — а их
+        // на сцене столько же, сколько у всего приложения.
+    }, []);
 
     /**
      * Одни часы на всю качку. Отрицательная задержка в стилях отсчитана от появления элемента,
@@ -1388,3 +1392,13 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
         </div>
     );
 }
+
+/**
+ * Кадр перерисовывается только по своим входным данным.
+ *
+ * Он самый тяжёлый на экране — десятки кораблей со своей качкой, огнями и разметкой, — а живёт
+ * рядом с разговором, который перерисовывает приложение на каждом шаге пальца по кромке.
+ * До кадра эти шаги не доходят вовсе: он стоит в коробке, размер которой ему задают стилями,
+ * и от того, насколько вытянут разговор, ни один корабль не сдвинется.
+ */
+export default memo(SeaScene);
