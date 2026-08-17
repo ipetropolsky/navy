@@ -562,10 +562,8 @@ interface ActionsBar {
  * меряем отдельно: ей положено доходить фоном и чертой до краёв хозяина, гася его поля
  * отрицательными margin и возвращая их своими padding.
  *
- * Хозяин при этом меряется по внешней кромке, а не по `clientWidth`: форма мотает себя сама
- * и держит справа полоску под полосу прокрутки, и полоска эта лежит внутри её полей. Полоса
- * кнопок гасит и её (--actions-gutter), иначе фон с чертой обрывались бы за восемь точек
- * до правого края, а кнопки стояли бы от него дальше, чем от левого.
+ * Хозяин — колонка из тела с прокруткой и полосы под ним, и полоса занимает его ширину целиком:
+ * место под полосу прокрутки держит тело, а не он сам, и отнимать у кнопок ей нечего.
  */
 const actionsBar = (page: Page): Promise<ActionsBar> =>
     page.evaluate(() => {
@@ -617,8 +615,10 @@ test.describe('телефон', () => {
 
         // Мерка «половина, но не уже 350px» на телефоне сходится к ширине формы: отдельного
         // правила для узкого экрана нет, и проверяем мы как раз то, что оно не понадобилось.
+        // Меряется тело формы, а не плашка целиком: поля лежат на нём, а плашка — колонка
+        // из тела и полосы кнопок, и своих полей у неё нет.
         const field = await page.getByPlaceholder('Гром').evaluate((input) => {
-            const form = input.closest('[class*="card"]')!;
+            const form = input.closest('[class*="body"]')!;
             return {
                 width: input.getBoundingClientRect().width,
                 inner: form.clientWidth - 2 * parseFloat(getComputedStyle(form).paddingLeft),
@@ -846,8 +846,9 @@ test.describe('десктоп', () => {
         expect(panel.width, 'форма не дотянулась до краёв').toBe(panel.parentWidth);
         expect(panel.radius, 'на всю ширину скругления не нужны').toBe(0);
 
+        // Меряется тело формы: поля лежат на нём, а не на плашке (см. проверку на телефоне).
         const field = await page.getByPlaceholder('Гром').evaluate((input) => {
-            const form = input.closest('[class*="card"]')!;
+            const form = input.closest('[class*="body"]')!;
             const inner = form.clientWidth - 2 * parseFloat(getComputedStyle(form).paddingLeft);
             return { width: input.getBoundingClientRect().width, inner };
         });
@@ -867,10 +868,13 @@ test.describe('десктоп', () => {
 });
 
 /**
- * Прилипание кнопок. Прилипают они всегда и на любом окне: отсечка по высоте тут была, пока
- * раскладок было шесть и на низком окне форме доставалась ладонь. Теперь рост блока контента
- * задаёт само приложение, и меньше своей мерки он не бывает, — а отсечка на границе давала
- * худшее из двух: кнопки то прилипали, то отлипали от пары пикселей высоты окна.
+ * Кнопки у нижней кромки. Стоят они там всегда и на любом окне: форма — колонка из тела
+ * с прокруткой и полосы кнопок под ним, и мотается только тело. Липнуть полосе поэтому нечем
+ * и незачем — из потока она не уходит и под обрез не попадает, сколько бы полей в форме
+ * ни набралось.
+ *
+ * Отсечка по высоте тут была, пока раскладок было шесть и на низком окне форме доставалась
+ * ладонь. Теперь рост блока контента задаёт само приложение, и меньше своей мерки он не бывает.
  */
 test.describe('кнопки у нижней кромки', () => {
     test.use({ viewport: { width: 390, height: 844 } });
@@ -878,13 +882,33 @@ test.describe('кнопки у нижней кромки', () => {
     test('кнопка формы видна сразу и на высоком окне, и на низком', async ({ page }) => {
         await openChannel(page, DEMO);
         await openJoinForm(page);
-        expect((await actionsBar(page)).position, 'кнопки не прилипли на высоком окне').toBe('sticky');
-        await expect(page.locator('button[type=submit]'), 'прилипшая кнопка не видна').toBeInViewport();
+        expect((await actionsBar(page)).position, 'полосе кнопок незачем липнуть').toBe('static');
+        await expect(page.locator('button[type=submit]'), 'кнопка формы не видна').toBeInViewport();
 
         // Телефон на боку: окно ниже всего, что бывает, — и кнопка всё так же на виду.
         await page.setViewportSize({ width: 844, height: 390 });
-        expect((await actionsBar(page)).position, 'на низком окне кнопки отлипли').toBe('sticky');
         await expect(page.locator('button[type=submit]'), 'на низком окне кнопка уехала под обрез').toBeInViewport();
+    });
+
+    // Прокрутка кончается там же, где кончается текст: мотается тело, а полоса стоит под ним
+    // и с места не уходит. До этой правки полоса лежала внутри прокрутки и на домотке
+    // наезжала на содержимое, отнимая у себя же полоску под ползунок.
+    test('домотанная форма не двигает полосу кнопок', async ({ page }) => {
+        await openChannel(page, DEMO);
+        await openJoinForm(page);
+        const before = await actionsBar(page);
+
+        const scrolled = await page.getByPlaceholder('Гром').evaluate((input) => {
+            const body = input.closest<HTMLElement>('[class*="body"]')!;
+            body.scrollTop = body.scrollHeight;
+            return body.scrollTop > 0;
+        });
+        expect(scrolled, 'форму не удалось домотать: мотать нечего').toBe(true);
+
+        const after = await actionsBar(page);
+        expect(after.buttons[0].width, 'кнопки поехали от прокрутки').toBeCloseTo(before.buttons[0].width, 0);
+        expect(after.bandWidth, 'полоса кнопок поехала от прокрутки').toBeCloseTo(before.bandWidth, 0);
+        expect(after.bandWidth, 'полоса кнопок не во всю ширину хозяина').toBeCloseTo(after.ownerWidth, 0);
     });
 });
 
@@ -1705,8 +1729,11 @@ const openCard = async (page: Page): Promise<void> => {
     await page.waitForTimeout(300);
 };
 
-/** Что мотается внутри шторки: у карточки корабля — она сама целиком, от позывного до кнопок. */
-const SHEET_BODY = '[class*="shade_"] [class*="card_"]';
+/**
+ * Что мотается внутри шторки: тело карточки — от позывного до характеристик корабля. Полоса
+ * кнопок в него не входит, она стоит под ним отдельной строкой (см. ui/Actions).
+ */
+const SHEET_BODY = '[class*="shade_"] [class*="body_"]';
 
 /**
  * Ручка шторки: единственное место, за которое её тянут.
@@ -1726,16 +1753,15 @@ const shadeGrip = async (page: Page): Promise<{ x: number; y: number }> => {
  * размножается копиями. Заводить ради проверки роста настоящую карточку в полсотни строк
  * незачем — правило тут про высоту содержимого, а не про то, откуда оно взялось.
  *
- * Копии встают перед полосой кнопок, а не в самый конец: полоса — последняя строка содержимого,
- * и оставлять её посередине значило бы проверять раскладку, которой в приложении не бывает.
+ * Копии уходят в тело карточки: полоса кнопок ему не ребёнок, а сосед, и раздувается то самое,
+ * что мотается.
  */
 const growSheet = (page: Page): Promise<void> =>
     page.evaluate((selector) => {
         const body = document.querySelector(selector)!;
         const line = body.querySelector('[class*="kind_"]')!;
-        const band = body.querySelector('[class*="actions_"]')!;
         for (let i = 0; i < 40; i++) {
-            body.insertBefore(line.cloneNode(true), band);
+            body.append(line.cloneNode(true));
         }
     }, SHEET_BODY);
 
@@ -1785,8 +1811,8 @@ const flingAt = async (page: Page, x: number, y: number, by: number): Promise<vo
  *
  * Заодно проверяется и слот под кнопки — с обоих концов. Снизу полоса доходит до самой кромки
  * шторки: своё поле она унесла внутрь, к кнопкам. Сверху между ней и последней строкой
- * содержимого есть воздух: в шторке кнопки стоят под текстом, а не встык с ним (--actions-top
- * в ui/Shade, см. ui/Actions).
+ * содержимого есть воздух — нижнее поле тела карточки: кнопки стоят под текстом, а не встык
+ * с ним (см. ui/Actions).
  */
 test('шторка ростом по содержимому и не выше окна за вычетом шапки', async ({ page }) => {
     await openChannel(page, DEMO, ALBATROS);
@@ -2053,7 +2079,7 @@ test('карточка корабля закрывается за ручку и 
     await page.waitForTimeout(400);
 
     const card = page.getByRole('region', { name: 'Корабль' });
-    const body = card.locator('[class*="card_"]');
+    const body = card.locator('[class*="body_"]');
     // Проверка держится на том, что карточка и правда мотается сама: не мотайся она,
     // и спорить ручке было бы не с чем.
     expect(
@@ -2114,8 +2140,9 @@ test('список кораблей встаёт в коробку разгов�
  *
  * Полоса кнопок при этом прижата к нижней кромке слоя, а не висит сразу за последней строчкой:
  * слой ростом во всю коробку разговора, и с тремя кораблями под кнопками оставалось бы пустое
- * поле в пол-экрана. У шторки этого не бывает — она ровно по содержимому, — и разницу эту
- * объявляет хозяин слота, а не сами кнопки (--actions-top, см. ui/Actions).
+ * поле в пол-экрана. Прижимает её не сама полоса, а строчки над ней: тело списка растёт на всё,
+ * что дадут (см. .body в MembersList). У шторки этого не бывает — она ровно по содержимому,
+ * и тело там не растёт.
  */
 test('в списке кораблей крестик стоит вровень с заголовком, а кнопки — у нижней кромки', async ({ page }) => {
     /** Заголовок и крестик стоят на одной линии и не наезжают друг на друга. */
@@ -2172,14 +2199,13 @@ test('в списке кораблей крестик стоит вровень 
 });
 
 /**
- * Просвет над полосой кнопок — свой у самой полосы и одинаковый везде, а не то число, которым
- * хозяин прижимает её к нижней кромке.
+ * Просвет над полосой кнопок — нижнее поле тела, и он на месте, сколько бы строчек в списке
+ * ни набралось: полоса стоит под телом отдельной строкой, а не последним блоком внутри его
+ * прокрутки. Пока она лежала в прокрутке, домотанный до конца список упирался последней
+ * строчкой прямо в черту над кнопками.
  *
- * Разница видна ровно там, где хозяин прижимает полосу через `auto`: слой со списком ростом
- * во всю коробку разговора, и с тремя кораблями `auto` уводит кнопки вниз. Стоило кораблям
- * набраться на всю высоту — свободного места не остаётся, `auto` обращается в ноль, и последняя
- * строчка упиралась в черту над кнопками. Отсюда и проверка: список раздут копиями строчки
- * и домотан до конца — просвет обязан быть на месте (см. @band-gap в ui/Actions).
+ * Отсюда и проверка: список раздут копиями строчки и домотан до конца — просвет обязан быть
+ * ровно тем же, каким он был у короткого списка.
  *
  * Раздуваем копиями нарочно: правило тут про тесноту, а не про то, откуда она взялась,
  * и заводить ради него канал на два десятка кораблей незачем.
@@ -2190,17 +2216,17 @@ test('кнопки не встают встык с содержимым, даж�
     await page.waitForTimeout(600);
     await openSheet(page);
 
-    const scroller = listRegion(page).locator('[class*="list_"]').first();
+    const scroller = listRegion(page).locator('[class*="body_"]').first();
+    const gap = Number.parseFloat(await scroller.evaluate((node) => getComputedStyle(node).paddingBottom));
+    expect(gap, 'у тела списка нет нижнего поля — просвету взяться неоткуда').toBeGreaterThan(0);
+
     await scroller.evaluate((node) => {
         const row = node.querySelector('[class*="row_"]')!;
-        const gap = node.querySelector('[class*="gap_"]')!;
         for (let i = 0; i < 20; i++) {
-            node.insertBefore(row.cloneNode(true), gap);
+            node.append(row.cloneNode(true));
         }
         node.scrollTop = node.scrollHeight;
     });
-    // Домотанный до конца список: полоса встала на своё место в потоке, и просвет над ней —
-    // тот самый, который в этом положении и пропадал.
     await expect
         .poll(async () => Math.round(await scroller.evaluate((node) => node.scrollHeight - node.clientHeight)), {
             message: 'раздутому списку не стало тесно',
@@ -2210,7 +2236,9 @@ test('кнопки не встают встык с содержимым, даж�
     const rows = listRegion(page).locator('[class*="row_"], [class*="rowActive"]');
     const last = (await rows.last().boundingBox())!;
     const band = (await listRegion(page).locator('[class*="actions_"]').boundingBox())!;
-    expect(Math.round(band.y - (last.y + last.height)), 'кнопки встали встык с последней строчкой').toBe(20);
+    expect(Math.round(band.y - (last.y + last.height)), 'кнопки встали встык с последней строчкой').toBe(
+        Math.round(gap)
+    );
 });
 
 /**
@@ -2237,8 +2265,10 @@ test('место под полосу прокрутки держится и в �
     expect(await gutter('main [class*="list_"]'), 'лента не оставила места под полосу').toBe(8);
 
     await openSheet(page);
+    // Мотает себя не сам слой, а тело списка внутри него: полоса кнопок стоит под ним отдельной
+    // строкой и в прокрутку не попадает (см. ui/Actions).
     expect(
-        await gutter('section[aria-label="Корабли на связи"] [class*="list_"]'),
+        await gutter('section[aria-label="Корабли на связи"] [class*="body_"]'),
         'список из трёх кораблей не держит места под полосу'
     ).toBe(8);
 });
@@ -2276,13 +2306,14 @@ test('полосу прокрутки поджимает сверху у люб�
     expect(feed.bottom, 'полоса ленты не отбита снизу').toBeGreaterThan(0);
 
     await openSheet(page);
-    const crew = await trackInset(page, 'section[aria-label="Корабли на связи"] [class*="list_"]');
+    const crew = await trackInset(page, 'section[aria-label="Корабли на связи"] [class*="body_"]');
     expect(crew.top, 'полоса списка кораблей полезла под скруглённый угол').toBeCloseTo(radius, 0);
 
     await page.getByRole('button', { name: 'Настроить корабль' }).click();
     // Форма живёт не внутри блока разговора, а соседом ему, — поэтому и селектор без `main`.
-    // Правило от этого не меняется: оно у самого прокручиваемого блока, где бы тот ни стоял.
-    const form = await trackInset(page, 'form[class*="card"]');
+    // Правило от этого не меняется: оно у самого прокручиваемого блока, где бы тот ни стоял,
+    // а мотает себя в форме её тело: полоса кнопок стоит под ним отдельной строкой.
+    const form = await trackInset(page, 'form[class*="card"] [class*="body_"]');
     expect(form.top, 'полоса формы полезла под скруглённый угол').toBeCloseTo(radius, 0);
     // Поля у формы шире, чем у ленты: полоса кончается там же, где кончается текст.
     expect(form.bottom, 'полоса формы кончается не по её полям').toBeGreaterThan(feed.bottom);
@@ -3098,12 +3129,15 @@ test('на границе телефона ничего не прыгает: ш�
 /**
  * Длинная форма мотается сама, а кнопки внизу остаются на виду. Прокрутки у неё однажды
  * не стало вовсе — блок контента снаружи обрезан наглухо, а своего скроллера форме не завели, —
- * и десяток силуэтов в столбик просто уходил под обрез без права вернуться. Прилипшим кнопкам
- * при этом было не к чему прилипать: `position: sticky` считается от того, что прокручивает.
+ * и десяток силуэтов в столбик просто уходил под обрез без права вернуться.
  *
- * Проверяется и то, и другое: форме есть что мотать, домотать до конца выходит, а полоса кнопок
+ * Мотается при этом тело формы, а не плашка целиком: полоса кнопок стоит под телом своей
+ * строкой и в прокрутку не попадает. Пока она лежала внутри скроллера, домотка наезжала на неё
+ * содержимым и отнимала у неё же полоску под ползунок.
+ *
+ * Проверяется и то, и другое: телу есть что мотать, домотать до конца выходит, а полоса кнопок
  * всё это время стоит ровно на нижней кромке формы — не выше, иначе под ней светилась бы
- * полоска фона в её нижнее поле.
+ * полоска фона.
  */
 test('длинная форма мотается сама, а кнопки держатся нижней кромки', async ({ page }) => {
     await page.setViewportSize({ width: MOBILE_MAX_WIDTH - 90, height: 844 });
@@ -3114,16 +3148,19 @@ test('длинная форма мотается сама, а кнопки де�
 
     const card = page.locator('form[class*="card"]');
     const measure = () =>
-        card.evaluate((node) => ({
-            scrollable: node.scrollHeight - node.clientHeight,
-            top: Math.round(node.scrollTop),
-            cardBottom: Math.round(node.getBoundingClientRect().bottom),
-            actionsBottom: Math.round(node.querySelector('[class*="actions"]')!.getBoundingClientRect().bottom),
-        }));
+        card.evaluate((node) => {
+            const body = node.querySelector('[class*="body"]')!;
+            return {
+                scrollable: body.scrollHeight - body.clientHeight,
+                top: Math.round(body.scrollTop),
+                cardBottom: Math.round(node.getBoundingClientRect().bottom),
+                actionsBottom: Math.round(node.querySelector('[class*="actions"]')!.getBoundingClientRect().bottom),
+            };
+        });
 
     // Кромка меряется с допуском в пиксель: и форма, и полоса кнопок встают на дробные
-    // координаты, и на домотанной до конца прокрутке они округляются в разные стороны.
-    // Ловим мы тут не пиксель, а полоску фона в нижнее поле формы — она была бы в десяток.
+    // координаты, и округляются они в разные стороны. Ловим мы тут не пиксель, а полоску фона
+    // в нижнее поле формы — она была бы в десяток.
     const onEdge = (measured: { actionsBottom: number; cardBottom: number }): number =>
         Math.abs(measured.actionsBottom - measured.cardBottom);
 
@@ -3132,11 +3169,12 @@ test('длинная форма мотается сама, а кнопки де�
     expect(onEdge(before), 'кнопки встали не на кромку формы').toBeLessThanOrEqual(1);
 
     await card.evaluate((node) => {
-        node.scrollTop = node.scrollHeight;
+        const body = node.querySelector('[class*="body"]')!;
+        body.scrollTop = body.scrollHeight;
     });
     const after = await measure();
     expect(after.top, 'форма не домоталась до конца').toBe(before.scrollable);
-    expect(onEdge(after), 'кнопки уехали с кромки вместе с формой').toBeLessThanOrEqual(1);
+    expect(onEdge(after), 'кнопки уехали с кромки вместе с прокруткой').toBeLessThanOrEqual(1);
 });
 
 /**

@@ -56,21 +56,24 @@ export default function LeaveRaid({ onConfirm, onCancel }: LeaveRaidProps) {
 
     return (
         <form className={styles.card} onSubmit={handleSubmit}>
-            <h2 className={styles.title}>Вы уходите с рейда</h2>
+            {/* Мотается только тело: полоса кнопок стоит под ним своей строкой (см. ui/Actions). */}
+            <div className={styles.body}>
+                <h2 className={styles.title}>Вы уходите с рейда</h2>
 
-            {/* Подписи к полю хватает: «Задайте новый курс» говорит ровно то же, что говорила
-                бы объясняющая строчка над ним, и повторять её значило бы не доверять человеку. */}
-            <Field label="Задайте новый курс">
-                <Input
-                    value={course}
-                    maxLength={MAX_COURSE_LENGTH}
-                    placeholder="В Кронштадт, на зимовку"
-                    autoComplete="off"
-                    // Пальцем — значит клавиатура экранная, и фокус выкинул бы её поверх шторки.
-                    autoFocus={!isTouch()}
-                    onChange={(event) => setCourse(event.target.value)}
-                />
-            </Field>
+                {/* Подписи к полю хватает: «Задайте новый курс» говорит ровно то же, что говорила
+                    бы объясняющая строчка над ним, и повторять её значило бы не доверять человеку. */}
+                <Field label="Задайте новый курс">
+                    <Input
+                        value={course}
+                        maxLength={MAX_COURSE_LENGTH}
+                        placeholder="В Кронштадт, на зимовку"
+                        autoComplete="off"
+                        // Пальцем — значит клавиатура экранная, и фокус выкинул бы её поверх шторки.
+                        autoFocus={!isTouch()}
+                        onChange={(event) => setCourse(event.target.value)}
+                    />
+                </Field>
+            </div>
 
             {/* Уход стоит первым, потому что за ним сюда и пришли: шторка открылась нажатием
                 на выход, и подтверждение — продолжение того же движения. «Полный назад»

@@ -25,28 +25,22 @@ interface PanelProps {
     children?: ReactNode;
     /** Кнопки внизу: одна занимает всю ширину, две делят её пополам. */
     actions?: ReactNode;
-    /**
-     * Длинная форма: кнопки прилипают к нижней кромке, пока окно достаточно высокое.
-     * Короткой это не нужно — она и так видна целиком, — а с припиской под кнопками
-     * и вредно: приписка уезжала бы под них.
-     */
-    pinActions?: boolean;
     /** Приписка под кнопками: ссылка в сторону, а не действие. */
     footer?: ReactNode;
     onSubmit?: () => void;
 }
 
-export default function Panel({ title, hint, children, actions, footer, pinActions, onSubmit }: PanelProps) {
+export default function Panel({ title, hint, children, actions, footer, onSubmit }: PanelProps) {
     const content = (
         <>
-            {title && <h1 className={styles.title}>{title}</h1>}
-            {hint && <p className={styles.hint}>{hint}</p>}
-            {children}
-            {actions && (
-                <Actions pinned={pinActions} aboveFooter={Boolean(footer)}>
-                    {actions}
-                </Actions>
-            )}
+            {/* Мотается только тело: кнопки под ним стоят своей строкой и с места не уходят
+                (см. ui/Actions). Поэтому и прокрутка кончается там же, где кончается текст. */}
+            <div className={styles.body}>
+                {title && <h1 className={styles.title}>{title}</h1>}
+                {hint && <p className={styles.hint}>{hint}</p>}
+                {children}
+            </div>
+            {actions && <Actions aboveFooter={Boolean(footer)}>{actions}</Actions>}
             {footer && <p className={styles.footer}>{footer}</p>}
         </>
     );

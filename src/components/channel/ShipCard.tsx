@@ -58,26 +58,28 @@ export default function ShipCard({ member, senior }: ShipCardProps) {
 
     return (
         <div className={styles.card}>
-            <div className={styles.title}>
-                <MemberName name={member.name} color={member.color} large />
-                {/* Отвечает званием по нажатию — так же, как в списке кораблей: вымпел
+            {/* Мотается только тело: полоса кнопок стоит под ним своей строкой (см. ui/Actions). */}
+            <div className={styles.body}>
+                <div className={styles.title}>
+                    <MemberName name={member.name} color={member.color} large />
+                    {/* Отвечает званием по нажатию — так же, как в списке кораблей: вымпел
                     в карточке ничем не подписан, и спросить, что он значит, человек может
                     только тычком. */}
-                {senior && (
-                    <button
-                        type="button"
-                        className={styles.pennant}
-                        title={SENIOR_TITLE}
-                        aria-label={SENIOR_TITLE}
-                        onClick={() => notify(SENIOR_TITLE)}
-                    >
-                        <Pennant />
-                    </button>
-                )}
-            </div>
-            <div className={styles.hullNumber}>Бортовой номер {member.hullNumber}</div>
+                    {senior && (
+                        <button
+                            type="button"
+                            className={styles.pennant}
+                            title={SENIOR_TITLE}
+                            aria-label={SENIOR_TITLE}
+                            onClick={() => notify(SENIOR_TITLE)}
+                        >
+                            <Pennant />
+                        </button>
+                    )}
+                </div>
+                <div className={styles.hullNumber}>Бортовой номер {member.hullNumber}</div>
 
-            {/* По умолчанию корабль на якоре — он и правда стоит на рейде, и огни у него
+                {/* По умолчанию корабль на якоре — он и правда стоит на рейде, и огни у него
                 якорные. Ходовые зажигает кнопка внизу, и только на портрете.
 
                 Нажатие на сам портрет приближает корабль: силуэт занимает место целиком,
@@ -86,23 +88,24 @@ export default function ShipCard({ member, senior }: ShipCardProps) {
                 (см. shipSizeShare), и катер обязан быть мельче корвета. Разглядеть его при
                 этом всё равно хочется, и приближение — единственное место в приложении,
                 где корабль показан не в масштабе флота, а сам по себе. */}
-            <ShipPortrait
-                kind={member.shipKind}
-                hullNumber={member.hullNumber}
-                facing={member.place.facing}
-                mode={underway ? 'underway' : 'anchored'}
-                morseFeed={reply}
-                ownHeight
-                zoomed={zoomed}
-                onZoom={() => setZoomed((was) => !was)}
-            />
+                <ShipPortrait
+                    kind={member.shipKind}
+                    hullNumber={member.hullNumber}
+                    facing={member.place.facing}
+                    mode={underway ? 'underway' : 'anchored'}
+                    morseFeed={reply}
+                    ownHeight
+                    zoomed={zoomed}
+                    onZoom={() => setZoomed((was) => !was)}
+                />
 
-            <div className={styles.kind}>{SHIP_KIND_LABELS[member.shipKind]}</div>
-            <div className={styles.spec}>{shipSpecLine(member.shipKind)}</div>
+                <div className={styles.kind}>{SHIP_KIND_LABELS[member.shipKind]}</div>
+                <div className={styles.spec}>{shipSpecLine(member.shipKind)}</div>
+            </div>
 
             {/* Ряд кнопок тот же, что внизу форм: одна механика на всё приложение — как они
-                делят ширину, когда переносятся и как липнут к нижней кромке. */}
-            <Actions pinned>
+                делят ширину и когда переносятся. */}
+            <Actions>
                 <Button variant="secondary" onClick={handleSignal}>
                     Сигнал
                 </Button>

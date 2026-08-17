@@ -15,11 +15,6 @@
 // Цвет ползунка один на обе ветки правил ниже.
 @scrollbar-thumb: rgba(120, 168, 214, 0.25);
 
-// Ширина полоски, которую блок держит под полосу прокрутки. Нужна не только самой полосе:
-// полоска эта лежит внутри полей блока, справа от содержимого, и всё, что раздаётся до краёв
-// блока, обязано её гасить — см. --actions-gutter в ui/Actions.
-@scrollbar-width: 8px;
-
 .scrolls() {
     overflow-y: auto;
     scrollbar-gutter: stable;
@@ -36,7 +31,7 @@
     // где текст. Число это у каждого своё и приходит от него самого (--scrollbar-bottom);
     // умолчание — поле ленты.
     &::-webkit-scrollbar {
-        width: @scrollbar-width;
+        width: 8px;
     }
 
     &::-webkit-scrollbar-track {
