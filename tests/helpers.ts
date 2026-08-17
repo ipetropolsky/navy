@@ -130,6 +130,11 @@ const sceneReady = async (page: Page): Promise<void> => {
  * Открыть канал. `memberId` в адресе перебивает сохранённую личность вкладки — так вторая
  * вкладка говорит за другой корабль, не трогая первую.
  *
+ * Ждём разметку, а не тишину в сети. `networkidle` — это по устройству полсекунды молчания
+ * поверх всего остального, и платит их каждая проверка набора: полутора сотнями выходит больше
+ * минуты на пустом месте. Дожидаться же тут нечего — следом стоит `sceneReady`, и он ждёт
+ * не сеть вообще, а именно те картинки, без которых в кадре темно.
+ *
  * Раскладку тут никто не подкладывает: приложение открывается с разговором в треть окна —
  * сбоку в лежачем, под кадром в стоячем (см. `defaultWish` в hooks/useLayout), — и это ровно
  * то, что проверкам и нужно. Прежде сюда писали в хранилище сжатый кадр: раскладок было
@@ -138,7 +143,7 @@ const sceneReady = async (page: Page): Promise<void> => {
  */
 export const openChannel = async (page: Page, slug = DEMO, memberId?: string): Promise<void> => {
     const address = memberId ? `/?channel=${slug}&memberId=${memberId}` : `/?channel=${slug}`;
-    await page.goto(address, { waitUntil: 'networkidle' });
+    await page.goto(address, { waitUntil: 'domcontentloaded' });
     await sceneReady(page);
 };
 
@@ -147,7 +152,7 @@ export const openChannel = async (page: Page, slug = DEMO, memberId?: string): P
  * и он же — свой: в демо-канале на рейде уже стоит эскадра.
  */
 export const openNewChannel = async (page: Page, slug: string): Promise<void> => {
-    await page.goto('/', { waitUntil: 'networkidle' });
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
     await page.getByPlaceholder('Эскадра «Полночь»').fill(slug);
     await page.locator('input[placeholder="eskadra-polnoch"]').fill(slug);
     await page.locator('button[type=submit]').click();
