@@ -117,6 +117,11 @@ export default function App() {
     // попадает на рейд, а не в анкету, — и до того, как он сам решит встать в строй, канал
     // о нём не знает ничего. Открывает её единственная кнопка посреди пустой плашки, см. ниже.
     const [joining, setJoining] = useState(false);
+    // Подняла ли панель на экран сама открывшаяся в неё форма или список — и, значит, задвинуть
+    // ли панель обратно, когда слой закроется (см. `openLayer` ниже).
+    const [broughtPanel, setBroughtPanel] = useState(false);
+    // Слой сел в закрытую панель и ждёт кадра, чтобы та тронулась вместе с ним (там же).
+    const [bringing, setBringing] = useState(false);
     const notify = useSnackbar();
 
     /**
@@ -171,7 +176,19 @@ export default function App() {
     const tight = !atSide && size - layout.floor < FEED_MIN;
 
     const sceneRef = useRef<HTMLDivElement>(null);
-    const toggleChat = useCallback(() => (shown ? hide() : show()), [shown, hide, show]);
+
+    /**
+     * Размер разговора выбрал человек: потянул кромку, повёл свайпом, нажал стрелку, убрал
+     * панель кнопкой.
+     *
+     * Тем самым панель перестаёт быть поднятой ради открытого в неё слоя (см. `openLayer`):
+     * задвинуть её потом за человека значило бы забрать то, что он только что выбрал сам.
+     */
+    const chose = useCallback(() => setBroughtPanel(false), []);
+    const toggleChat = useCallback(() => {
+        chose();
+        return shown ? hide() : show();
+    }, [chose, shown, hide, show]);
 
     /**
      * Свайп по кадру двигает разговор на соседнее положение: вверх — на ступеньку выше,
@@ -190,9 +207,10 @@ export default function App() {
             if (atSide) {
                 return;
             }
+            chose();
             resize(stepMagnet(chatMagnets(layout), layout.size, direction === 'up' ? 1 : -1), true);
         },
-        [atSide, layout, resize]
+        [atSide, chose, layout, resize]
     );
     useSwipe(sceneRef, stepChat);
 
@@ -295,9 +313,10 @@ export default function App() {
     // третьего у входа нет.
     const joinOpen = !loading && Boolean(channel) && !me && joining;
     // Форма своего корабля: выезжает снизу поверх разговора и уходит туда же. Пока едет —
-    // остаётся на экране, см. useSlide.
+    // остаётся на экране, см. useSlide. Поднявшая панель форма своего хода не имеет вовсе:
+    // её везёт панель (см. `openLayer`).
     const formOpen = editing && inChat;
-    const formSlide = useSlide(formOpen);
+    const formSlide = useSlide(formOpen, broughtPanel);
 
     /**
      * Список кораблей — второй такой же слой той же коробки, а не шторка поверх всего.
@@ -311,7 +330,7 @@ export default function App() {
      * в списке закрывает список, а название канала в шапке закрывает форму (см. `handleShips`).
      */
     const listOpen = sheetOpen && inChat && !editing;
-    const listSlide = useSlide(listOpen);
+    const listSlide = useSlide(listOpen, broughtPanel);
 
     // Место на рейде выбирают в форме корабля и только в ней: это её поле, просто вынесенное
     // на воду. На главной канала ещё нет, вставать некуда и не в чем — там рейд пустой
@@ -492,20 +511,57 @@ export default function App() {
     /**
      * Панель под открывающийся слой — форму своего корабля или список кораблей.
      *
-     * Слой стоит в той же коробке, что и разговор, и ровно её размера. Поэтому убранную панель
+     * Слой стоит в той же коробке, что и разговор, и ровно её размера. Поэтому закрытую панель
      * возвращаем на экран: открывать слой в коробку, которой на экране нет, значит открывать
      * его в никуда. Свёрнутый до ручки разговор — то же самое: полоска в двадцать точек
-     * ни списку, ни форме не жильё.
+     * ни списку, ни форме не жильё. Возвращается панель в тот размер, в каком её оставили
+     * (`back` в hooks/useLayout).
      *
-     * Возвращается панель в тот размер, в каком её оставили (`back` в hooks/useLayout), и в нём
-     * же и стоит после того, как слой закрыли: слой приезжает в панель и уезжает из неё,
-     * а панель как стояла, так и стоит.
+     * Открытая панель принимает слой как есть: тот выезжает в неё снизу своим ходом и уходит
+     * туда же, а панель как стояла, так и стоит.
+     *
+     * Закрытая — выдвигается **вместе с готовым слоем внутри**: своего движения у слоя тогда
+     * нет вовсе, и на экране остаётся одно движение вместо двух наехавших друг на друга.
+     * Закрылся слой — панель тем же движением задвигается обратно, и слой уезжает в ней.
+     *
+     * Помним это про нынешний слой, а не про панель вообще: перешли из формы в список — панель
+     * уже не поднятая ради слоя, а просто открытая, и закрывать её за человека не за что.
      */
     const openLayer = () => {
+        setBroughtPanel(!talking);
         if (!talking) {
-            show();
+            setBringing(true);
         }
     };
+    useEffect(() => {
+        if (!bringing) {
+            return undefined;
+        }
+        const frame = requestAnimationFrame(() => {
+            setBringing(false);
+            show();
+        });
+        return () => cancelAnimationFrame(frame);
+    }, [bringing, show]);
+
+    // Слот опустел — панель, поднятая ради него, задвигается обратно. Отсюда, а не из каждой
+    // закрывалки: слой закрывают и кнопкой в нём, и названием канала в шапке, и свайпом вниз,
+    // и отправкой формы, а движение после всех этих способов одно.
+    const layerOpen = formOpen || listOpen;
+    useEffect(() => {
+        if (!layerOpen && broughtPanel) {
+            hide();
+        }
+    }, [layerOpen, broughtPanel, hide]);
+
+    // Уехал слой вместе с панелью и снялся с экрана — память о поднятой панели больше ни при чём:
+    // следующий слой посмотрит на панель заново. До этого мига она нужна: пока слой уезжает,
+    // именно она говорит ему стоять в панели, а не уходить вниз своим ходом.
+    useEffect(() => {
+        if (!layerOpen && !formSlide.mounted && !listSlide.mounted) {
+            setBroughtPanel(false);
+        }
+    }, [layerOpen, formSlide.mounted, listSlide.mounted]);
 
     // Список кораблей открывается названием канала. Пока открыта форма своего корабля,
     // списка не видно (он бы её накрыл), и то же нажатие возвращает от формы к списку —
@@ -748,6 +804,7 @@ export default function App() {
         dragFrom.current = { pointerId: event.pointerId, at: gripAxis(event), size, open: size, fling: trackFling() };
         event.currentTarget.setPointerCapture(event.pointerId);
         setDragging(true);
+        chose();
     };
 
     const handleGripMove = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -828,6 +885,7 @@ export default function App() {
         }[event.key];
         if (to !== undefined) {
             event.preventDefault();
+            chose();
             resize(to, true);
         }
     };
@@ -1045,7 +1103,9 @@ export default function App() {
                 и выезжающая снизу форма из него бы не высунулась. */}
             {formSlide.mounted && me && (
                 <div
-                    className={[styles.form, editing ? '' : styles.formLeaving].filter(Boolean).join(' ')}
+                    className={[styles.form, editing ? '' : styles.formLeaving, broughtPanel ? styles.layerStill : '']
+                        .filter(Boolean)
+                        .join(' ')}
                     onTransitionEnd={formSlide.onTransitionEnd}
                     inert={!shown}
                 >
@@ -1113,7 +1173,9 @@ export default function App() {
                 корабля рядом. */}
             {listSlide.mounted && (
                 <section
-                    className={[styles.list, listOpen ? '' : styles.listLeaving].filter(Boolean).join(' ')}
+                    className={[styles.list, listOpen ? '' : styles.listLeaving, broughtPanel ? styles.layerStill : '']
+                        .filter(Boolean)
+                        .join(' ')}
                     aria-label="Корабли на связи"
                     onTransitionEnd={listSlide.onTransitionEnd}
                     inert={!shown}

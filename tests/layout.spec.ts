@@ -1589,6 +1589,46 @@ const berthSpan = (page: Page): Promise<number> =>
 
 const PHONE = { width: MOBILE_MAX_WIDTH - 90, height: 844 };
 
+/**
+ * Насколько верхняя кромка слоя разошлась с кромкой блока контента за `span` мс, px.
+ *
+ * Так отличается движение вдвоём от движения врозь. Слой, приехавший в закрытую панель, стоит
+ * в её коробке с первого же кадра: едет одна панель, кромки идут вплотную, и разойтись им
+ * негде. Слой, выезжающий своим ходом, в это же время поднимается снизу — и кромки расходятся
+ * почти на всю высоту коробки.
+ *
+ * Считается покадрово и прямо в странице: сверять надо кадры движения, а не то, что осталось
+ * после него, и снимать их отсюда по одному значило бы мерить скорость канала, а не разметки.
+ */
+const rideGap = (page: Page, selector: string, span = 200): Promise<number> =>
+    page.evaluate(
+        ([sel, ms]: [string, number]) =>
+            new Promise<number>((resolve) => {
+                const started = performance.now();
+                let worst = 0;
+                const tick = () => {
+                    const layer = document.querySelector(sel);
+                    const content = document.querySelector('main');
+                    if (layer && content) {
+                        worst = Math.max(
+                            worst,
+                            Math.abs(layer.getBoundingClientRect().top - content.getBoundingClientRect().top)
+                        );
+                    }
+                    if (performance.now() - started < ms) {
+                        requestAnimationFrame(tick);
+                    } else {
+                        resolve(Math.round(worst));
+                    }
+                };
+                tick();
+            }),
+        [selector, span] as [string, number]
+    );
+
+/** Половина ходу панели: на столько кромки разошлись бы, поедь слой своим ходом. */
+const APART = 100;
+
 test('свёрнутый разговор форма своего корабля разворачивает под себя', async ({ page }) => {
     takes(5);
     await page.setViewportSize(PHONE);
@@ -1604,6 +1644,7 @@ test('свёрнутый разговор форма своего корабля
     await expect
         .poll(async () => (await contentBox(page)).height, { message: 'разговор не свернулся до пола' })
         .toBeLessThan(chatSize(PHONE) / 2);
+    const folded = (await contentBox(page)).height;
 
     // Открываем форму на почти голом кадре — нажатием по своему кораблю.
     //
@@ -1613,6 +1654,10 @@ test('свёрнутый разговор форма своего корабля
         timeout: SAIL_TIMEOUT,
     });
     await clickShip(page, page.locator('[class*="shipMine"]'));
+
+    // Панель разворачивается уже с готовой формой внутри: движение тут одно, панелино,
+    // и форма всю дорогу стоит в коробке, а не догоняет её снизу.
+    expect(await rideGap(page, '[class*="form_"]'), 'форма выезжала своим ходом поверх панели').toBeLessThan(APART);
     await page.waitForTimeout(600);
 
     // Разговор под формой развернулся в тот размер, в каком его оставили, — и форма встала
@@ -1629,14 +1674,59 @@ test('свёрнутый разговор форма своего корабля
     expect(await berthSpan(page), 'отметки мест сошлись в точку').toBeGreaterThan(0);
     await marks.first().click();
 
-    // Ушла форма — под ней остался разговор, и остался в том же размере: панель как стояла,
-    // так и стоит, а слой только приехал в неё и уехал.
+    // Закрыли форму — панель, поднявшаяся ради неё, задвигается обратно и увозит её в себе:
+    // тем же одним движением и в обратном порядке. Разговор возвращается в пол, каким и был
+    // до формы, а не остаётся развёрнутым: разворачивать его человек не просил.
     await page.getByRole('button', { name: 'Отмена' }).click();
+    expect(await rideGap(page, '[class*="form_"]'), 'форма уезжала вниз из-под панели').toBeLessThan(APART);
     await page.waitForTimeout(600);
     const after = await contentBox(page);
-    expect(after.height, 'уход формы утащил разговор за собой').toBe(chatSize(PHONE));
+    expect(after.height, 'разговор остался развёрнутым после ухода формы').toBe(folded);
     expect(after.top + after.height, 'разговор отошёл от нижней кромки окна').toBe(PHONE.height);
-    expect(await feedShown(page), 'у развёрнутого разговора нет ленты').toBe(true);
+    expect(await feedShown(page), 'у свёрнутого разговора откуда-то лента').toBe(false);
+    await expect(page.locator('[class*="form_"]'), 'форма осталась на экране').toHaveCount(0);
+});
+
+/**
+ * То же самое сбоку: убранная панель выезжает из-за кромки с готовой формой внутри и уходит
+ * обратно вместе с ней.
+ *
+ * Убранная и свёрнутая панель — это два разных движения (уход за кромку и сжатие до полоски
+ * ручки, см. docs/LAYOUT.md), и правило «слой едет в панели, а не сам» проверяется на обоих.
+ */
+test('убранная сбоку панель выезжает с готовой формой и уходит вместе с ней', async ({ page }) => {
+    takes(4);
+    await page.setViewportSize(LYING);
+    // Свой канал с единственным кораблём — по той же причине, что и в проверке выше: форму
+    // тут открывают нажатием по своему кораблю, и накрыть его в кадре некому.
+    await openNewChannel(page, 'gruz-side');
+    await join(page, 'Гроза', '318');
+
+    // Убираем панель кнопкой и ждём, пока она уйдёт за кромку: мерить движение формы надо
+    // от стоящей панели, а не от едущей.
+    await page.getByRole('button', { name: 'Убрать панель' }).click();
+    await page.waitForTimeout(600);
+    expect((await boxOf(page, 'header')).width, 'панель не ушла за кромку').toBe(LYING.width);
+
+    // Форму открываем щелчком по своему кораблю — из списка её было бы не открыть: список
+    // сам слой той же панели.
+    await expect(page.locator('[data-motion]'), 'корабль так и не встал на место').toHaveCount(0, {
+        timeout: SAIL_TIMEOUT,
+    });
+    await clickShip(page, page.locator('[class*="shipMine"]'));
+    expect(await rideGap(page, '[class*="form_"]'), 'форма выезжала своим ходом поверх панели').toBeLessThan(APART);
+    await page.waitForTimeout(600);
+
+    const form = await boxOf(page, '[class*="form_"]');
+    expect(form.width, 'форма выехала не в ширину панели').toBe(chatSize(LYING));
+    expect(form.right, 'форма не дошла до правой кромки окна').toBe(LYING.width);
+
+    // Закрыли — панель уходит обратно за кромку с формой внутри, и на экране её не остаётся.
+    await page.getByRole('button', { name: 'Отмена' }).click();
+    expect(await rideGap(page, '[class*="form_"]'), 'форма уезжала вниз из-под панели').toBeLessThan(APART);
+    await page.waitForTimeout(600);
+    expect((await boxOf(page, 'header')).width, 'панель не вернулась за кромку').toBe(LYING.width);
+    await expect(page.locator('[class*="form_"]'), 'форма осталась на экране').toHaveCount(0);
 });
 
 /**
