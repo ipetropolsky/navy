@@ -52,8 +52,10 @@
     // По бокам — поле хозяина, и только по бокам: фон с чертой идут во всю его ширину, а полю
     // достаются одни кнопки.
     padding: @band-pad var(--actions-side, @band-pad) @band-pad-bottom;
+    // Цвет тот же, что у формы под ней: шторки и формы в приложении одного тёмного тона,
+    // и полоса отделена от содержимого чертой, а не заливкой.
     border-top: 1px solid var(--color-border);
-    background: var(--color-bg-raised);
+    background: var(--color-bg-chat);
 
     > * {
         flex: 1 1 auto;
