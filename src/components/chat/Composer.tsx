@@ -1,4 +1,4 @@
-import { SyntheticEvent, useEffect, useRef, useState } from 'react';
+import { Ref, SyntheticEvent, useEffect, useRef, useState } from 'react';
 
 import IconButton from '@/components/ui/IconButton';
 import Input from '@/components/ui/Input';
@@ -23,6 +23,12 @@ interface ComposerProps {
     onTooLong: (message: string) => void;
     /** Вызывается на каждое изменение текста: добавленные символы (или '\b' при удалении). */
     onTyped: (chars: string) => void;
+    /**
+     * Ссылка на саму плашку. Нужна она снаружи затем, что высотой плашки меряется пол
+     * разговора — то, во что он сворачивается свайпом (см. `floor` в App): постоянным числом
+     * её не запишешь, плашка растёт от ответа над полем и от выреза экрана снизу.
+     */
+    ref?: Ref<HTMLFormElement>;
 }
 
 /**
@@ -57,7 +63,15 @@ const typedChars = (prev: string, next: string): string => {
 };
 
 /** Поле ввода в стиле Telegram: плашка ответа, кнопка отправки появляется при вводе. */
-export default function Composer({ replyTo, replyToAuthor, onCancelReply, onSend, onTooLong, onTyped }: ComposerProps) {
+export default function Composer({
+    replyTo,
+    replyToAuthor,
+    onCancelReply,
+    onSend,
+    onTooLong,
+    onTyped,
+    ref,
+}: ComposerProps) {
     const [value, setValue] = useState('');
     const prevValueRef = useRef('');
     const inputRef = useRef<HTMLInputElement>(null);
@@ -108,7 +122,7 @@ export default function Composer({ replyTo, replyToAuthor, onCancelReply, onSend
     };
 
     return (
-        <form className={styles.composer} onSubmit={handleSubmit}>
+        <form className={styles.composer} ref={ref} onSubmit={handleSubmit}>
             {replyTo && (
                 <div className={styles.replyBar}>
                     <ReplyQuote author={replyToAuthor ?? undefined} text={<MessageBody message={replyTo} />} />

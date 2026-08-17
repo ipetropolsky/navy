@@ -16,6 +16,13 @@ const view = (width: number, height: number) => ({ width, height });
 /** Выбор человека. По умолчанию — умолчание приложения, с точечной правкой одной из раскладок. */
 const wish = (patch: Partial<LayoutWish> = {}): LayoutWish => ({ ...defaultWish(), ...patch });
 
+/**
+ * Пол разговора под кадром, px: ручка и поле ввода под ней. В приложении его меряют на месте
+ * (плашка растёт от ответа над полем и от выреза экрана снизу), здесь берём круглое число —
+ * проверяется не оно само, а то, что его слушают.
+ */
+const FLOOR = 78;
+
 describe('chatMode', () => {
     it('в лежачем окне ставит разговор сбоку, в стоячем — под кадром', () => {
         expect(chatMode(view(1200, 900))).toBe('side');
@@ -66,6 +73,21 @@ describe('chatLimits', () => {
         // Кадру тут не хватает и своего минимума, и потолок вышел бы уже разговора. Пределы
         // обязаны остаться пригодными к счёту: на них считается и свайп, и подписи у коридора.
         expect(chatLimits('side', view(700, 500))).toEqual({ min: SIDE_MIN_WIDTH, max: SIDE_MIN_WIDTH });
+    });
+
+    it('под кадром низом стоит пол, которым разговор торчит из-за кромки', () => {
+        // Свёрнутый до упора разговор с экрана не пропадает: внизу от него остаются ручка
+        // и поле ввода под ней, и высота их приходит замером снаружи.
+        expect(chatLimits('under', view(390, 844), FLOOR)).toEqual({ min: FLOOR, max: 844 - SHEET_TOP_GAP });
+    });
+
+    it('сбоку пола нет: панель убирают целиком', () => {
+        // Замер поля ввода в боковой раскладке ни при чём — там разговор уходит за правую
+        // кромку весь, и полоски от него не остаётся.
+        expect(chatLimits('side', view(1400, 900), FLOOR)).toEqual({
+            min: SIDE_MIN_WIDTH,
+            max: 1400 - SCENE_MIN_WIDTH,
+        });
     });
 });
 
@@ -124,6 +146,37 @@ describe('allowedLayout', () => {
         expect(allowedLayout(chosen, view(2000, 900)).size).toBe(1200);
     });
 
+    it('под кадром разговор ложится на пол, а не пропадает', () => {
+        // Кнопки, возвращающей разговор, под кадром нет вовсе: он всегда снизу, и нулём быть
+        // ему нельзя — иначе писать в канал было бы нечем.
+        const layout = allowedLayout(wish({ under: { share: 0, back: CHAT_SHARE } }), view(390, 844), FLOOR);
+        expect(layout.size).toBe(FLOOR);
+        expect(layout.shown).toBe(true);
+        expect(layout.folded).toBe(true);
+    });
+
+    it('доля ниже пола до пола и дотягивается', () => {
+        // Половина ручки с полем ввода — не размер: разговор в неё не сминается, а встаёт
+        // на пол целиком.
+        const layout = allowedLayout(wish({ under: { share: 0.05, back: CHAT_SHARE } }), view(390, 844), FLOOR);
+        expect(layout.size).toBe(FLOOR);
+        expect(layout.folded).toBe(true);
+    });
+
+    it('разговор выше пола свёрнутым не считается', () => {
+        const layout = allowedLayout(defaultWish(), view(390, 844), FLOOR);
+        expect(layout.size).toBeGreaterThan(FLOOR);
+        expect(layout.folded).toBe(false);
+    });
+
+    it('сбоку пол не мешает убрать панель', () => {
+        // Пол — мерка нижней раскладки. Сбоку убранная панель остаётся нулём, иначе кнопка
+        // в шапке перестала бы что-либо делать.
+        const hidden = wish({ side: { share: 0, back: CHAT_SHARE } });
+        expect(allowedLayout(hidden, view(1400, 900), FLOOR).size).toBe(0);
+        expect(allowedLayout(hidden, view(1400, 900), FLOOR).shown).toBe(false);
+    });
+
     it('размер всегда целый', () => {
         // Дробный размер разговора даёт дробный кадр, а кадр рисует корабли и подписи —
         // половина пикселя там видна размытой кромкой.
@@ -133,11 +186,18 @@ describe('allowedLayout', () => {
 
 describe('chatMagnets', () => {
     /** Точки той раскладки, в которую попадает окно такой формы. */
-    const points = (width: number, height: number) => chatMagnets(allowedLayout(defaultWish(), view(width, height)));
+    const points = (width: number, height: number, floor = 0) =>
+        chatMagnets(allowedLayout(defaultWish(), view(width, height), floor));
 
-    it('под кадром это ровно четыре записанные доли хода', () => {
+    it('под кадром это пол и три записанные доли хода', () => {
         // Ход тут — окно без полоски под шапку, и доли считаются от него: 780 = 844 − 64.
         expect(points(390, 844)).toEqual([0, 260, 520, 780]);
+    });
+
+    it('нижней точкой стоит пол, а не ноль', () => {
+        // Разговор под кадром неубираемый: самое малое, во что он сворачивается, — ручка
+        // с полем ввода. Доли при этом остаются теми же самыми.
+        expect(points(390, 844, FLOOR)).toEqual([FLOOR, 260, 520, 780]);
     });
 
     it('сбоку доли за пределом прижимаются к упору, а не пропадают', () => {

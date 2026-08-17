@@ -1,30 +1,27 @@
 import { RefObject, useEffect } from 'react';
 
 /**
- * Свайп пальцем по блоку — в одну заранее названную сторону.
+ * Свайп пальцем по блоку: в какую сторону провели.
  *
  * Пальцем, а не указателем: мышью то же самое делают кнопкой, а тянущее движение мышью
  * по кадру — это выделение и выбор места на рейде, и отбирать его у них нечем.
  *
- * Сторона одна и приходит снаружи, потому что от неё зависит главное — чей это жест. Своим
- * мы объявляем движение только в свою сторону и только вдоль: всё остальное (поперёк, назад,
- * двумя пальцами) уходит системе нетронутым, вместе с свайпом страницы к обновлению.
+ * Своим мы объявляем движение только вдоль: поперёк и двумя пальцами уходит системе нетронутым.
+ * Отменять при этом нечего — вертикаль кадра запрещена стилями (`touch-action` у .scene),
+ * и браузеру тут не за что взяться. Слушатели поэтому ленивые, а нажатие по кораблю доживает
+ * до конца и срабатывает, даже если палец по дороге дрогнул.
  */
 
 /**
  * Насколько палец должен уйти, чтобы стало понятно, куда его ведут, px. Меньше — тычок:
  * попасть в экран и не сдвинуть палец на пиксель-другой невозможно.
- *
- * Зазор маленький нарочно. Решать, наш это жест или системный, приходится в первые же
- * миллиметры: браузер начинает тянуть страницу к обновлению с первого движения, и запретить
- * это позже уже нельзя.
  */
 const CLAIM_SLOP = 8;
 
-/** Сколько надо пройти в свою сторону, чтобы жест сработал, px. */
+/** Сколько надо пройти вдоль, чтобы жест сработал, px. */
 const SWIPE_DISTANCE = 48;
 
-export const useSwipe = (ref: RefObject<HTMLElement | null>, direction: 'up' | 'down', onSwipe: () => void): void => {
+export const useSwipe = (ref: RefObject<HTMLElement | null>, onSwipe: (direction: 'up' | 'down') => void): void => {
     useEffect(() => {
         const node = ref.current;
         if (!node) {
@@ -51,28 +48,23 @@ export const useSwipe = (ref: RefObject<HTMLElement | null>, direction: 'up' | '
             }
             const dx = event.touches[0].clientX - start.x;
             const dy = event.touches[0].clientY - start.y;
-            // Насколько палец ушёл в нужную сторону: назад — отрицательное.
-            const along = direction === 'down' ? dy : -dy;
 
             if (!ours) {
                 if (Math.abs(dx) <= CLAIM_SLOP && Math.abs(dy) <= CLAIM_SLOP) {
                     return;
                 }
-                // Поперёк или назад — не наше. Забываем начало: жест уже опознан чужим,
-                // и доводить его до нашей стороны разворотом посреди пути нельзя.
-                if (along <= 0 || Math.abs(dx) > Math.abs(dy)) {
+                // Поперёк — не наше. Забываем начало: жест уже опознан чужим, и доводить его
+                // до вертикали разворотом посреди пути нельзя.
+                if (Math.abs(dx) > Math.abs(dy)) {
                     start = null;
                     return;
                 }
                 ours = true;
             }
 
-            // Жест наш — и страницу на нём тянуть не надо. Отсюда и неленивый слушатель ниже:
-            // ленивому браузер запретить ничего не даёт.
-            event.preventDefault();
-            if (along >= SWIPE_DISTANCE) {
+            if (Math.abs(dy) >= SWIPE_DISTANCE) {
                 done = true;
-                onSwipe();
+                onSwipe(dy > 0 ? 'down' : 'up');
             }
         };
 
@@ -81,7 +73,7 @@ export const useSwipe = (ref: RefObject<HTMLElement | null>, direction: 'up' | '
         };
 
         node.addEventListener('touchstart', handleStart, { passive: true });
-        node.addEventListener('touchmove', handleMove, { passive: false });
+        node.addEventListener('touchmove', handleMove, { passive: true });
         node.addEventListener('touchend', handleEnd, { passive: true });
         node.addEventListener('touchcancel', handleEnd, { passive: true });
         return () => {
@@ -90,5 +82,5 @@ export const useSwipe = (ref: RefObject<HTMLElement | null>, direction: 'up' | '
             node.removeEventListener('touchend', handleEnd);
             node.removeEventListener('touchcancel', handleEnd);
         };
-    }, [ref, direction, onSwipe]);
+    }, [ref, onSwipe]);
 };

@@ -235,17 +235,19 @@ export default function MembersList({
             <Actions pinned>
                 <Button variant="secondary" onClick={onCopyLink}>
                     <LinkIcon />
-                    {/* На широком списке слово целиком: «Координаты рейда». Узкому хватает
-                        первого — второе слово там только отнимает место у соседней кнопки,
-                        а рейд и так один, тот самый, чей список открыт. Решает это ширина
-                        самого списка, а не окна (@container, см. стили). */}
+                    {/* На широком списке подписи целиком, узкому хватает первого слова: рейд
+                        и так один, тот самый, чей список открыт, — а вдвоём полные подписи
+                        в строку не помещаются, и кнопки уезжают каждая на свою строчку.
+                        Решает это ширина самого списка, а не окна (@container, см. стили). */}
                     <span>
                         Координаты<span className={styles.wide}> рейда</span>
                     </span>
                 </Button>
                 <Button variant="danger" onClick={onLeave}>
                     <LeaveIcon />
-                    <span>Уйти с рейда</span>
+                    <span>
+                        Уйти<span className={styles.wide}> с рейда</span>
+                    </span>
                 </Button>
             </Actions>
         </div>
