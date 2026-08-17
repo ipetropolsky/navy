@@ -16,9 +16,10 @@ import islandUrl from '@/assets/scene/island.png';
 import moonUrl from '@/assets/scene/moon.png';
 import seaUrl from '@/assets/scene/sea.png';
 import skyUrl from '@/assets/scene/sky.png';
-import { fleetLefts, restingLeft } from '@/backend';
+import { fleetLefts, restingDrift, restingLeft, restingYaw } from '@/backend';
 import MemberName from '@/components/ships/MemberName';
 import Ship from '@/components/ships/Ship';
+import { paced } from '@/config/time';
 import {
     Berth,
     CORRIDORS,
@@ -118,12 +119,15 @@ const SCENE_IMAGES = [skyUrl, moonUrl, cloudFarUrl, cloudNearUrl, islandUrl, sea
 
 // Сколько корабль пропадает из виду, перезаходя на другой слот. Пауза нужна, чтобы уход
 // и заход читались как два разных манёвра, а не как рывок из одного края кадра в другой.
-const RELOCATE_PAUSE_MS = 3000;
+//
+// Она часть манёвра, а не отсрочка перед ним, — поэтому идёт по той же скорости времени,
+// что и сам ход (см. config/time). Иначе ускоренный перезаход состоял бы почти из одной паузы.
+const RELOCATE_PAUSE_MS = paced(3000);
 
 // Сколько длится кивок, с. Сама длительность живёт в стилях (@nod-seconds), здесь она нужна
 // затем, чтобы вовремя снять класс: анимация запускается его появлением, и оставшийся класс
-// не дал бы кораблю кивнуть во второй раз.
-const NOD_SECONDS = 3.5;
+// не дал бы кораблю кивнуть во второй раз. Скорость времени делит обе одинаково.
+const NOD_SECONDS = paced(3.5);
 
 // Насколько кивок на остановке опережает конец хода. Клюёт носом корабль, пока гасит ход,
 // а не после: к тому мгновению, когда он встал, он уже должен быть выровнен. Не весь кивок
@@ -134,7 +138,7 @@ const NOD_LEAD = 0.8;
 // Сколько гаснет слой выбора места, мс. Сама длительность живёт в стилях (@berth-fade),
 // здесь она нужна затем, чтобы вовремя снять разметку: пока переход идёт, слой обязан
 // оставаться в кадре, а после — исчезнуть, иначе он навсегда останется в разметке прозрачным.
-const BERTH_FADE_MS = 200;
+const BERTH_FADE_MS = paced(200);
 
 /** Ждёт загрузки картинки. Не сложилось — тоже ответ: сцену показываем в любом случае. */
 const preload = (url: string): Promise<void> =>
@@ -691,12 +695,17 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
      * и для корабля, и для овала свободного места, только встают они по ней по-разному:
      * отметка — на оси своего коридора, корабль — там, где ему насчитала расстановка
      * (см. fleetLefts), то есть с разбросом внутри полосы и с оглядкой на тесного соседа.
+     *
+     * `drift` — тот же разброс, но по дальности: корабль отходит от своей линии на долю
+     * промежутка до соседней (restingDrift). Достаётся он одному кораблю: отметка места
+     * и подпись под ним остаются на самой линии — разметка про выбор, и стройность ей нужна.
      */
-    const laneStyle = (place: Berth, width: number, left = place.left): CSSProperties => {
+    const laneStyle = (place: Berth, width: number, left = place.left, drift = 0): CSSProperties => {
         // Доля пути от дальней линии к ближней. Считается от концов рейда, а не от глубины:
         // сами концы приколочены к горизонту и к нижней кромке кадра, а перспектива
-        // распределяет линии между ними.
-        const share = slotShare(place.slot);
+        // распределяет линии между ними. Отход от линии идёт в слотах, а не в долях: доли
+        // между линиями разной величины, и в слотах перспектива распределит его сама.
+        const share = slotShare(place.slot + drift);
         return {
             // Ширину досчитывает CSS: там же живёт масштаб для телефонов.
             '--slot-left': `${left.toFixed(2)}%`,
@@ -917,6 +926,10 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
     return (
         <div
             className={[styles.scene, painted ? styles.scenePainted : ''].filter(Boolean).join(' ')}
+            // То же самое, что и класс рядом, но именем, которое не меняется: имена классов
+            // хеширует сборка, и цепляться за них снаружи — в проверках — можно только
+            // подстрокой. Атрибут говорит прямо: задники догрузились, кадр проступил.
+            data-scene-painted={painted ? '' : undefined}
             style={{ '--sky-img-px': `${skyImageHeight}px` } as CSSProperties}
             ref={sceneRef}
         >
@@ -956,6 +969,13 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
                 {placed.map((member) => {
                     const depth = slotDepth(member.place.slot);
                     const width = shipWidthPercent(member.place.slot, member.shipKind);
+                    // Отход от своей линии и разворот корпуса: и то и другое — про стоянку,
+                    // а не про место, и потому считается тут же, где и разброс поперёк.
+                    // Размер корабля от отхода не меняется: доля линии — это единицы пикселей
+                    // на глаз, а вот разойдись ширина корпуса с той, по которой расстановка
+                    // разводила соседей бортами, — и двое на линии встали бы внахлёст.
+                    const drift = restingDrift(member);
+                    const yaw = restingYaw(member);
                     const leaving = leavingById.current.has(member.memberId);
                     const entering = !leaving && enteringIds.current.has(member.memberId);
                     // Переход по воде на соседнюю точку своей же линии. Уходящему и заходящему
@@ -1090,8 +1110,10 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
                             }}
                             style={
                                 {
-                                    ...laneStyle(member.place, width, shown),
+                                    ...laneStyle(member.place, width, shown, drift),
                                     // Ближний перекрывает дальнего: порядок наложения идёт от слота.
+                                    // Отход от линии его не меняет — он меньше половины промежутка,
+                                    // и порядок линий от него не переворачивается (см. DEPTH_SCATTER).
                                     zIndex: member.place.slot + 1,
                                     // Ход в процентах ширины кадра: столько корабль смещён от своего
                                     // места, когда только появляется из-за кромки. Знак — сторона,
@@ -1107,6 +1129,10 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
                                     '--shift-seconds': `${(shift?.seconds ?? 0).toFixed(1)}s`,
                                     '--sail-trim': `${trim.toFixed(2)}deg`,
                                     '--nod-angle': `${nod.toFixed(2)}deg`,
+                                    // Разворот корпуса на стоянке: постоянный угол, не движение.
+                                    // Живёт на дорожке рядом с прочими углами, а достаётся
+                                    // одному силуэту — см. .shipYaw в стилях.
+                                    '--yaw-angle': `${yaw.toFixed(2)}deg`,
                                 } as CSSProperties
                             }
                         >
@@ -1158,28 +1184,34 @@ export default function SeaScene({ members, myId, morseFeeds, ready, berths, onE
                                     >
                                         {/* Тень идёт перед кораблём в разметке, поэтому корпус её перекрывает. */}
                                         <div className={styles.shipShadow} />
-                                        <Ship
-                                            kind={member.shipKind}
-                                            name={member.name}
-                                            hullNumber={member.hullNumber}
-                                            facing={member.place.facing}
-                                            // Идёт — ходовые огни, стоит на рейде — якорные. Это про всех
-                                            // в кадре, а не только про свой корабль: огни у корабля не зависят
-                                            // от того, из чьей вкладки на него смотрят.
-                                            mode={motionKind ? 'underway' : 'anchored'}
-                                            depth={depth}
-                                            // Пока выбирают место, весь флот отходит на второй план: речь
-                                            // сейчас про рейд, и вода должна читаться сквозь любой корпус.
-                                            // Свой корабль тут не исключение — его как раз и разбирают,
-                                            // и место под ним закрыто им же.
-                                            //
-                                            // Высветляется при этом один корпус: огни горят по-прежнему,
-                                            // и тень на воде остаётся тёмной. Разбирается с этим сам
-                                            // корабль — снаружи не отделить одно от другого, — а почему
-                                            // именно так, написано у GHOST в Ship.
-                                            aside={Boolean(berths)}
-                                            morseFeed={morseFeeds[member.memberId] ?? null}
-                                        />
+                                        {/* Разворот на стоянке: ещё один поворот, и по тому же правилу,
+                                    что кивок с тангажом, — свой блок на своё свойство. Внутри него
+                                    один силуэт: тень осталась снаружи и лежит на воде ровно, как
+                                    ей и положено. */}
+                                        <div className={styles.shipYaw}>
+                                            <Ship
+                                                kind={member.shipKind}
+                                                name={member.name}
+                                                hullNumber={member.hullNumber}
+                                                facing={member.place.facing}
+                                                // Идёт — ходовые огни, стоит на рейде — якорные. Это про всех
+                                                // в кадре, а не только про свой корабль: огни у корабля не зависят
+                                                // от того, из чьей вкладки на него смотрят.
+                                                mode={motionKind ? 'underway' : 'anchored'}
+                                                depth={depth}
+                                                // Пока выбирают место, весь флот отходит на второй план: речь
+                                                // сейчас про рейд, и вода должна читаться сквозь любой корпус.
+                                                // Свой корабль тут не исключение — его как раз и разбирают,
+                                                // и место под ним закрыто им же.
+                                                //
+                                                // Высветляется при этом один корпус: огни горят по-прежнему,
+                                                // и тень на воде остаётся тёмной. Разбирается с этим сам
+                                                // корабль — снаружи не отделить одно от другого, — а почему
+                                                // именно так, написано у GHOST в Ship.
+                                                aside={Boolean(berths)}
+                                                morseFeed={morseFeeds[member.memberId] ?? null}
+                                            />
+                                        </div>
                                     </div>
                                 </div>
                             </div>

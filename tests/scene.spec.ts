@@ -1,4 +1,4 @@
-import { Page, expect, test } from '@playwright/test';
+import { Page, expect } from '@playwright/test';
 
 import { EDGE_MARGIN } from '@/backend/placement';
 import { slotShare } from '@/types/channel';
@@ -6,8 +6,10 @@ import { slotShare } from '@/types/channel';
 import {
     ALBATROS,
     DEMO,
+    TIME_SCALE,
     berths,
     clickShip,
+    hasten,
     join,
     leaveRaid,
     openChannel,
@@ -19,6 +21,8 @@ import {
     readState,
     ships,
     shipsButton,
+    test,
+    unhasten,
 } from '@tests/helpers';
 
 /**
@@ -47,11 +51,15 @@ const SPREAD_NEAR = 0.1;
 /**
  * Сколько ждать конца манёвра, мс. Мерка не запасная, а расчётная: самый длинный ход в кадре —
  * уход с ближней линии через весь рейд, — идёт на наименьшем ходу по кадру (`MIN_SAIL_PACE`)
- * около 53 с. Отсюда и минута с небольшим: меньше — и проверки начнут падать от того, что
- * корабль ещё в пути, а не от того, что он идёт не туда. Сбавят ход ещё — это число сбавляют
- * вместе с ним, иначе падение будет ждать полторы минуты вместо секунды.
+ * около 53 с, а под проверками во столько же раз меньше, во сколько ускорено время. Отсюда
+ * и запас: меньше — и проверки начнут падать от того, что корабль ещё в пути, а не от того,
+ * что он идёт не туда.
+ *
+ * Слагаемым, а не множителем: ускоряется ход корабля, а не открытие канала, загрузка картинок
+ * и постановка в строй, которые в это же ожидание попадают. Сбавят ход ещё — первое число
+ * сбавляют вместе с ним.
  */
-const SAIL_TIMEOUT = 70_000;
+const SAIL_TIMEOUT = 60_000 / TIME_SCALE + 10_000;
 
 /** Насколько боковое место этой линии отстоит от середины кадра, доля его ширины. */
 const berthOffset = (slot: number): number => CORRIDOR_STEP + SPREAD_FAR + (SPREAD_NEAR - SPREAD_FAR) * slotShare(slot);
@@ -221,7 +229,11 @@ test('на одной линии помещаются двое, и борта н
     await page.mouse.click(spot!.x + spot!.width / 2, spot!.y + spot!.height / 2);
     await expect(page.locator(`[data-berth="${shared}"][aria-pressed="true"]`)).toHaveCount(1);
     await join(page, 'Гроза', '777');
-    await page.waitForTimeout(1200);
+    // Ждём признак, а не время: борта сравнивать можно только со стоящими кораблями. Заходящий
+    // проходит над местом соседа по дороге к своему — застигнутый в этот миг, он с ним и
+    // «налезает». Прежде тут стояла пауза в 1200 мс, и держалась она на том, что за это время
+    // корабль не успевал дойти даже до середины пути.
+    await expect(page.locator('[data-motion]'), 'корабли так и не встали на места').toHaveCount(0);
 
     const after = await readState(page).then(
         (state) => Object.values(state.channels).find((item) => item.channel.slug === 'para')!.members
@@ -232,19 +244,21 @@ test('на одной линии помещаются двое, и борта н
         'на линии не оказалось двоих'
     ).toHaveLength(2);
 
-    // И это видно в кадре: корабли одной дальности стоят на одной высоте, и борта у них
-    // не пересекаются. Высоту сравниваем с допуском — корабли качает.
+    // И это видно в кадре: борта у двоих на одной дальности не пересекаются. Линию берём
+    // из места, написанного на самом корпусе, а не из высоты в кадре: на стоянке корабль
+    // отходит от своей линии (restingDrift), и двое на одной линии стоят в кадре чуть
+    // по-разному — на глаз это и есть стоянка вместо строя.
     const hulls = await page.evaluate(() =>
-        [...document.querySelectorAll('[class*="shipSlot"]')].map((slot) => {
+        [...document.querySelectorAll<HTMLElement>('[data-berth-ship]')].map((slot) => {
             const box = slot.getBoundingClientRect();
-            return { bottom: box.bottom, left: box.left, right: box.right };
+            return { line: slot.dataset.berthShip!.split('-')[0], left: box.left, right: box.right };
         })
     );
     // Пара тут одна, но ищем их все — так же, как выше искали место: правило про борта общее.
     const pairs = hulls.flatMap((one, index) =>
         hulls
             .slice(index + 1)
-            .filter((other) => Math.abs(one.bottom - other.bottom) < 6)
+            .filter((other) => other.line === one.line)
             .map((other) => [one, other].sort((first, second) => first.left - second.left))
     );
     expect(pairs.length, 'в кадре не нашлось двух кораблей на одной дальности').toBeGreaterThan(0);
@@ -423,7 +437,13 @@ test('разброс по коридору у всех вкладок одина
     // берём из порядка наложения — он и есть номер линии, — а середина и есть то число,
     // которое двигает разброс. Подписей в обычном кадре нет, они живут в разметке выбора,
     // поэтому корабли различаем линией и шириной корпуса, а не именем.
-    const picture = (tab: Page): Promise<{ slot: number; middle: number; width: number }[]> =>
+    // Отход от линии и разворот корпуса — тот же разброс, только по дальности и по углу,
+    // и считаются они тем же хешем. Значит, и совпадать у вкладок обязаны в той же мере:
+    // отход виден по нижней кромке дорожки — она стоит на воде под килем, — а разворот
+    // берётся с блока, которому он и достаётся.
+    const picture = (
+        tab: Page
+    ): Promise<{ slot: number; middle: number; width: number; water: number; yaw: string }[]> =>
         tab.evaluate(() =>
             [...document.querySelectorAll<HTMLElement>('[class*="shipLane"]')]
                 .map((lane) => {
@@ -432,6 +452,8 @@ test('разброс по коридору у всех вкладок одина
                         slot: Number(lane.style.zIndex) - 1,
                         middle: Math.round((box.left + box.width / 2) * 100) / 100,
                         width: Math.round(box.width * 100) / 100,
+                        water: Math.round(lane.getBoundingClientRect().bottom * 100) / 100,
+                        yaw: getComputedStyle(lane.querySelector('[class*="shipYaw"]')!).rotate,
                     };
                 })
                 .sort((one, other) => one.slot - other.slot || one.middle - other.middle)
@@ -447,6 +469,85 @@ test('разброс по коридору у всех вкладок одина
     await other.close();
 
     expect(theirs, 'у второй вкладки рейд оказался другим').toEqual(mine);
+});
+
+test('на стоянке корабль отходит от своей линии и разворачивает корпус', async ({ page }) => {
+    // Флот, выставленный точно по линиям и строго вдоль кадра, читается парадом, а не
+    // стоянкой: на настоящем рейде корабли разводит ветром и течением. Отход по дальности
+    // и малый разворот корпуса — это он и есть.
+    //
+    // Канал свой, а не демо, и корабли в нём расставлены руками: и отход, и разворот идут
+    // от хеша по позывному и месту, а в демо-канале места раздаёт случай — вышло бы, что
+    // проверка каждый раз меряет другой рейд. Линии взяты вразбег по всей глубине: у дальних
+    // промежуток вчетверо теснее, чем у ближних, и отход обязан укладываться в оба.
+    await openNewChannel(page, 'stoyanka');
+    const anchor = async (memberId: string, name: string, hullNumber: string, berth: string): Promise<void> => {
+        await openChannel(page, 'stoyanka', memberId);
+        await openJoinForm(page);
+        await page.locator(`[data-berth="${berth}"]`).click();
+        await join(page, name, hullNumber);
+    };
+    await anchor('pervyy', 'Гром', '404', '8-center');
+    await anchor('vtoroy', 'Вымпел', '303', '5-right');
+    await anchor('tretiy', 'Резвый', '202', '2-right');
+
+    // Смотрим гостем: разметка рейда видна только при открытой форме, а линии рейда видны
+    // только в ней — точками свободных мест и подписями занятых. Сравнивать положение
+    // корабля больше не с чем.
+    await openChannel(page, 'stoyanka', 'gost');
+    await openJoinForm(page);
+
+    const raid = await page.evaluate(() => {
+        // Меряем дорожки, а не то, что на них стоит: дорожка неподвижна, а точка с подписью
+        // качаются волной, и разовый замер застал бы их в случайной фазе. Нижняя кромка
+        // дорожки — это и есть вода под килем, то самое место стоянки.
+        const water = (node: Element): number => Math.round(node.getBoundingClientRect().bottom * 100) / 100;
+        const lines = [
+            ...document.querySelectorAll<HTMLElement>('[class*="shipNameLane"]'),
+            ...document.querySelectorAll<HTMLElement>('[data-berth]'),
+        ].map((mark) => water(mark.closest('[class*="Lane"]') ?? mark));
+        const fleet = [...document.querySelectorAll<HTMLElement>('[data-berth-ship]')].map((hull) => {
+            const lane = hull.closest<HTMLElement>('[class*="shipLane"]')!;
+            const name = document.querySelector(`[data-berth-name="${hull.dataset.berthShip!}"]`);
+            return {
+                // Своя линия у корабля одна: подпись его же места. Она достаётся всем,
+                // кроме стоящего на выбранном месте, — а выбранное свободно, чужих рейд
+                // не предлагает.
+                line: name ? water(name) : null,
+                water: water(lane),
+                yaw: Number.parseFloat(getComputedStyle(lane.querySelector('[class*="shipYaw"]')!).rotate),
+            };
+        });
+        return { lines, fleet };
+    });
+
+    expect(raid.fleet, 'на рейде не собралось трёх кораблей').toHaveLength(3);
+    for (const ship of raid.fleet) {
+        expect(ship.line, 'у корабля не нашлось подписи своего места').not.toBeNull();
+    }
+
+    // Отошли все: рейд стоит не по линейке. Полпикселя тут не мерка терпимости, а порог
+    // видимости — совпади корабль с линией, разница вышла бы ровным нулём.
+    const shifts = raid.fleet.map((ship) => Math.abs(ship.water - ship.line!));
+    for (const shift of shifts) {
+        expect(shift, 'корабль встал точно на свою линию').toBeGreaterThan(0.5);
+    }
+
+    // И при этом никто не перебрался на чужую линию: отход — пятая часть промежутка,
+    // а не половина. Промежуток у каждой линии свой — перспектива сводит дальние теснее, —
+    // поэтому меряем его на месте: до ближайшей соседней линии в кадре.
+    for (const [index, shift] of shifts.entries()) {
+        const line = raid.fleet[index].line!;
+        const apart = raid.lines.map((other) => Math.abs(other - line)).filter((gap) => gap > 0.5);
+        expect(shift, 'корабль ушёл на чужую линию').toBeLessThan(Math.min(...apart) / 2);
+    }
+
+    // Развернуло каждого, и никого — сильнее своей меры. Само число живёт в расстановке
+    // (YAW_DEGREES), сюда оно перенесено с запасом на округление в стилях.
+    for (const { yaw } of raid.fleet) {
+        expect(Math.abs(yaw), 'корабль стоит строго вдоль кадра').toBeGreaterThan(0.01);
+        expect(Math.abs(yaw), 'корабль развернуло сильнее, чем ветром на стоянке').toBeLessThanOrEqual(1.51);
+    }
 });
 
 test('свободные места на рейде зависят от выбранного корабля', async ({ page }) => {
@@ -824,6 +925,9 @@ const crossed = (path: { ms: number; part: number }[], mark: number): number => 
 };
 
 test('разметка гаснет вместе с флотом, а не кадром', async ({ page }) => {
+    // Время тут обычное: замер идёт покадрово и с запасом в полсотни миллисекунд, а ускоренное
+    // высветление целиком короче этого запаса.
+    await unhasten(page);
     await openChannel(page, DEMO, ALBATROS);
     await openShipForm(page);
     // Ждём, пока флот договорит своё: замер идёт по долям пути, и начинать его посреди
@@ -1003,6 +1107,9 @@ test('ход корабля идёт с правдоподобной скоро�
     // в строй в той же вкладке уже не покажется, вкладка помнит, что корабль у неё есть.
     const seconds = async (kind: string): Promise<number> => {
         const context = await browser.newContext();
+        // Контекст свой, а значит и ускорение времени в нём своё: фикстура достаётся только
+        // тому контексту, который выдаёт сам `test`.
+        await hasten(context);
         const page = await context.newPage();
         await openNewChannel(page, `hod${kind.length}`);
         await join(page, `Гость${kind.length}`, String(100 + kind.length), kind);
@@ -1010,7 +1117,9 @@ test('ход корабля идёт с правдоподобной скоро�
         await expect(slot).toHaveCount(1);
         const value = await slot.evaluate((element) => getComputedStyle(element).getPropertyValue('--enter-seconds'));
         await context.close();
-        return Number.parseFloat(value);
+        // Обратно к обычному времени: проверяется правило, а правило записано в настоящих
+        // секундах хода, а не в тех, за которые его отыгрывают под ускорением.
+        return Number.parseFloat(value) * TIME_SCALE;
     };
 
     const cutter = await seconds('Пограничный сторожевой катер');

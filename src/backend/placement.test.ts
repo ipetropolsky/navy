@@ -22,6 +22,9 @@ import {
     isBerthFree,
     placeShip,
     preferredBerths,
+    restingDrift,
+    restingLeft,
+    restingYaw,
     suggestBerth,
 } from '@/backend/placement';
 
@@ -377,5 +380,96 @@ describe('расхождение тесных соседей', () => {
             fleetLefts([staying, joined])[joined.memberId]
         );
         expect(overlap(line.filter((ship) => ship !== leaving)), 'корпуса налезли друг на друга').toBe(false);
+    });
+});
+
+/**
+ * Стоянка: отход от своей линии по дальности и разворот корпуса. И то и другое — про то,
+ * как корабль стоит на месте, а не про само место, и считается тем же хешем, что и разброс
+ * поперёк. Значит, проверять тут надо ровно две вещи: что числа держатся в своих пределах
+ * и что они у всех разные, — а видно ли это в кадре, показывает браузер.
+ */
+
+/** Десяток кораблей на одном месте: разными их делает только позывной. */
+const CREW: Anchored[] = [...new Array<number>(10)].map((_, index) => anchored(`ship-${index}`, NEAR, 'center', KIND));
+
+describe('живая стоянка', () => {
+    test('отход от линии не выходит за пятую часть промежутка и не меняется от прогона к прогону', () => {
+        for (const ship of CREW) {
+            const drift = restingDrift(ship);
+            expect(Math.abs(drift), `${ship.memberId} ушёл с линии дальше положенного`).toBeLessThanOrEqual(0.2);
+            expect(restingDrift(ship), 'отход посчитался по-разному дважды подряд').toBe(drift);
+        }
+    });
+
+    test('отходят в обе стороны и на разное расстояние', () => {
+        // Иначе это был бы не разброс, а общий сдвиг всего флота на полшага к наблюдателю.
+        const drifts = CREW.map(restingDrift);
+        expect(
+            drifts.some((drift) => drift > 0.02),
+            'никто не подошёл ближе'
+        ).toBe(true);
+        expect(
+            drifts.some((drift) => drift < -0.02),
+            'никто не отошёл дальше'
+        ).toBe(true);
+        expect(new Set(drifts.map((drift) => drift.toFixed(4))).size, 'флот отошёл строем').toBe(drifts.length);
+    });
+
+    test('с крайних линий отходят только внутрь рейда', () => {
+        // Дальше нулевой линии корабль встал бы на горизонт, ближе последней — ушёл бы
+        // под нижнюю кромку кадра.
+        for (const memberId of CREW.map((ship) => ship.memberId)) {
+            expect(
+                restingDrift(anchored(memberId, 0, 'center', KIND)),
+                'с дальней линии ушли за горизонт'
+            ).toBeGreaterThanOrEqual(0);
+            expect(
+                restingDrift(anchored(memberId, SLOT_COUNT - 1, 'center', KIND)),
+                'с ближней линии ушли под кромку кадра'
+            ).toBeLessThanOrEqual(0);
+        }
+    });
+
+    test('разворот корпуса невелик и достаётся в обе стороны', () => {
+        const yaws = CREW.map(restingYaw);
+        for (const yaw of yaws) {
+            expect(Math.abs(yaw), 'корабль развернуло сильнее, чем ветром на стоянке').toBeLessThanOrEqual(1.5);
+        }
+        expect(
+            yaws.some((yaw) => yaw > 0.1),
+            'никого не развернуло в одну сторону'
+        ).toBe(true);
+        expect(
+            yaws.some((yaw) => yaw < -0.1),
+            'никого не развернуло в другую'
+        ).toBe(true);
+    });
+
+    test('отход, разворот и разброс поперёк не ходят вместе', () => {
+        // У каждого свой ключ хеша нарочно: сойдись они — и корабль, отошедший вправо,
+        // всегда отходил бы ещё и вперёд, и с тем же разворотом. Строй от такого правила
+        // выглядел бы разложенным по одной линейке, а не стоящим на якорях.
+        const order = (numbers: number[]): string =>
+            numbers
+                .map((value, index) => [value, index] as const)
+                .sort(([one], [other]) => one - other)
+                .map(([, index]) => index)
+                .join(',');
+        const drifts = order(CREW.map(restingDrift));
+        const yaws = order(CREW.map(restingYaw));
+        const lefts = order(CREW.map(restingLeft));
+        expect(drifts, 'отход повторяет разворот').not.toBe(yaws);
+        expect(drifts, 'отход повторяет разброс поперёк').not.toBe(lefts);
+        expect(yaws, 'разворот повторяет разброс поперёк').not.toBe(lefts);
+    });
+
+    test('переставленный корабль стоит на новом месте по-новому', () => {
+        // В ключ хеша входит место: перешёл на другую стоянку — встал на ней иначе,
+        // а не повторил прежний отход.
+        const here = anchored('malysh', NEAR, 'center', KIND);
+        const there = anchored('malysh', NEAR - 1, 'center', KIND);
+        expect(restingDrift(there), 'отход переехал вместе с кораблём').not.toBeCloseTo(restingDrift(here), 3);
+        expect(restingYaw(there), 'разворот переехал вместе с кораблём').not.toBeCloseTo(restingYaw(here), 3);
     });
 });

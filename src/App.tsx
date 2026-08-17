@@ -26,7 +26,7 @@ import Panel from '@/components/ui/Panel';
 import Shade from '@/components/ui/Shade';
 import { useSnackbar } from '@/components/ui/Snackbar';
 import { LeaveIcon } from '@/components/ui/icons';
-import { SHEET_HANDLE } from '@/config/layout';
+import { FEED_MIN, SHEET_HANDLE } from '@/config/layout';
 import { HAIL_SIGNAL, morseDuration } from '@/hooks/morse';
 import { useChannel } from '@/hooks/useChannel';
 import { chatMagnets, useLayout } from '@/hooks/useLayout';
@@ -164,6 +164,11 @@ export default function App() {
     // рост коробки под этим списком. Сам свёрнутый разговор при этом живой: в поле ввода
     // пишут, за ручку его достают обратно, и коридор для свайпа стоит по его кромке (`shown`).
     const talking = shown && !folded;
+    // Ленте не досталось и одной реплики: разговор либо стоит на полу, либо его ведут от пола
+    // вверх и он ещё не дорос. Выглядит он в этом случае одинаково — ручка и плашка ввода, —
+    // а ленты нет вовсе, см. FEED_MIN в config/layout и .contentTight в стилях. Сбоку такого
+    // не бывает: там разговор либо во всю высоту окна, либо убран целиком.
+    const tight = !atSide && size - layout.floor < FEED_MIN;
 
     const sceneRef = useRef<HTMLDivElement>(null);
     const toggleChat = useCallback(() => (shown ? hide() : show()), [shown, hide, show]);
@@ -1004,7 +1009,7 @@ export default function App() {
                 ни чтению вслух. Свёрнутый до пола разговор, наоборот, остаётся живым: плашка
                 ввода на экране, и писать в неё можно, ничего не разворачивая. */}
             <main
-                className={[styles.content, atSide ? styles.contentSide : '', folded ? styles.contentFolded : '']
+                className={[styles.content, atSide ? styles.contentSide : '', tight ? styles.contentTight : '']
                     .filter(Boolean)
                     .join(' ')}
                 inert={!shown}

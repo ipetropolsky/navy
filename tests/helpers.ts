@@ -1,4 +1,7 @@
-import { Locator, Page, expect } from '@playwright/test';
+import { BrowserContext, Locator, Page, expect, test as base } from '@playwright/test';
+
+// Приложение объявляет window.timeScale — импорт нужен ради этого объявления.
+import '@/config/time';
 
 /**
  * Общее для всех проверок: как открыть канал, как встать в строй, как заглянуть в хранилище.
@@ -7,14 +10,81 @@ import { Locator, Page, expect } from '@playwright/test';
  * всегда свежий: три корабля и семь реплик из `src/backend/seed.ts`.
  */
 
+/**
+ * Во сколько раз время в проверках идёт быстрее обычного.
+ *
+ * Ход корабля по кадру длится до минуты, и половина набора этот ход пережидала: четыре самые
+ * долгие проверки съедали треть всего прогона. Ускоряется при этом само приложение, а не
+ * проверки: правила остаются те же, движение остаётся движением — просто отыгрывается вдесятеро
+ * быстрее (см. src/config/time.ts).
+ *
+ * Десятая доля — не потолок, а предел разумного. Выше начинает мешать не приложение,
+ * а сам браузер: переезд раскладки в 0.42 с при таком ускорении укладывается в три кадра,
+ * и проверки, которые смотрят на движение посередине, ловить станет нечего.
+ */
+export const TIME_SCALE = 10;
+
+/**
+ * Ускорить время в контексте. Мерка ставится скриптом до загрузки страницы: приложение читает
+ * её один раз при запуске, и подложить её позже — значит не подложить вовсе.
+ *
+ * Нужна руками только тем проверкам, которые заводят себе контекст сами; всем остальным
+ * его выдаёт `test` ниже, уже ускоренным.
+ */
+export const hasten = async (context: BrowserContext): Promise<void> => {
+    await context.addInitScript((scale) => {
+        window.timeScale = scale;
+    }, TIME_SCALE);
+};
+
+/**
+ * Вернуть вкладке обычное время. Нужно тем немногим проверкам, которые смотрят не на итог
+ * движения, а на его промежуточные кадры: переезд в 0.42 с, ускоренный вдесятеро, укладывается
+ * в три кадра экрана — «поехало или прыгнуло» на таком не различить.
+ *
+ * Ставится тем же способом и поверх общего ускорения: скрипты страницы выполняются после
+ * скриптов контекста, и последнее слово остаётся за этим. Звать до перехода на страницу —
+ * приложение читает мерку один раз, при запуске.
+ */
+export const unhasten = async (page: Page): Promise<void> => {
+    await page.addInitScript(() => {
+        window.timeScale = 1;
+    });
+};
+
+/**
+ * Тот же `test`, что и у Playwright, только время в нём идёт быстрее. Берут его отсюда все
+ * проверки набора: ускорение — свойство прогона, а не отдельной проверки, и помнить о нём
+ * в каждом файле никто не должен.
+ */
+// Второй параметр фикстуры Playwright зовёт `use`, но здесь он `run`: линтер React считает
+// всякое `use(...)` вызовом хука и ругается на него посреди обычной функции.
+export const test = base.extend({
+    context: async ({ context }, run) => {
+        await hasten(context);
+        await run(context);
+    },
+});
+
 export const DEMO = 'demo';
 
 /** Корабли демо-канала: их id заданы руками в seed.ts, на них можно ссылаться. */
 export const ALBATROS = 'm-albatros';
 export const VYMPEL = 'm-vympel';
 
-/** Сколько ждём, пока сцена проявится: картинки грузятся все разом и только потом показываются. */
-const SCENE_READY_MS = 1500;
+/**
+ * Дождаться, пока сцена проступит. Картинки грузятся все разом и показываются только вместе:
+ * пока последняя не пришла, в кадре темно (см. `data-scene-painted` в SeaScene).
+ *
+ * Ждём признак, а не время: он приходит ровно тогда, когда задники готовы, и ждать дольше
+ * незачем. Само проявление — переход, и по ускоренному времени оно короткое; прежде тут стояла
+ * глухая пауза в полторы секунды, и на полутора сотнях проверок она стоила дороже всего
+ * остального в наборе.
+ */
+const sceneReady = async (page: Page): Promise<void> => {
+    await page.locator('[data-scene-painted]').first().waitFor({ timeout: 15_000 });
+    await page.waitForTimeout(600 / TIME_SCALE + 100);
+};
 
 /**
  * Открыть канал. `memberId` в адресе перебивает сохранённую личность вкладки — так вторая
@@ -29,7 +99,7 @@ const SCENE_READY_MS = 1500;
 export const openChannel = async (page: Page, slug = DEMO, memberId?: string): Promise<void> => {
     const address = memberId ? `/?channel=${slug}&memberId=${memberId}` : `/?channel=${slug}`;
     await page.goto(address, { waitUntil: 'networkidle' });
-    await page.waitForTimeout(SCENE_READY_MS);
+    await sceneReady(page);
 };
 
 /**
@@ -41,7 +111,7 @@ export const openNewChannel = async (page: Page, slug: string): Promise<void> =>
     await page.getByPlaceholder('Эскадра «Полночь»').fill(slug);
     await page.locator('input[placeholder="eskadra-polnoch"]').fill(slug);
     await page.locator('button[type=submit]').click();
-    await page.waitForTimeout(SCENE_READY_MS);
+    await sceneReady(page);
 };
 
 /**
@@ -99,10 +169,27 @@ export const join = async (page: Page, name: string, hullNumber: string, shipKin
  */
 export const shipsButton = (page: Page) => page.locator('button[title="Корабли на связи"]');
 
+/**
+ * Сколько ждать конца выезда, мс: те же `@slide-seconds` из стилей, поделённые на скорость
+ * времени, плюс запас на кадр-другой. Ждать выезда всё равно приходится временем — признака
+ * «доехало» у перехода нет, — но пусть это будет его длительность, а не круглое число.
+ */
+const SLIDE_MS = 280 / TIME_SCALE + 60;
+
 export const openSheet = async (page: Page): Promise<void> => {
     await shipsButton(page).click();
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(SLIDE_MS);
 };
+
+/**
+ * Кнопка выхода внизу списка кораблей.
+ *
+ * Ищется по первому слову: второе — «с рейда» — стоит только там, где список широк, а на узком
+ * от подписи остаётся одно «Уйти» (см. `.wide` в MembersList.module.less). Ширину списку задаёт
+ * разговор, и в боковой раскладке он и в треть окна бывает — рассчитывать на полную подпись
+ * нельзя нигде.
+ */
+export const leaveButton = (page: Page) => page.getByRole('button', { name: /^Уйти/ });
 
 /**
  * Уйти с рейда: кнопка внизу списка кораблей, а следом — новый курс в шторке прощания.
@@ -113,7 +200,7 @@ export const openSheet = async (page: Page): Promise<void> => {
  */
 export const leaveRaid = async (page: Page, course = 'В Кронштадт'): Promise<void> => {
     await openSheet(page);
-    await page.getByRole('button', { name: 'Уйти с рейда' }).click();
+    await leaveButton(page).click();
     await page.getByLabel('Задайте новый курс').fill(course);
     await page.getByRole('button', { name: 'Курс верный' }).click();
     await page.waitForTimeout(WRITE_MS);
@@ -134,7 +221,7 @@ export const openShipCard = async (page: Page, name: string): Promise<void> => {
         .getByRole('region', { name: 'Корабли на связи' })
         .getByRole('button', { name: `Корабль «${name}»` })
         .click();
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(SLIDE_MS);
 };
 
 /** Написать в ленту. */

@@ -1,4 +1,4 @@
-import { Locator, Page, expect, test } from '@playwright/test';
+import { Locator, Page, expect } from '@playwright/test';
 
 import {
     ALBATROS,
@@ -8,6 +8,7 @@ import {
     bubbles,
     clickShip,
     join,
+    leaveButton,
     leaveRaid,
     openChannel,
     openJoinForm,
@@ -19,6 +20,7 @@ import {
     ships,
     shipsButton,
     systemLines,
+    test,
 } from '@tests/helpers';
 
 /**
@@ -206,15 +208,21 @@ test('уход с рейда отмечается в ленте и возвра�
     // Вкладка возвращается к закрытой форме — туда же, куда попадает и пришедший по ссылке:
     // тупика нет, встать в строй можно снова, а до того рейд просто виден со стороны.
     await expect(page.getByRole('button', { name: 'Встать на рейд' })).toBeVisible();
-    const state = await readState(page);
-    expect(state.channels['ch-demo'].members.map((member) => member.memberId)).not.toContain(ALBATROS);
+    expect((await readState(page)).channels['ch-demo'].members.map((member) => member.memberId)).not.toContain(
+        ALBATROS
+    );
     // Бэкенд пишет данными, а не фразой: каким корабль был на момент ухода и что он сказал
     // на прощание. Как это сказать словами, решает лента — её слова проверены выше.
-    expect(state.channels['ch-demo'].messages.at(-1)!.notice).toEqual({
-        event: 'left',
-        before: { shipKind: 'pr1400', name: 'Альбатрос', hullNumber: '317' },
-        course: 'В Кронштадт, на зимовку',
-    });
+    // Запись в хранилище приходит следом за перерисовкой формы, а не вместе с ней, — ждём её.
+    await expect
+        .poll(async () => (await readState(page)).channels['ch-demo'].messages.at(-1)!.notice, {
+            message: 'прощание не легло в хранилище последней записью',
+        })
+        .toEqual({
+            event: 'left',
+            before: { shipKind: 'pr1400', name: 'Альбатрос', hullNumber: '317' },
+            course: 'В Кронштадт, на зимовку',
+        });
 
     // А словами курс читают оставшиеся: у самого ушедшего на месте разговора теперь форма,
     // и своё прощание он не видит — оно и написано не ему.
@@ -264,7 +272,7 @@ test('ушедший корабль остаётся в ленте с авата
 test('уход спрашивает курс, и без него не уйти, а «Полный назад» оставляет на рейде', async ({ page }) => {
     await openChannel(page, DEMO, ALBATROS);
     await openSheet(page);
-    await page.getByRole('button', { name: 'Уйти с рейда' }).click();
+    await leaveButton(page).click();
 
     const shade = page.getByRole('region', { name: 'Вы уходите с рейда' });
     await expect(shade, 'шторка прощания не открылась').toBeVisible();
@@ -517,8 +525,13 @@ test('не старшему высаживать нечем, а после ег�
     await leaveRaid(page);
     await expect(page.getByRole('button', { name: 'Встать на рейд' })).toBeVisible();
 
-    const state = await readState(page);
-    expect(state.channels['ch-demo'].channel.owner?.memberId).toBe(VYMPEL);
+    // Форма возвращается по своему состоянию вкладки, а старшинство переписывает бэкенд —
+    // порядок между ними не оговорён, поэтому ждём смену старшего, а не смотрим сразу после формы.
+    await expect
+        .poll(async () => (await readState(page)).channels['ch-demo'].channel.owner?.memberId, {
+            message: 'старшинство не перешло к оставшемуся',
+        })
+        .toBe(VYMPEL);
 
     // И это видно в списке: бэдж переехал на нового старшего, а с ним и кнопки высадки.
     await openChannel(page, DEMO, VYMPEL);
@@ -682,6 +695,17 @@ test('перестановка из соседней вкладки не зат�
     const wasTheirs = await berthOf(theirs, VYMPEL);
     await mine.locator(`[data-berth="${here}"]`).click();
     await theirs.locator(`[data-berth="${there}"]`).click();
+    // Выбор должен дойти до формы прежде, чем жать «Готово»: гонка тут проверяется одна —
+    // между вкладками, — и подмешивать к ней вторую, между проверкой и отрисовкой, незачем.
+    // Не дошедший выбор виден как «ничего не переставилось»: форма отправляет прежнее место.
+    await expect(mine.locator(`[data-berth="${here}"]`), 'выбор места не дошёл до формы').toHaveAttribute(
+        'aria-pressed',
+        'true'
+    );
+    await expect(theirs.locator(`[data-berth="${there}"]`), 'выбор места не дошёл до соседней формы').toHaveAttribute(
+        'aria-pressed',
+        'true'
+    );
     await Promise.all([shipFormSubmit(mine).click(), shipFormSubmit(theirs).click()]);
 
     // Своя перестановка доезжает целиком: терялась тут именно первая из двух записей —
@@ -714,24 +738,30 @@ test('два корабля не встают на одно место, даже
 
     await mine.locator(`[data-berth="${shared}"]`).click();
     await theirs.locator(`[data-berth="${shared}"]`).click();
+    // Обе вкладки должны и правда стоять на спорном месте, иначе спора не выйдет: не дошедший
+    // выбор отправит прежнее место, и проверка разойдётся на том, чего не проверяет.
+    await expect(mine.locator(`[data-berth="${shared}"]`), 'выбор места не дошёл до формы').toHaveAttribute(
+        'aria-pressed',
+        'true'
+    );
+    await expect(theirs.locator(`[data-berth="${shared}"]`), 'выбор места не дошёл до соседней формы').toHaveAttribute(
+        'aria-pressed',
+        'true'
+    );
     await Promise.all([shipFormSubmit(mine).click(), shipFormSubmit(theirs).click()]);
 
     // Место одно, а желающих двое: достаться оно должно кому-то одному, второму — другое.
+    // Считаем именно разные места: кораблей в канале три при любом исходе, и на их числе
+    // не видно, дошли ли обе записи.
+    const allBerths = async (): Promise<string[]> =>
+        (await readState(mine)).channels['ch-demo'].members.map(
+            (member) => `${member.place.slot}-${member.place.corridor}`
+        );
     await expect
-        .poll(
-            async () => {
-                const members = (await readState(mine)).channels['ch-demo'].members;
-                return members.map((member) => `${member.place.slot}-${member.place.corridor}`).sort();
-            },
-            { message: 'на рейде так и не стало трёх разных мест' }
-        )
-        .toHaveLength(3);
-    const berths = (await readState(mine)).channels['ch-demo'].members.map(
-        (member) => `${member.place.slot}-${member.place.corridor}`
-    );
-    expect(new Set(berths).size, 'два корабля встали на одно место').toBe(3);
+        .poll(async () => new Set(await allBerths()).size, { message: 'на рейде так и не стало трёх разных мест' })
+        .toBe(3);
     expect(
-        berths.filter((berth) => berth === shared),
+        (await allBerths()).filter((berth) => berth === shared),
         'место досталось не одному'
     ).toHaveLength(1);
 
@@ -740,13 +770,19 @@ test('два корабля не встают на одно место, даже
     // где на деле уже стоял чужой.
     await openShipForm(mine);
     await openShipForm(theirs);
-    const ownMine = await ownBerth(mine);
-    const ownTheirs = await ownBerth(theirs);
-    expect(ownMine, 'вкладка держит своим место, которое ей не досталось').toBe(await berthOf(mine, ALBATROS));
-    expect(ownTheirs, 'соседняя вкладка держит своим место, которое ей не досталось').toBe(
-        await berthOf(theirs, VYMPEL)
-    );
-    expect(ownMine, 'обе вкладки считают своим одно и то же место').not.toBe(ownTheirs);
+    // Отобранное место возвращается во вкладку рассылкой, и приходит она не в тот же миг:
+    // ждём совпадения, а не смотрим на первый попавшийся кадр формы.
+    await expect
+        .poll(async () => [await ownBerth(mine), await berthOf(mine, ALBATROS)], {
+            message: 'вкладка держит своим место, которое ей не досталось',
+        })
+        .toEqual([await berthOf(mine, ALBATROS), await berthOf(mine, ALBATROS)]);
+    await expect
+        .poll(async () => [await ownBerth(theirs), await berthOf(theirs, VYMPEL)], {
+            message: 'соседняя вкладка держит своим место, которое ей не досталось',
+        })
+        .toEqual([await berthOf(theirs, VYMPEL), await berthOf(theirs, VYMPEL)]);
+    expect(await ownBerth(mine), 'обе вкладки считают своим одно и то же место').not.toBe(await ownBerth(theirs));
 });
 
 /**

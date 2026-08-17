@@ -1,6 +1,18 @@
-import { expect, test } from '@playwright/test';
+import { expect } from '@playwright/test';
 
-import { ALBATROS, DEMO, bubbles, expectWayOut, join, openChannel, openSheet, send, ships } from '@tests/helpers';
+import {
+    ALBATROS,
+    DEMO,
+    bubbles,
+    expectWayOut,
+    join,
+    leaveButton,
+    openChannel,
+    openSheet,
+    send,
+    ships,
+    test,
+} from '@tests/helpers';
 
 /**
  * Что происходит, когда сделано не то. Проверяется не только текст отказа, но и то,
@@ -64,7 +76,7 @@ test('слишком длинное сообщение не уходит, и с�
 test('слишком длинный курс не уводит с рейда, и сказано насколько', async ({ page }) => {
     await openChannel(page, DEMO, ALBATROS);
     await openSheet(page);
-    await page.getByRole('button', { name: 'Уйти с рейда' }).click();
+    await leaveButton(page).click();
 
     const course = page.getByLabel('Задайте новый курс');
     await course.fill('я'.repeat(101));
