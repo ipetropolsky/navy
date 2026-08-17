@@ -4085,6 +4085,69 @@ test('плашка ввода стоит на месте, пока свёрну�
     expect(Math.abs((await composerTop()) - stood), 'плашка ввода не вернулась к нижней кромке').toBeLessThanOrEqual(1);
 });
 
+/**
+ * Домотать ленту до низа и попробовать увести её вверх колесом. Отдаёт, сколько она проехала.
+ *
+ * Начинаем от низа нарочно: прицепленная лента и так стоит в конце, и проба «поехала ли»
+ * с середины ничего не значила бы — она могла просто доводиться до низа сама.
+ */
+const feedRolls = async (page: Page): Promise<number> => {
+    const feed = page.locator('main [class*="_list_"]');
+    await feed.evaluate((node) => {
+        node.scrollTop = node.scrollHeight;
+    });
+    await page.waitForTimeout(200);
+    const from = await feed.evaluate((node) => node.scrollTop);
+    const box = await boxOf(page, 'main [class*="_list_"]');
+    await page.mouse.move(box.left + box.width / 2, box.top + box.height / 2);
+    await page.mouse.wheel(0, -200);
+    await page.waitForTimeout(400);
+    return from - (await feed.evaluate((node) => node.scrollTop));
+};
+
+/**
+ * Лента мотается и после того, как разговор погоняли по точкам и открыли поверх него слой.
+ *
+ * Проверка на живучесть, а не на мерку: прокрутка содержимого — первое, что отваливается,
+ * когда движение пальца остаётся за кем-то незакрытым. Захваченный указатель, повисшее
+ * затемнение ушедшей шторки, слой, который не сняли с экрана, — всё это видно одинаково:
+ * лента перестаёт ехать, и заметно это не сразу, а после нескольких манипуляций подряд.
+ */
+test('лента мотается и после того, как разговор погоняли по точкам', async ({ page }) => {
+    await page.setViewportSize(PHONE);
+    await openChannel(page, DEMO, ALBATROS);
+
+    // Разговор во весь рост: ленте нужно что мотать.
+    const grip = page.locator('[role="separator"]');
+    await grip.focus();
+    await grip.press('Home');
+    await page.waitForTimeout(600);
+    expect(await feedRolls(page), 'лента не поехала и без единой манипуляции').toBeGreaterThan(0);
+
+    // Три пары ходов вниз и обратно: свайп за ручку с приземлением на точку.
+    /* eslint-disable no-await-in-loop -- ходы идут по очереди: это подряд идущие свайпы */
+    for (let round = 0; round < 3; round += 1) {
+        await leadChat(page, -200);
+        await leadChat(page, 200);
+    }
+    /* eslint-enable no-await-in-loop */
+    expect(await feedRolls(page), 'лента перестала ехать после ходов разговора').toBeGreaterThan(0);
+
+    // Слой списка кораблей: открыть и закрыть тем же нажатием.
+    await openSheet(page);
+    await shipsButton(page).click();
+    await page.waitForTimeout(700);
+    expect(await feedRolls(page), 'лента перестала ехать после списка кораблей').toBeGreaterThan(0);
+
+    // Карточка чужого корабля — шторка поверх всего, со своим затемнением.
+    await openShipCard(page, 'Вымпел');
+    await page.getByRole('button', { name: 'Закрыть шторку' }).click();
+    await page.waitForTimeout(700);
+    await shipsButton(page).click();
+    await page.waitForTimeout(700);
+    expect(await feedRolls(page), 'лента перестала ехать после карточки корабля').toBeGreaterThan(0);
+});
+
 /** Наименьший рост кадра в этом окне, px: больший из доли окна и трёхсот пикселей. */
 const sceneMin = (view: { width: number; height: number }): number =>
     Math.max(SCENE_MIN_HEIGHT, view.height * SCENE_MIN_SHARE);
