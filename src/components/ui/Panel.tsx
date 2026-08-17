@@ -38,7 +38,9 @@ export default function Panel({ title, hint, children, actions, footer, onSubmit
             <div className={styles.body}>
                 {title && <h1 className={styles.title}>{title}</h1>}
                 {hint && <p className={styles.hint}>{hint}</p>}
-                {children}
+                {/* Поля стоят колонкой с просветом между ними, и просвет этот — её, а не полей
+                    (см. .fields). Своим нижним отступом поле уносило бы его и под последнее. */}
+                <div className={styles.fields}>{children}</div>
             </div>
             {actions && <Actions aboveFooter={Boolean(footer)}>{actions}</Actions>}
             {footer && <p className={styles.footer}>{footer}</p>}
