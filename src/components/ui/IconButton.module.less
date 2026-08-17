@@ -1,0 +1,109 @@
+// Кнопка без подписи: значок в круге. Такие стоят в шапке, у поля ввода и внутри полей.
+//
+// Размер круга и значка в нём приходят от того, в чём кнопка лежит: шапка над развёрнутым
+// кадром задаёт их разом всем своим кнопкам (см. .headerBarExpanded в App.module.less),
+// и любая новая кнопка в ней вырастает вместе с остальными, не зная об этом ничего.
+// Прежде укрупнение просили у каждой кнопки отдельным свойством — и кнопка выхода с рейда,
+// добавленная позже, его просто не получила: в развёрнутом кадре она осталась стоять
+// в ряду крупных мелочью.
+//
+// У значка умолчание `auto`, а не число: размеры ему заданы в самой разметке, и одинаковы
+// они не у всех — значок в маленькой кнопке внутри поля ростом в 19px.
+.iconButton {
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    cursor: pointer;
+    transition:
+        background 0.15s ease,
+        color 0.15s ease,
+        transform 0.08s ease,
+        opacity 0.15s ease;
+
+    svg {
+        width: var(--icon-button-icon, auto);
+        height: var(--icon-button-icon, auto);
+    }
+
+    &:active {
+        transform: scale(var(--press-scale-round));
+    }
+
+    &:disabled {
+        opacity: 0.35;
+        cursor: default;
+        transform: none;
+    }
+}
+
+// Прозрачная: значок сам по себе, подложка появляется только под указателем.
+.plain {
+    width: var(--icon-button-size, 40px);
+    height: var(--icon-button-size, 40px);
+    background: transparent;
+    color: var(--color-text);
+
+    @media (hover: hover) {
+        &:hover:not(:disabled) {
+            background: var(--color-accent-faint);
+        }
+    }
+}
+
+// Второстепенная — та же прозрачная, но значок вполголоса: отменить, закрыть.
+.muted {
+    .plain();
+
+    color: var(--color-text-muted);
+
+    @media (hover: hover) {
+        &:hover:not(:disabled) {
+            color: var(--color-text);
+        }
+    }
+}
+
+// Заливка акцентом: главное действие в ряду, отправка сообщения.
+.accent {
+    width: var(--icon-button-size, 40px);
+    height: var(--icon-button-size, 40px);
+    background: var(--color-accent);
+    color: var(--color-on-accent);
+
+    svg {
+        fill: currentColor;
+    }
+
+    @media (hover: hover) {
+        &:hover:not(:disabled) {
+            background: var(--color-accent-hover);
+        }
+    }
+}
+
+// Кнопка есть, но делать ей нечего: сжимается и гаснет, не занимая места в разметке
+// и не перехватывая нажатий. Так кнопка отправки появляется ровно тогда, когда есть что слать.
+.inactive {
+    transform: scale(0.5);
+    opacity: 0;
+    pointer-events: none;
+}
+
+// Внутри поля ввода: меньше и в цвет акцента, чтобы не спорить с текстом.
+.inField {
+    width: 34px;
+    height: 34px;
+    border-radius: var(--radius-control);
+    background: transparent;
+    color: var(--color-accent);
+
+    @media (hover: hover) {
+        &:hover:not(:disabled) {
+            background: var(--color-accent-faint);
+        }
+    }
+}

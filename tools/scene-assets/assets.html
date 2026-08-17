@@ -1,0 +1,260 @@
+<!doctype html>
+<html>
+    <head>
+        <meta charset="utf-8" />
+        <style>
+            body {
+                margin: 0;
+                background: transparent;
+            }
+            .asset {
+                position: relative;
+                overflow: hidden;
+                margin-bottom: 4px;
+            }
+            /* Базовые градиенты */
+            #sky {
+                width: 1600px;
+                height: 340px;
+                background: linear-gradient(
+                    180deg,
+                    #141e46 0%,
+                    #1c2a5c 32%,
+                    #2b376c 58%,
+                    #42477a 78%,
+                    #575984 92%,
+                    #6b6a90 100%
+                );
+            }
+            #sea {
+                width: 1600px;
+                height: 320px;
+                background: linear-gradient(
+                    180deg,
+                    #8aa2c6 0%,
+                    #7593bd 15%,
+                    #6484b2 35%,
+                    #5273a4 60%,
+                    #446394 85%,
+                    #3c5a8b 100%
+                );
+            }
+            #stars,
+            #orion,
+            #moon,
+            #cloud-1,
+            #cloud-2,
+            #island-far,
+            #island-mid,
+            #island-near,
+            .wave {
+                background: transparent;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="asset" id="sky"></div>
+        <div class="asset" id="sea"></div>
+
+        <div class="asset" id="stars" style="width: 1600px; height: 300px"></div>
+
+        <div class="asset" id="orion" style="width: 360px; height: 300px"></div>
+
+        <div class="asset" id="moon" style="width: 260px; height: 260px">
+            <svg width="260" height="260" viewBox="0 0 260 260">
+                <defs>
+                    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+                        <stop offset="0%" stop-color="rgba(214, 224, 252, 0.5)" />
+                        <stop offset="45%" stop-color="rgba(214, 224, 252, 0.18)" />
+                        <stop offset="100%" stop-color="rgba(214, 224, 252, 0)" />
+                    </radialGradient>
+                    <mask id="crescent">
+                        <circle cx="130" cy="130" r="58" fill="#fff" />
+                        <circle cx="156" cy="118" r="54" fill="#000" />
+                    </mask>
+                </defs>
+                <circle cx="130" cy="130" r="120" fill="url(#glow)" />
+                <circle cx="130" cy="130" r="58" fill="#242e54" />
+                <circle cx="130" cy="130" r="58" fill="#e9edf9" mask="url(#crescent)" />
+                <circle cx="108" cy="118" r="7" fill="rgba(190,200,230,0.35)" />
+                <circle cx="116" cy="156" r="5" fill="rgba(190,200,230,0.3)" />
+            </svg>
+        </div>
+
+        <div class="asset" id="cloud-1" style="width: 900px; height: 200px">
+            <svg width="900" height="200" viewBox="0 0 900 200">
+                <g filter="url(#blur1)" fill="#9aa6cf">
+                    <ellipse cx="230" cy="120" rx="200" ry="26" opacity="0.22" />
+                    <ellipse cx="420" cy="95" rx="260" ry="30" opacity="0.16" />
+                    <ellipse cx="640" cy="130" rx="220" ry="22" opacity="0.2" />
+                </g>
+                <filter id="blur1"><feGaussianBlur stdDeviation="16" /></filter>
+            </svg>
+        </div>
+
+        <div class="asset" id="cloud-2" style="width: 1000px; height: 160px">
+            <svg width="1000" height="160" viewBox="0 0 1000 160">
+                <g filter="url(#blur2)" fill="#a8b0d6">
+                    <ellipse cx="300" cy="80" rx="290" ry="18" opacity="0.16" />
+                    <ellipse cx="700" cy="100" rx="260" ry="14" opacity="0.13" />
+                </g>
+                <filter id="blur2"><feGaussianBlur stdDeviation="12" /></filter>
+            </svg>
+        </div>
+
+        <div class="asset" id="island-far" style="width: 1000px; height: 240px">
+            <svg width="1000" height="240" viewBox="0 0 1000 240">
+                <path
+                    fill="#2b3d5e"
+                    d="M0 240 L0 150 Q90 70 210 110 Q290 60 400 105 Q520 70 640 130 Q780 100 880 160 Q950 190 1000 200 L1000 240 Z"
+                    opacity="0.9"
+                />
+                <path
+                    fill="#35486b"
+                    d="M120 240 Q240 130 360 160 Q470 120 590 165 Q700 140 800 185 Q900 215 1000 225 L1000 240 Z"
+                    opacity="0.85"
+                />
+            </svg>
+        </div>
+
+        <div class="asset" id="island-mid" style="width: 800px; height: 170px">
+            <svg width="800" height="170" viewBox="0 0 800 170">
+                <path
+                    fill="#1b2b47"
+                    d="M0 170 L0 90 Q100 40 220 75 Q330 45 440 90 Q560 60 660 110 Q740 145 800 155 L800 170 Z"
+                />
+            </svg>
+        </div>
+
+        <div class="asset" id="island-near" style="width: 640px; height: 150px">
+            <svg width="640" height="150" viewBox="0 0 640 150">
+                <path
+                    fill="#101d33"
+                    d="M0 150 L0 70 Q60 40 150 55 Q260 35 350 75 Q460 95 540 120 Q600 138 640 145 L640 150 Z"
+                />
+            </svg>
+        </div>
+
+        <!-- Волны: прозрачные штрихи-блики, светлые и тёмные -->
+        <div class="asset wave" id="wave-1" style="width: 600px; height: 48px">
+            <svg width="600" height="48">
+                <g fill="#dbe7f7">
+                    <rect x="40" y="18" width="330" height="5" rx="2.5" opacity="0.19" />
+                    <rect x="420" y="28" width="110" height="4" rx="2" opacity="0.2" />
+                </g>
+            </svg>
+        </div>
+        <div class="asset wave" id="wave-2" style="width: 600px; height: 48px">
+            <svg width="600" height="48">
+                <rect x="60" y="16" width="280" height="5" rx="2.5" fill="#2b4877" opacity="0.26" />
+                <rect x="180" y="26" width="240" height="4" rx="2" fill="#dbe7f7" opacity="0.24" />
+            </svg>
+        </div>
+        <div class="asset wave" id="wave-3" style="width: 600px; height: 48px">
+            <svg width="600" height="48">
+                <g fill="#dbe7f7">
+                    <rect x="20" y="14" width="150" height="4" rx="2" opacity="0.26" />
+                    <rect x="220" y="22" width="200" height="4" rx="2" opacity="0.19" />
+                    <rect x="470" y="16" width="70" height="3" rx="1.5" opacity="0.22" />
+                </g>
+            </svg>
+        </div>
+        <div class="asset wave" id="wave-4" style="width: 600px; height: 48px">
+            <svg width="600" height="48">
+                <rect x="50" y="18" width="480" height="6" rx="3" fill="#e6eefb" opacity="0.19" />
+            </svg>
+        </div>
+        <div class="asset wave" id="wave-5" style="width: 600px; height: 48px">
+            <svg width="600" height="48">
+                <g fill="#2b4877">
+                    <rect x="90" y="16" width="270" height="5" rx="2.5" opacity="0.24" />
+                    <rect x="400" y="26" width="130" height="4" rx="2" opacity="0.19" />
+                </g>
+            </svg>
+        </div>
+        <div class="asset wave" id="wave-6" style="width: 600px; height: 48px">
+            <svg width="600" height="48">
+                <rect x="40" y="20" width="210" height="4" rx="2" fill="#dbe7f7" opacity="0.27" />
+                <rect x="290" y="20" width="220" height="4" rx="2" fill="#2b4877" opacity="0.22" />
+            </svg>
+        </div>
+        <div class="asset wave" id="wave-7" style="width: 600px; height: 48px">
+            <svg width="600" height="48">
+                <g fill="#dbe7f7">
+                    <rect x="60" y="14" width="95" height="3" rx="1.5" opacity="0.24" />
+                    <rect x="200" y="22" width="140" height="4" rx="2" opacity="0.21" />
+                    <rect x="390" y="30" width="80" height="3" rx="1.5" opacity="0.27" />
+                </g>
+            </svg>
+        </div>
+        <div class="asset wave" id="wave-8" style="width: 600px; height: 48px">
+            <svg width="600" height="48">
+                <rect x="30" y="16" width="190" height="5" rx="2.5" fill="#e6eefb" opacity="0.28" />
+                <rect x="250" y="16" width="130" height="5" rx="2.5" fill="#e6eefb" opacity="0.19" />
+                <rect x="120" y="28" width="260" height="4" rx="2" fill="#2b4877" opacity="0.19" />
+            </svg>
+        </div>
+
+        <script>
+            // Звёздные поля рисуем детерминированно (LCG), чтобы перегенерация давала тот же результат.
+            function lcg(seed) {
+                let s = seed;
+                return () => {
+                    s = (s * 48271) % 2147483647;
+                    return s / 2147483647;
+                };
+            }
+            function sparklePath(x, y, r) {
+                const a = r * 0.22;
+                return `M${x} ${y - r} L${x + a} ${y - a} L${x + r} ${y} L${x + a} ${y + a} L${x} ${y + r} L${x - a} ${y + a} L${x - r} ${y} L${x - a} ${y - a} Z`;
+            }
+            const stars = document.getElementById('stars');
+            {
+                const rnd = lcg(20260726);
+                let svg = '<svg width="1600" height="300" viewBox="0 0 1600 300">';
+                for (let i = 0; i < 130; i++) {
+                    const x = 20 + rnd() * 1560;
+                    const y = 10 + rnd() * 260;
+                    const r = 0.8 + rnd() * 1.4;
+                    const o = 0.3 + rnd() * 0.65;
+                    svg += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${r.toFixed(2)}" fill="#eef3fd" opacity="${o.toFixed(2)}"/>`;
+                }
+                for (let i = 0; i < 10; i++) {
+                    const x = 40 + rnd() * 1520;
+                    const y = 16 + rnd() * 240;
+                    const r = 4 + rnd() * 5;
+                    svg += `<path d="${sparklePath(x, y, r)}" fill="#f4f7ff" opacity="${(0.55 + rnd() * 0.4).toFixed(2)}"/>`;
+                }
+                svg += '</svg>';
+                stars.innerHTML = svg;
+            }
+            const orion = document.getElementById('orion');
+            {
+                // Орион «лёжа» (июль): пояс по диагонали в центре, Бетельгейзе слева-сверху, Ригель справа-снизу.
+                const cluster = [
+                    { x: 80, y: 60, r: 9 },
+                    { x: 148, y: 40, r: 7.5 },
+                    { x: 104, y: 118, r: 6.5 },
+                    { x: 122, y: 132, r: 7 },
+                    { x: 140, y: 146, r: 6.5 },
+                    { x: 126, y: 172, r: 4 },
+                    { x: 96, y: 208, r: 7 },
+                    { x: 172, y: 196, r: 9.5 },
+                ];
+                const rnd = lcg(1943);
+                let svg = '<svg width="360" height="300" viewBox="0 0 360 300">';
+                for (const s of cluster) {
+                    svg += `<path d="${sparklePath(s.x, s.y, s.r)}" fill="#f6f8ff" opacity="0.95"/>`;
+                    svg += `<circle cx="${s.x}" cy="${s.y}" r="${s.r * 0.28}" fill="#ffffff"/>`;
+                }
+                for (let i = 0; i < 26; i++) {
+                    const x = 20 + rnd() * 320;
+                    const y = 10 + rnd() * 280;
+                    svg += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${(0.7 + rnd()).toFixed(2)}" fill="#e8eefc" opacity="${(0.3 + rnd() * 0.5).toFixed(2)}"/>`;
+                }
+                svg += '</svg>';
+                orion.innerHTML = svg;
+            }
+        </script>
+    </body>
+</html>

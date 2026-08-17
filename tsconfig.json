@@ -25,9 +25,10 @@
     /* Path mapping */
     "paths": {
       "@/*": ["./src/*"],
+      "@tests/*": ["./tests/*"],
       "~/*": ["./node_modules/*"]
     }
   },
-  "include": ["src"],
+  "include": ["src", "tests"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

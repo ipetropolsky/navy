@@ -1,0 +1,19 @@
+// Цитата сообщения, на которое отвечают: полоска слева цветом автора, позывной, начало текста.
+// Одна и та же и в пузыре в ленте, и над полем ввода, пока ответ готовится.
+.quote {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    align-self: stretch;
+    padding: 4px 10px;
+    border-left: 2px solid var(--color-accent);
+    border-radius: var(--radius-tiny);
+    background: var(--color-quote);
+}
+
+.text {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    color: var(--color-text-muted);
+}

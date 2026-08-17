@@ -1,0 +1,108 @@
+// Закрытая форма: одна кнопка посреди плашки. Плашка растянута на всё, что осталось от кадра
+// (см. .card в Panel.module.less), и кнопка встаёт ровно в её середину — а не под верхнюю
+// кромку, где читалась бы обрубком длинной формы, ушедшей под обрез.
+.gate {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    // Проценты считаются от поля плашки, а её высоту задаёт раскладка снаружи. Меньше кнопки
+    // это место не бывает: у самой кнопки высота своя.
+    min-height: 100%;
+}
+
+.colors {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.color {
+    width: 26px;
+    height: 26px;
+    border: 2px solid transparent;
+    border-radius: 50%;
+    cursor: pointer;
+}
+
+.colorActive {
+    .color();
+
+    border-color: var(--color-text);
+}
+
+// Курс — те же плашки, что и у кораблей ниже, только маленькие: выбор тут такой же, и рамка
+// у выбранного должна выглядеть так же. Подписи нет, стрелки хватает — она и есть ответ
+// на вопрос, а слово «влево» рядом со стрелкой влево читателю ничего не добавит.
+.courses {
+    display: flex;
+    gap: 8px;
+}
+
+.course {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 64px;
+    height: 42px;
+    border-radius: var(--radius-control);
+    border: 1px solid transparent;
+    background: var(--color-bubble-in);
+    color: var(--color-text);
+    cursor: pointer;
+}
+
+.courseActive {
+    .course();
+
+    border-color: var(--color-accent);
+    background: var(--color-bubble-out);
+}
+
+// Корабли в столбик: каждому достаётся вся ширина плашки. Сетка, а не флекс, ради
+// grid-auto-rows: 1fr — так все кнопки одной высоты, по самой высокой из них, и столбик
+// не выглядит рваным из-за того, что у одного корабля название переносится, а у другого нет.
+.kinds {
+    display: grid;
+    grid-auto-rows: 1fr;
+    gap: 8px;
+}
+
+// Картинка сверху, подписи под ней: так силуэт не соперничает за место с текстом
+// и его видно целиком.
+.kind {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding: 20px;
+    border-radius: var(--radius-control);
+    border: 1px solid transparent;
+    background: var(--color-bubble-in);
+    color: var(--color-text);
+    font: inherit;
+    // Плашка — `div` (см. MemberForm.tsx), а он выравнивает текст по левому краю; кнопка
+    // выравнивала бы по центру сама. Длинная строчка характеристик переносится, и без этого
+    // вторая строка вставала бы не под первой.
+    text-align: center;
+    cursor: pointer;
+}
+
+.kindActive {
+    .kind();
+
+    border-color: var(--color-accent);
+    background: var(--color-bubble-out);
+}
+
+.kindLabel {
+    color: var(--color-text-muted);
+    font-size: var(--font-size-small);
+}
+
+// Характеристики — приписка под названием: мельче и тише, читать их подряд не нужно,
+// но когда выбираешь между катером и тральщиком, разница видна сразу.
+.kindSpec {
+    color: var(--color-text-muted);
+    font-size: var(--font-size-small);
+    opacity: 0.72;
+}
