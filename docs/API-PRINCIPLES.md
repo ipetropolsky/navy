@@ -143,4 +143,5 @@ setTyping({ channelId, memberId, typing: { chars } });
 Одно место, и оно не про форму, а про транспорт: `setTyping` и событие `typing` шлют
 по символу на нажатие клавиши. Это переживёт эмулятор на `BroadcastChannel`, но не переживёт
 Firebase с его `query` + `onSnapshot`. Заменяется не переименованием, а другой механикой —
-разбор в [TODO.md](./TODO.md), там же и то, что тогда уйдёт из контракта.
+разбор в [задаче №6](https://github.com/ipetropolsky/navy/issues/6), там же и то, что тогда
+уйдёт из контракта.
