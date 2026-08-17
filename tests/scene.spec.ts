@@ -244,19 +244,21 @@ test('на одной линии помещаются двое, и борта н
         'на линии не оказалось двоих'
     ).toHaveLength(2);
 
-    // И это видно в кадре: корабли одной дальности стоят на одной высоте, и борта у них
-    // не пересекаются. Высоту сравниваем с допуском — корабли качает.
+    // И это видно в кадре: борта у двоих на одной дальности не пересекаются. Линию берём
+    // из места, написанного на самом корпусе, а не из высоты в кадре: на стоянке корабль
+    // отходит от своей линии (restingDrift), и двое на одной линии стоят в кадре чуть
+    // по-разному — на глаз это и есть стоянка вместо строя.
     const hulls = await page.evaluate(() =>
-        [...document.querySelectorAll('[class*="shipSlot"]')].map((slot) => {
+        [...document.querySelectorAll<HTMLElement>('[data-berth-ship]')].map((slot) => {
             const box = slot.getBoundingClientRect();
-            return { bottom: box.bottom, left: box.left, right: box.right };
+            return { line: slot.dataset.berthShip!.split('-')[0], left: box.left, right: box.right };
         })
     );
     // Пара тут одна, но ищем их все — так же, как выше искали место: правило про борта общее.
     const pairs = hulls.flatMap((one, index) =>
         hulls
             .slice(index + 1)
-            .filter((other) => Math.abs(one.bottom - other.bottom) < 6)
+            .filter((other) => other.line === one.line)
             .map((other) => [one, other].sort((first, second) => first.left - second.left))
     );
     expect(pairs.length, 'в кадре не нашлось двух кораблей на одной дальности').toBeGreaterThan(0);
@@ -435,7 +437,13 @@ test('разброс по коридору у всех вкладок одина
     // берём из порядка наложения — он и есть номер линии, — а середина и есть то число,
     // которое двигает разброс. Подписей в обычном кадре нет, они живут в разметке выбора,
     // поэтому корабли различаем линией и шириной корпуса, а не именем.
-    const picture = (tab: Page): Promise<{ slot: number; middle: number; width: number }[]> =>
+    // Отход от линии и разворот корпуса — тот же разброс, только по дальности и по углу,
+    // и считаются они тем же хешем. Значит, и совпадать у вкладок обязаны в той же мере:
+    // отход виден по нижней кромке дорожки — она стоит на воде под килем, — а разворот
+    // берётся с блока, которому он и достаётся.
+    const picture = (
+        tab: Page
+    ): Promise<{ slot: number; middle: number; width: number; water: number; yaw: string }[]> =>
         tab.evaluate(() =>
             [...document.querySelectorAll<HTMLElement>('[class*="shipLane"]')]
                 .map((lane) => {
@@ -444,6 +452,8 @@ test('разброс по коридору у всех вкладок одина
                         slot: Number(lane.style.zIndex) - 1,
                         middle: Math.round((box.left + box.width / 2) * 100) / 100,
                         width: Math.round(box.width * 100) / 100,
+                        water: Math.round(lane.getBoundingClientRect().bottom * 100) / 100,
+                        yaw: getComputedStyle(lane.querySelector('[class*="shipYaw"]')!).rotate,
                     };
                 })
                 .sort((one, other) => one.slot - other.slot || one.middle - other.middle)
@@ -459,6 +469,85 @@ test('разброс по коридору у всех вкладок одина
     await other.close();
 
     expect(theirs, 'у второй вкладки рейд оказался другим').toEqual(mine);
+});
+
+test('на стоянке корабль отходит от своей линии и разворачивает корпус', async ({ page }) => {
+    // Флот, выставленный точно по линиям и строго вдоль кадра, читается парадом, а не
+    // стоянкой: на настоящем рейде корабли разводит ветром и течением. Отход по дальности
+    // и малый разворот корпуса — это он и есть.
+    //
+    // Канал свой, а не демо, и корабли в нём расставлены руками: и отход, и разворот идут
+    // от хеша по позывному и месту, а в демо-канале места раздаёт случай — вышло бы, что
+    // проверка каждый раз меряет другой рейд. Линии взяты вразбег по всей глубине: у дальних
+    // промежуток вчетверо теснее, чем у ближних, и отход обязан укладываться в оба.
+    await openNewChannel(page, 'stoyanka');
+    const anchor = async (memberId: string, name: string, hullNumber: string, berth: string): Promise<void> => {
+        await openChannel(page, 'stoyanka', memberId);
+        await openJoinForm(page);
+        await page.locator(`[data-berth="${berth}"]`).click();
+        await join(page, name, hullNumber);
+    };
+    await anchor('pervyy', 'Гром', '404', '8-center');
+    await anchor('vtoroy', 'Вымпел', '303', '5-right');
+    await anchor('tretiy', 'Резвый', '202', '2-right');
+
+    // Смотрим гостем: разметка рейда видна только при открытой форме, а линии рейда видны
+    // только в ней — точками свободных мест и подписями занятых. Сравнивать положение
+    // корабля больше не с чем.
+    await openChannel(page, 'stoyanka', 'gost');
+    await openJoinForm(page);
+
+    const raid = await page.evaluate(() => {
+        // Меряем дорожки, а не то, что на них стоит: дорожка неподвижна, а точка с подписью
+        // качаются волной, и разовый замер застал бы их в случайной фазе. Нижняя кромка
+        // дорожки — это и есть вода под килем, то самое место стоянки.
+        const water = (node: Element): number => Math.round(node.getBoundingClientRect().bottom * 100) / 100;
+        const lines = [
+            ...document.querySelectorAll<HTMLElement>('[class*="shipNameLane"]'),
+            ...document.querySelectorAll<HTMLElement>('[data-berth]'),
+        ].map((mark) => water(mark.closest('[class*="Lane"]') ?? mark));
+        const fleet = [...document.querySelectorAll<HTMLElement>('[data-berth-ship]')].map((hull) => {
+            const lane = hull.closest<HTMLElement>('[class*="shipLane"]')!;
+            const name = document.querySelector(`[data-berth-name="${hull.dataset.berthShip!}"]`);
+            return {
+                // Своя линия у корабля одна: подпись его же места. Она достаётся всем,
+                // кроме стоящего на выбранном месте, — а выбранное свободно, чужих рейд
+                // не предлагает.
+                line: name ? water(name) : null,
+                water: water(lane),
+                yaw: Number.parseFloat(getComputedStyle(lane.querySelector('[class*="shipYaw"]')!).rotate),
+            };
+        });
+        return { lines, fleet };
+    });
+
+    expect(raid.fleet, 'на рейде не собралось трёх кораблей').toHaveLength(3);
+    for (const ship of raid.fleet) {
+        expect(ship.line, 'у корабля не нашлось подписи своего места').not.toBeNull();
+    }
+
+    // Отошли все: рейд стоит не по линейке. Полпикселя тут не мерка терпимости, а порог
+    // видимости — совпади корабль с линией, разница вышла бы ровным нулём.
+    const shifts = raid.fleet.map((ship) => Math.abs(ship.water - ship.line!));
+    for (const shift of shifts) {
+        expect(shift, 'корабль встал точно на свою линию').toBeGreaterThan(0.5);
+    }
+
+    // И при этом никто не перебрался на чужую линию: отход — пятая часть промежутка,
+    // а не половина. Промежуток у каждой линии свой — перспектива сводит дальние теснее, —
+    // поэтому меряем его на месте: до ближайшей соседней линии в кадре.
+    for (const [index, shift] of shifts.entries()) {
+        const line = raid.fleet[index].line!;
+        const apart = raid.lines.map((other) => Math.abs(other - line)).filter((gap) => gap > 0.5);
+        expect(shift, 'корабль ушёл на чужую линию').toBeLessThan(Math.min(...apart) / 2);
+    }
+
+    // Развернуло каждого, и никого — сильнее своей меры. Само число живёт в расстановке
+    // (YAW_DEGREES), сюда оно перенесено с запасом на округление в стилях.
+    for (const { yaw } of raid.fleet) {
+        expect(Math.abs(yaw), 'корабль стоит строго вдоль кадра').toBeGreaterThan(0.01);
+        expect(Math.abs(yaw), 'корабль развернуло сильнее, чем ветром на стоянке').toBeLessThanOrEqual(1.51);
+    }
 });
 
 test('свободные места на рейде зависят от выбранного корабля', async ({ page }) => {
