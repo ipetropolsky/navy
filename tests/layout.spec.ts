@@ -4048,6 +4048,43 @@ test('в щели между ручкой и плашкой ввода лент�
     await page.waitForTimeout(600);
 });
 
+/**
+ * Плашка ввода стоит у нижней кромки окна и не двигается вовсе, пока разговор растят.
+ *
+ * Это про ту же щель, только с другой стороны: пока ленты нет, распирать коробку изнутри
+ * некому, и плашка ехала бы вверх вместе с верхней кромкой, а вернувшаяся лента роняла бы
+ * её обратно вниз — на глазах и посреди движения. Мерка поэтому по всей дороге, а не по
+ * началу с концом: обе крайние точки сходились и тогда, когда середина прыгала.
+ */
+test('плашка ввода стоит на месте, пока свёрнутый разговор вытягивают вверх', async ({ page }) => {
+    await page.setViewportSize(PHONE);
+    await openChannel(page, DEMO, ALBATROS);
+
+    await leadChat(page, -chatSize(PHONE));
+    const composerTop = async () => (await boxOf(page, '[class*="composer"]')).top;
+    const stood = await composerTop();
+    // Пиксель допуска — на сетку браузера: высота коробки едет дробными числами, и верхняя
+    // кромка плашки ложится то на целый пиксель, то на соседний. Ищем мы падение на десятки.
+    const steady = async (step: number) =>
+        expect(Math.abs((await composerTop()) - stood), `плашка ввода поехала на ${step}px пути`).toBeLessThanOrEqual(
+            1
+        );
+
+    const { x, y } = await gripSpot(page);
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    // Шаги нарочно проходят порог `FEED_MIN` насквозь: рвануло бы как раз на нём.
+    /* eslint-disable no-await-in-loop -- кадры снимаются по очереди: это одно движение пальца */
+    for (const step of [10, 30, FEED_MIN - 6, FEED_MIN + 6, 120, 240]) {
+        await page.mouse.move(x, y - step, { steps: 2 });
+        await steady(step);
+    }
+    /* eslint-enable no-await-in-loop */
+    await page.mouse.up();
+    await page.waitForTimeout(600);
+    expect(Math.abs((await composerTop()) - stood), 'плашка ввода не вернулась к нижней кромке').toBeLessThanOrEqual(1);
+});
+
 /** Наименьший рост кадра в этом окне, px: больший из доли окна и трёхсот пикселей. */
 const sceneMin = (view: { width: number; height: number }): number =>
     Math.max(SCENE_MIN_HEIGHT, view.height * SCENE_MIN_SHARE);
