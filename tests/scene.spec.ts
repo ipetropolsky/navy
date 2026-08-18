@@ -1669,23 +1669,23 @@ test('на соседний коридор своей линии корабль 
 /**
  * Смена раскладки посреди хода не должна сбивать корабль с курса.
  *
- * Точка, к которой корабль идёт, считается от кадра: на узком экране рейд шире кадра, и место
- * в боковом коридоре отодвигается от кромки, чтобы нос с бортовым номером остался на виду
- * (см. `edgesFor` в placement.ts). Значит, смена раскладки эту точку двигает — и, если двинуть
- * её под килём у идущего, переход в CSS начнётся заново: с того места, где корабль сейчас,
- * и на всю длительность целиком. На глаз это остановка на полпути.
+ * Место на рейде от кадра не зависит вовсе, а вот проекция зависит: чем уже окно, тем сильнее
+ * рейд разложен трапецией (см. `--raid-reach` в SeaScene.module.less). Значит, смена раскладки
+ * двигает точку на экране — и, если двинуть её под килём у идущего, переход в CSS начнётся
+ * заново: с того места, где корабль сейчас, и на всю длительность целиком. На глаз это
+ * остановка на полпути. Оттого идущему проекция и замирает такой, какой была на старте.
  *
- * Меряется здесь само правило, а не время: пока у корабля стоит пометка хода, точка, к которой
- * он наведён (`--slot-left`), обязана быть одна и та же. Часы для такой проверки — мерка
- * ненадёжная: разброс машины в ускоренный ход укладывается целиком.
+ * Меряется здесь само правило, а не время: пока у корабля стоит пометка хода, и точка на рейде
+ * (`--slot-left`), и её место на экране (`translate`) обязаны быть одни и те же. Часы для такой
+ * проверки — мерка ненадёжная: разброс машины в ускоренный ход укладывается целиком.
  *
  * Ход берётся самый долгий из тех, что есть, — уход с ближней линии через весь кадр: в него
  * успевает уложиться и смена окна, и десяток снимков до неё и после. Стоит корабль в боковом
  * коридоре: в среднем точка от кромок не зависит вовсе, и ловить там было бы нечего.
  *
  * Двух ловушек проверка избегает нарочно. Кадр в ней и правда должен перемениться посреди хода —
- * об этом говорит ширина дорожки, снятая в тех же кадрах. А точка после хода должна оказаться
- * другой — иначе раскладка ничего не сдвинула бы и в самом скверном случае.
+ * об этом говорит ширина дорожки, снятая в тех же кадрах. А проекция от такой перемены должна
+ * и правда разъезжаться — иначе двигать под килём было бы нечего.
  */
 test('корабль доходит до места, даже если посреди хода сменилась раскладка', async ({ page }) => {
     takes(20);
@@ -1712,7 +1712,7 @@ test('корабль доходит до места, даже если поср�
     // Замер идёт в самой вкладке и каждый кадр: со стороны Playwright между снимками успевает
     // пройти половина хода. Наружу отдаются только перемены — их за ход должно быть по пальцам.
     await page.evaluate(() => {
-        const seen: { motion: string; slot: string; lane: number }[] = [];
+        const seen: { motion: string; slot: string; at: string; lane: number }[] = [];
         (window as unknown as { __seen: typeof seen }).__seen = seen;
         const snap = (): void => {
             const lane = document.querySelector<HTMLElement>('[data-motion="leaving"]');
@@ -1727,10 +1727,13 @@ test('корабль доходит до места, даже если поср�
             const now = {
                 motion: lane.dataset.motion ?? '',
                 slot: lane.style.getPropertyValue('--slot-left'),
+                // Куда точка рейда легла на экран. Снимается именно --slot-x, а не translate:
+                // translate посреди хода показывает, где корабль сейчас, и меняется каждый кадр.
+                at: getComputedStyle(lane).getPropertyValue('--slot-x'),
                 lane: Math.round(lane.clientWidth),
             };
             const last = seen[seen.length - 1];
-            if (last?.slot !== now.slot || last.lane !== now.lane) {
+            if (last?.slot !== now.slot || last.at !== now.at || last.lane !== now.lane) {
                 seen.push(now);
             }
             requestAnimationFrame(snap);
@@ -1740,30 +1743,41 @@ test('корабль доходит до места, даже если поср�
     // Хотя бы один снимок до перемены: без него менять окно не с чем сравнивать, а первый
     // кадр после установки замера приходит не в тот же миг.
     await page.waitForFunction(() => (window as unknown as { __seen: unknown[] }).__seen.length > 0);
+    // Проекция до смены окна: с ней и сверяется, было ли под килём чему разъезжаться.
+    const reachWide = await page
+        .locator('[class*="raid_"]')
+        .first()
+        .evaluate((raid) => Number(getComputedStyle(raid).getPropertyValue('--raid-reach-far')));
     await page.setViewportSize({ width: 390, height: 844 });
     await expect(page.locator('[data-motion="leaving"]'), 'уход не кончился').toHaveCount(0, {
         timeout: SAIL_TIMEOUT,
     });
 
     const seen = await page.evaluate(
-        () => (window as unknown as { __seen: { motion: string; slot: string; lane: number }[] }).__seen
+        () => (window as unknown as { __seen: { motion: string; slot: string; at: string; lane: number }[] }).__seen
     );
     expect(
         new Set(seen.map((frame) => frame.lane)).size,
         'кадр не переменился посреди хода — ловить было нечего'
     ).toBeGreaterThan(1);
+    expect([...new Set(seen.map((frame) => frame.slot))], 'у идущего корабля переменилась точка на рейде').toHaveLength(
+        1
+    );
     expect(
-        [...new Set(seen.map((frame) => frame.slot))],
+        [...new Set(seen.map((frame) => frame.at))],
         'у идущего корабля переменилась точка, от которой он отсчитывает ход'
     ).toHaveLength(1);
 
     // И перезаход отыгрался до конца: корабль пришёл туда, куда его послали.
     await expect(page.locator('[data-motion]'), 'перезаход не кончился').toHaveCount(0, { timeout: SAIL_TIMEOUT });
-    const arrived = await page
-        .locator('[class*="shipLane"]')
-        .first()
-        .evaluate((lane) => lane.style.getPropertyValue('--slot-left'));
-    expect(arrived, 'новая раскладка не сдвинула точку — проверять было нечего').not.toBe(seen[0].slot);
+    // А двигать под килём было что: от новой ширины окна проекция разъехалась — на узком
+    // экране рейд ложится трапецией круче, чем на широком.
+    const reachNarrow = await page
+        .locator('[class*="raid_"]')
+        .evaluate((raid) => Number(getComputedStyle(raid).getPropertyValue('--raid-reach-far')));
+    expect(reachNarrow, 'проекция от смены окна не переменилась — проверять было нечего').toBeLessThan(
+        reachWide - 0.05
+    );
     const state = await readState(page);
     const [moved] = Object.values(state.channels).find((one) => one.channel.slug === 'perehod-raskladka')!.members;
     expect(`${moved.place.slot}-${moved.place.corridor}`, 'корабль встал не на выбранное место').toBe('0-center');
@@ -1825,21 +1839,24 @@ test('корабль качается сам и не замирает', async ({
 });
 
 /**
- * Вылет рейда за кромки кадра. На телефоне кадр почти квадратный, и рейду в нём тесно: коридоры
- * сходятся к середине, перспективе негде разбежаться. Поэтому рейд там шире окна (RAID_OVERHANG),
- * а окно его обрезает — и обрезать оно должно только воду да корму крайнего корабля.
+ * Как рейд ложится на экран телефона. Кадр там почти квадратный, и рейду в нём тесно: коридоры
+ * сходятся к середине, перспективе негде разбежаться. Сам рейд от этого не меняется — он один
+ * и тот же на любом экране, — а меняется проекция: передний край раздаётся шире окна, дальний
+ * поджимается внутрь (RAID_SPREAD_NEAR и RAID_SPREAD_FAR), и окно обрезает то, что вышло.
  *
- * Числа расстановки проверены юнитом (см. placement.test.ts), браузеру остаётся то, чего в них
- * не увидеть: что в кадре и правда виден весь нос с бортовым номером, что рейд стоит по середине
- * окна, а не прижат к одной кромке, и что от лишней ширины не завелась прокрутка страницы.
+ * Числа расстановки проверены юнитом (см. placement.test.ts): поля по краям рейда там одни и те
+ * же на любом экране. Браузеру остаётся то, чего в них не увидеть: что дальний край и правда
+ * остался в окне с запасом, что рейд стоит по середине окна, а не прижат к одной кромке,
+ * и что от лишней ширины не завелась горизонтальная прокрутка страницы.
  *
- * Замер на окне 390px: рейд 484px против 390px окна — на 94px шире, — и оси боковых коридоров
- * отходят от кромки на 60px вместо прежних 86px, то есть почти на треть ближе к краю.
+ * Замер на окне 390px: передний край 484px — на 94px шире окна, — дальний 359px, то есть
+ * на 15px внутрь от каждой кромки. Ближним кораблям кромка теперь и правда режет нос вместе
+ * с бортовым номером: так и задумано, к самой кромке они попадают редко (см. issue #41).
  */
-test.describe('рейд шире окна на телефоне', () => {
+test.describe('рейд ложится на телефон трапецией', () => {
     test.use({ viewport: { width: 390, height: 844 } });
 
-    test('нос с номером остаётся в окне, а рейд — по середине кадра', async ({ page }) => {
+    test('передний край выходит за окно, дальний остаётся внутри, рейд — по середине', async ({ page }) => {
         takes(6);
         await openChannel(page, DEMO);
         await expect(page.locator('[data-motion]'), 'корабли так и не встали на места').toHaveCount(0, {
@@ -1847,7 +1864,12 @@ test.describe('рейд шире окна на телефоне', () => {
         });
 
         const seen = await page.evaluate(() => {
-            const raid = document.querySelector('[class*="raid_"]')!.getBoundingClientRect();
+            const water = document.querySelector('[class*="raid_"]')!;
+            const raid = water.getBoundingClientRect();
+            // Во сколько раз дальний край уже переднего: по нему и считается, где он лёг.
+            const reachFar = Number(getComputedStyle(water).getPropertyValue('--raid-reach-far'));
+            const middle = (raid.left + raid.right) / 2;
+            const halfFar = (raid.width * reachFar) / 2;
             return {
                 window: window.innerWidth,
                 // Прокрутка страницы: рейд лежит внутри кадра, а кадр обрезает всё за краями.
@@ -1855,27 +1877,98 @@ test.describe('рейд шире окна на телефоне', () => {
                 raid: raid.width,
                 // Насколько рейд выступает за левую и за правую кромку окна.
                 past: [-raid.left, raid.right - window.innerWidth],
-                ships: [...document.querySelectorAll<HTMLElement>('[data-facing]')].map((hull) => {
-                    const box = hull.getBoundingClientRect();
-                    const number = hull.querySelector('[class*="hullNumber"]')!.getBoundingClientRect();
-                    // Отступ носа и номера от той кромки, в которую корабль смотрит.
-                    const toEdge = (edge: { left: number; right: number }): number =>
-                        hull.dataset.facing === 'right' ? window.innerWidth - edge.right : edge.left;
-                    return { bow: toEdge(box), number: toEdge(number) };
-                }),
+                // Где оказались кромки дальнего края.
+                far: [middle - halfFar, window.innerWidth - (middle + halfFar)],
+                // Корабли дальней трети рейда: демо-флот ставит туда одного наверняка
+                // (см. DEMO_BANDS в seed.ts). Им кромка не грозит вовсе.
+                offshore: [...document.querySelectorAll<HTMLElement>('[data-facing]')]
+                    .filter(
+                        (hull) => Number(hull.closest('[data-berth-ship]')!.getAttribute('data-berth-ship')![0]) <= 2
+                    )
+                    .map((hull) => {
+                        const box = hull.getBoundingClientRect();
+                        const number = hull.querySelector('[class*="hullNumber"]')!.getBoundingClientRect();
+                        return {
+                            hull: [box.left, window.innerWidth - box.right],
+                            number: [number.left, window.innerWidth - number.right],
+                        };
+                    }),
             };
         });
 
-        expect(seen.raid, 'рейд не вышел за кромки окна — мерить нечего').toBeGreaterThan(seen.window);
+        expect(seen.raid, 'передний край не вышел за кромки окна — мерить нечего').toBeGreaterThan(seen.window);
         expect(seen.page, 'от вылета завелась горизонтальная прокрутка страницы').toBe(seen.window);
         expect(seen.past[0], 'рейд встал не по середине кадра').toBeCloseTo(seen.past[1], 0);
-        expect(seen.ships.length, 'в кадре нет кораблей').toBeGreaterThan(0);
-        for (const ship of seen.ships) {
-            // Поле у носа отмерено настоящей кромкой окна (см. edgesFor в placement.ts).
-            // Оно в долях рейда, а рейд шире окна, — значит в пикселях его не меньше,
-            // чем EDGE_MARGIN от ширины окна.
-            expect(ship.bow, 'нос подошёл к кромке окна ближе поля').toBeGreaterThan((EDGE_MARGIN / 100) * seen.window);
-            expect(ship.number, 'бортовой номер обрезан кромкой окна').toBeGreaterThan(0);
+        // Дальний край не просто в окне, а отодвинут от кромки: столько же, на сколько сходятся
+        // к нему оси коридоров, — иначе дальний корабль стоял бы вплотную к обрезу.
+        expect(seen.far[0], 'дальний край рейда вышел за левую кромку окна').toBeGreaterThan(10);
+        expect(seen.far[1], 'дальний край рейда вышел за правую кромку окна').toBeGreaterThan(10);
+        expect(seen.offshore.length, 'в дальней трети рейда нет кораблей').toBeGreaterThan(0);
+        for (const ship of seen.offshore) {
+            expect(Math.min(...ship.hull), 'дальний корабль обрезан кромкой окна').toBeGreaterThan(0);
+            expect(Math.min(...ship.number), 'у дальнего корабля обрезан бортовой номер').toBeGreaterThan(0);
         }
+    });
+
+    /**
+     * Смена ширины окна корабли по воде не возит. Место на рейде у них от окна не зависит вовсе,
+     * меняется только проекция — а она считается в тот же кадр, в который кадр стал другим.
+     * Иначе выходит нелепое: никто никуда не плыл, а четыре корабля разом трогаются с места
+     * и пару секунд подъезжают на новые точки.
+     *
+     * Меряется покадрово и по самой дорожке: её рамка — это и есть спроецированная точка, и,
+     * в отличие от корпуса, она не качается. Ширина рейда снимается теми же кадрами и служит
+     * отметкой момента: кадр, в котором рейд принял новую ширину, обязан быть тем же самым,
+     * в котором корабли встали на свои новые места. Ждём при этом целую длительность подработки
+     * у борта (@ship-aside-seconds, снимается с дорожки): подъезд, если он есть, укладывается
+     * ровно в неё.
+     *
+     * Оба окна телефонные: перестановка внутри одной раскладки, безо всяких разворотов.
+     */
+    test('смена ширины окна переставляет корабли сразу, а не подвозит', async ({ page }) => {
+        takes(12);
+        await page.setViewportSize({ width: 738, height: 844 });
+        await openChannel(page, DEMO);
+        await expect(page.locator('[data-motion]'), 'корабли так и не встали на места').toHaveCount(0, {
+            timeout: SAIL_TIMEOUT,
+        });
+
+        // Замер идёт в самой вкладке: со стороны Playwright между снимками успевает пройти
+        // половина подъезда. Наружу отдаются только перемены.
+        await page.evaluate(() => {
+            const seen: { raid: number; ships: string }[] = [];
+            (window as unknown as { __seen: typeof seen }).__seen = seen;
+            const snap = (): void => {
+                const raid = Math.round(document.querySelector('[class*="raid_"]')!.getBoundingClientRect().width);
+                const ships = [...document.querySelectorAll('[class*="shipLane"]')]
+                    .map((lane) => lane.getBoundingClientRect().left.toFixed(1))
+                    .join(' ');
+                const last = seen[seen.length - 1];
+                if (last?.raid !== raid || last.ships !== ships) {
+                    seen.push({ raid, ships });
+                }
+                requestAnimationFrame(snap);
+            };
+            snap();
+        });
+        const aside = await page
+            .locator('[class*="shipLane"]')
+            .first()
+            .evaluate((lane) => Number.parseFloat(getComputedStyle(lane).transitionDuration) || 0);
+        expect(aside, 'у дорожки нет перехода — ждать нечего и проверять нечего').toBeGreaterThan(0);
+
+        await page.setViewportSize({ width: 317, height: 844 });
+        await page.waitForTimeout(aside * 1000);
+
+        const seen = await page.evaluate(
+            () => (window as unknown as { __seen: { raid: number; ships: string }[] }).__seen
+        );
+        const last = seen[seen.length - 1];
+        expect(seen[0].raid, 'рейд не переменился от смены окна — мерить нечего').not.toBe(last.raid);
+        expect(seen[0].ships, 'проекция не переставила корабли — мерить нечего').not.toBe(last.ships);
+        expect(
+            seen.findIndex((frame) => frame.ships === last.ships),
+            'корабли встали на свои места не в том кадре, в котором рейд принял новую ширину'
+        ).toBe(seen.findIndex((frame) => frame.raid === last.raid));
     });
 });
