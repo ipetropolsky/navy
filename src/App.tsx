@@ -29,7 +29,7 @@ import Panel from '@/components/ui/Panel';
 import Shade from '@/components/ui/Shade';
 import { useSnackbar } from '@/components/ui/Snackbar';
 import { LeaveIcon } from '@/components/ui/icons';
-import { FEED_MIN, SHEET_HANDLE } from '@/config/layout';
+import { FEED_MIN, GATE_PAD, SHEET_HANDLE } from '@/config/layout';
 import { paced } from '@/config/time';
 import { HAIL_SIGNAL, morseDuration } from '@/hooks/morse';
 import { useChannel } from '@/hooks/useChannel';
@@ -155,6 +155,30 @@ export default function App() {
         return () => {
             observer.disconnect();
             setComposerHeight(0);
+        };
+    }, []);
+
+    /**
+     * Кнопка закрытой формы «Встать на рейд», px: то же самое дело, что и `measureComposer`
+     * выше, только про другую плашку.
+     *
+     * Гость видит на месте разговора не разговор, а пустую плашку с одной этой кнопкой,
+     * и коробка под ней должна встать по кнопке, а не долей хода, как настоящий разговор
+     * (см. `gateHeight` ниже). Число меряем, а не записываем: высота кнопки текучая, она
+     * растёт вместе с кеглем шрифта на широком окне (`--font-size-base` в index.less),
+     * и записанное число разошлось бы с ней при первой же правке кегля.
+     */
+    const [gateButtonHeight, setGateButtonHeight] = useState(0);
+    const measureGate = useCallback((node: HTMLButtonElement | null) => {
+        if (!node) {
+            setGateButtonHeight(0);
+            return undefined;
+        }
+        const observer = new ResizeObserver(() => setGateButtonHeight(node.getBoundingClientRect().height));
+        observer.observe(node);
+        return () => {
+            observer.disconnect();
+            setGateButtonHeight(0);
         };
     }, []);
 
@@ -635,13 +659,16 @@ export default function App() {
      */
     const stepChat = useCallback(
         (direction: 'up' | 'down') => {
-            if (atSide) {
+            // И сбоку, и у закрытой формы «Встать на рейд» — коробка стоит числом, которое
+            // не про долю хода: сбоку это вся высота окна, у закрытой формы — сама кнопка
+            // (см. `gated` ниже). Шагать по точкам разговора там нечем.
+            if (atSide || atGate) {
                 return;
             }
             chose();
             resize(stepMagnet(chatMagnets(layout, boxHasForm), layout.size, direction === 'up' ? 1 : -1), true);
         },
-        [atSide, boxHasForm, chose, layout, resize]
+        [atGate, atSide, boxHasForm, chose, layout, resize]
     );
     useSwipe(sceneRef, stepChat);
 
@@ -755,6 +782,8 @@ export default function App() {
                     // Обратно к закрытому виду — «Отменой». Набранное при этом не теряется:
                     // форма остаётся на месте и в закрытом виде.
                     onCancel={() => act({ type: 'close-join' })}
+                    // Закрытой формой меряется её коробка (см. `gateHeight` выше).
+                    gateRef={measureGate}
                 />
             )}
             {channel && me && (
@@ -784,12 +813,38 @@ export default function App() {
         </>
     );
 
+    /**
+     * Закрытая форма «Встать на рейд»: коробка стоит по кнопке, а не по доле хода.
+     *
+     * У гостя на месте разговора нет разговора — только пустая плашка с одной кнопкой
+     * посреди, — и коробка под ней не обязана тянуться на треть окна, как настоящий разговор:
+     * там нечего разглядывать сверх этой кнопки. Число берём у живой разметки
+     * (`gateButtonHeight`, см. `measureGate` выше) и прибавляем поле плашки сверху и снизу
+     * (`GATE_PAD`), тем же образом, каким пол разговора складывается из ручки и плашки ввода.
+     *
+     * Только под кадром: сбоку панель и так стоит во весь рост окна (`.contentSide` в стилях,
+     * `height: auto`) — мерить там нечего, и обычная ширина панели её не касается.
+     *
+     * Пока кнопка не измерена (первая отрисовка, `gateButtonHeight` ещё 0), коробка встаёт
+     * обычным способом — тем же, каким встал бы разговор, — и подбирается под кнопку кадром
+     * позже, как и пол разговора под свежую плашку ответа.
+     */
+    const gateHeight = gateButtonHeight > 0 ? gateButtonHeight + GATE_PAD * 2 : 0;
+    const gated = atGate && !atSide && gateHeight > 0;
+
     // Коробка разговора: в каком размере она стоит. Обычно это сам разговор — и свёрнутый тоже:
     // сворачиваясь, он не уезжает, а честно садится в свой пол, иначе плашка ввода уехала бы
     // под кромку окна вместе с низом коробки, а видно осталась бы верхушка ленты. А вот убранная
     // кнопкой панель уезжает за кромку целиком, своим размером, — сминать ленту с полем ввода
     // в ноль на глазах незачем. Ей и берём размер возврата.
-    const chatBox = shown ? size : layout.back;
+    //
+    // У закрытой формы «Встать на рейд» — своя мерка, и с долей хода она не спорит: набранный
+    // человеком размер разговора (`size`) остаётся в памяти вкладки как был, и стоит ему
+    // встать в строй — коробка вернётся туда же, откуда её потеснила кнопка.
+    let chatBox = shown ? size : layout.back;
+    if (gated) {
+        chatBox = gateHeight;
+    }
 
     // Насколько коробка разговора ушла за кромку: всё, что от неё не видно. У стоящего
     // разговора, хоть свёрнутого, это ноль; уходит за кромку только убранная панель.
@@ -811,7 +866,7 @@ export default function App() {
     // и её правая кромка, и отвод полосы шапки, и ширина шторок на сцене, и по ним же ходит
     // коридор для свайпа — он держится видимой кромки. Смена раскладки для всех них — обычное
     // движение: одно число идёт в ноль, второе из нуля, и едут они разом (см. .header в стилях).
-    const take = atSide ? { under: 0, side: size } : { under: size, side: 0 };
+    const take = atSide ? { under: 0, side: size } : { under: gated ? gateHeight : size, side: 0 };
 
     // Единственный кадр переезда стоит на прежних числах: коробка в нём уже ушла за свою новую
     // кромку, а кадр отмерен ровно так, как был отмерен до поворота, — и потому не двигается
@@ -1178,7 +1233,11 @@ export default function App() {
                     у неё одно на всё, что в коробке стоит, и то же самое, что у коридора над
                     ней: коробка внизу экрана одна, кромка у неё одна, и хват за эту кромку
                     тоже один. */}
-                {!atSide && (
+                {/* Пока коробка стоит по кнопке (`gated`), тянуть её не за что: она не про
+                    размер, а про содержимое, и потяг с этим бы спорил. Ручка здесь просто
+                    не рисуется — не запрещаем каждый обработчик по отдельности, а убираем
+                    саму цель, за которую тянут. */}
+                {!atSide && !gated && (
                     <div className={styles.sheetHandle} aria-hidden="true" {...gripHandlers}>
                         <span className={styles.sheetGrip} />
                     </div>
@@ -1199,7 +1258,7 @@ export default function App() {
                 и за неё разговор достают обратно тем же свайпом, каким свернули. Нет коридора
                 только у убранного: размера у него ноль, и тянуть не за что — вернуть его можно
                 кнопкой в шапке. */}
-            {shown && (
+            {shown && !gated && (
                 <div
                     className={[styles.grip, atSide ? styles.gripSide : styles.gripUnder].join(' ')}
                     style={boxEdge}
