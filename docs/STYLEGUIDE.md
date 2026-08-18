@@ -116,6 +116,7 @@
 | `ui/Input`                         | поле ввода — одно на ленту и на формы                              |
 | `ui/Button`                        | кнопка с подписью: `primary`, `secondary`, `danger`                |
 | `ui/IconButton`                    | кнопка со значком: `plain`, `muted`, `accent`, `inField`           |
+| `ui/Counter`                       | счётчик у кнопки: цифра в пилюле, место ей отводит хозяин          |
 | `ui/Switch`                        | переключатель положений: пилюля ездит по подписям                  |
 | `ui/Snackbar`                      | уведомления                                                        |
 | `ships/Avatar`, `ships/MemberName` | лицо и позывной участника                                          |
