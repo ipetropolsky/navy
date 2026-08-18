@@ -4092,14 +4092,19 @@ const gripSpot = async (page: Page): Promise<{ x: number; y: number }> => {
  * то есть разговор именно подвели, а не бросили. Скорости к отпусканию не остаётся, и приезд
  * считается от того места, куда его привели.
  */
-const leadChat = async (page: Page, by: number): Promise<void> => {
-    const { x, y } = await gripSpot(page);
+const leadFrom = async (page: Page, x: number, y: number, by: number): Promise<void> => {
     await page.mouse.move(x, y);
     await page.mouse.down();
     await page.mouse.move(x, y - by, { steps: 8 });
     await page.waitForTimeout(FLING_MS * 3);
     await page.mouse.up();
     await page.waitForTimeout(600);
+};
+
+/** То же, но от середины коридора: обычное место хвата, когда точка сама по себе не важна. */
+const leadChat = async (page: Page, by: number): Promise<void> => {
+    const { x, y } = await gripSpot(page);
+    await leadFrom(page, x, y, by);
 };
 
 /**
@@ -4122,9 +4127,16 @@ const flingChatDown = async (page: Page, by: number): Promise<void> => {
 };
 
 /**
+ * Область хвата, которую просит палец, px. Обычная телефонная мерка: меньше — промахиваются.
+ * Набирают её под кадром вдвоём — коридор сверху и ручка снизу от стыка.
+ */
+const TOUCH_TARGET = 44;
+
+/**
  * Коридор под кадром — та же полоска, что и сбоку, только поперёк: вдоль верхней кромки
- * разговора и во всю его ширину, а не во всю ширину окна. Стоит он на самом стыке, половиной
- * на кадр и половиной на разговор.
+ * разговора и во всю его ширину, а не во всю ширину окна. Нижней своей половиной он лежит
+ * на разговоре, а вверх, на воду, вытянут дальше — ровно настолько, чтобы вместе с ручкой
+ * под кромкой выйти на честные 44px.
  */
 test('под кадром коридор лежит поперёк, вдоль верхней кромки разговора', async ({ page }) => {
     await page.setViewportSize(PHONE);
@@ -4132,13 +4144,72 @@ test('под кадром коридор лежит поперёк, вдоль �
 
     const grip = await boxOf(page, '[role="separator"]');
     const chat = await boxOf(page, 'main');
-    expect(grip.height, 'коридор не в свою толщину').toBe(CHAT_GRIP);
     expect(grip.width, 'коридор не во всю ширину разговора').toBe(chat.width);
-    expect(grip.top + CHAT_GRIP / 2, 'коридор встал не на кромку разговора').toBe(chat.top);
+    // Округление до пикселя у каждой коробки своё: кромка разговора стоит на доле окна
+    // и на целое число не попадает. Отсюда и допуск в пиксель — во всех трёх мерках ниже.
+    expect(
+        Math.abs(grip.top + grip.height - CHAT_GRIP / 2 - chat.top),
+        'коридор встал не на кромку разговора'
+    ).toBeLessThanOrEqual(1);
+
+    // Ручка начинается ровно от кромки: всё, что ниже стыка, — она, всё, что выше, — коридор.
+    const handle = await boxOf(page, '[class*="sheetHandle"]');
+    expect(Math.abs(handle.top - chat.top), 'ручка стоит не у самой кромки разговора').toBeLessThanOrEqual(1);
+    expect(
+        Math.abs(handle.top + handle.height - grip.top - TOUCH_TARGET),
+        'область хвата у ручки меньше пальца'
+    ).toBeLessThanOrEqual(1);
+
     await expect(
         page.getByRole('separator', { name: 'Высота разговора' }),
         'коридор под кадром назвался шириной'
     ).toBeVisible();
+});
+
+/**
+ * Замер выше говорит про геометрию, а этот — про то, что вся полоса и правда берётся пальцем.
+ *
+ * Мест два, и оба крайние: самый верх коридора над водой и самый низ ручки над лентой. Верх
+ * лежит на слое, которым нажимают на корабли, низ — вплотную к первой строке ленты, и любой
+ * из соседей, окажись он выше, отобрал бы нажатие себе. Между ними — те самые 44px.
+ */
+test('разговор берётся за всю полосу хвата — от верха коридора до низа ручки', async ({ page }) => {
+    takes(4);
+    await page.setViewportSize(PHONE);
+    await openChannel(page, DEMO, ALBATROS);
+    const two = Math.round(chatRoom(PHONE) * 2 * CHAT_SHARE);
+
+    // От верхней кромки коридора: выше стыка, на воде.
+    const grip = await boxOf(page, '[role="separator"]');
+    await leadFrom(page, grip.left + grip.width / 2, grip.top + 1, 150);
+    expect(await chatHeight(page), 'за верх коридора разговор не взялся').toBe(two);
+
+    // От нижней кромки ручки: ниже стыка, вплотную к ленте. Мерки берутся заново: разговор
+    // только что подрос, и стык вместе с ручкой уехал вверх.
+    const handle = await boxOf(page, '[class*="sheetHandle"]');
+    await leadFrom(page, handle.left + handle.width / 2, handle.top + handle.height - 1, -150);
+    expect(await chatHeight(page), 'за низ ручки разговор не взялся').toBe(chatSize(PHONE));
+});
+
+/**
+ * Вверх коридор растянут на воду, а не на шапку. На распахнутом разговоре стык подходит
+ * к шапке вплотную, и нижняя строчка названия канала оказывается внутри той самой полосы
+ * хвата — но шапка лежит выше коридора слоем, и нажатие достаётся ей.
+ */
+test('коридор не отбирает нажатия у шапки на распахнутом разговоре', async ({ page }) => {
+    takes(3);
+    await page.setViewportSize(PHONE);
+    await openChannel(page, DEMO, ALBATROS);
+    await leadChat(page, 400);
+    const chat = await boxOf(page, 'main');
+    const title = await boxOf(page, 'button[title="Корабли на связи"]');
+    expect(chat.top - (title.top + title.height), 'название и так не достаёт до полосы хвата').toBeLessThan(
+        TOUCH_TARGET - SHEET_HANDLE
+    );
+
+    // По самой нижней строчке названия — той, что попала в полосу.
+    await page.mouse.click(title.left + title.width / 2, title.top + title.height - 2);
+    await expect(shipsButton(page), 'название не открыло список кораблей').toHaveAttribute('aria-expanded', 'true');
 });
 
 /**
