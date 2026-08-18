@@ -3009,15 +3009,19 @@ const skyIn = async (page: Page, frame: { width: number; height: number }, full:
     return skyFrame(page);
 };
 
+/** Два окна, в которых меряется небо. Высота нужна и замеру: от неё считается потолок неба. */
+const SKY_DESK_WINDOW = { width: 1200, height: 900 };
+const SKY_PHONE_WINDOW = { width: 390, height: 844 };
+
 /** Четыре кадра разом: широкое окно и телефонное, с разговором на экране и без него. */
 const skyFrames = async (page: Page) => {
-    await page.setViewportSize({ width: 1200, height: 900 });
+    await page.setViewportSize(SKY_DESK_WINDOW);
     await openChannel(page, DEMO, ALBATROS);
     // Цепочкой, а не циклом: окно одно, раскладки примеряются по очереди.
-    const desk = await skyIn(page, { width: 1200, height: 900 }, false);
-    const deskFull = await skyIn(page, { width: 1200, height: 900 }, true);
-    const phone = await skyIn(page, { width: 390, height: 844 }, false);
-    const phoneFull = await skyIn(page, { width: 390, height: 844 }, true);
+    const desk = await skyIn(page, SKY_DESK_WINDOW, false);
+    const deskFull = await skyIn(page, SKY_DESK_WINDOW, true);
+    const phone = await skyIn(page, SKY_PHONE_WINDOW, false);
+    const phoneFull = await skyIn(page, SKY_PHONE_WINDOW, true);
     return { desk, deskFull, phone, phoneFull };
 };
 
@@ -3027,10 +3031,10 @@ const skyFrames = async (page: Page) => {
  * пикселей съели бы четверть её. Сдвиг там нулевой и с разговором, и без него — уход разговора
  * его не добавляет, иначе звёзды переезжали бы на глазах.
  *
- * А вот месяц отмерен одинаково везде — долей неба от линии воды, все четыре кадра
- * по одному правилу. Своего отсчёта у телефона больше нет: он был от строки состояния,
- * и месяц там стоял на месте, пока под ним открывалось небо. Теперь месяц едет вместе
- * с горизонтом: тесный кадр срезает его верхней кромкой заодно со звёздами, кадр во весь
+ * А вот месяц отмерен одинаково везде — долей от потолка неба (100dvh * @sky-share), все четыре
+ * кадра по одному правилу и своего отсчёта у телефона нет. Мерка та же, по которой меряется
+ * плитка со звёздами, — потому месяц и стоит на месте, когда кадр тесним разговором: звёзды
+ * стоят, и он с ними. Тесный кадр срезает его верхней кромкой заодно со звёздами, кадр во весь
  * экран — показывает целиком.
  *
  * Проверяется отношение, а не место снимка в кадре: низ его лежит ниже горизонта на свою
@@ -3038,7 +3042,7 @@ const skyFrames = async (page: Page) => {
  * место в кадре ни о чём не говорит — высота снимка считается по двум разным правилам,
  * см. --sky-tile.
  */
-test('небо опущено к воде, а месяц во всех раскладках стоит на своей доле неба', async ({ page }) => {
+test('небо опущено к воде, а месяц во всех раскладках стоит на своей доле потолка неба', async ({ page }) => {
     takes(4);
     const frames = await skyFrames(page);
 
@@ -3053,34 +3057,38 @@ test('небо опущено к воде, а месяц во всех раск�
     expectDropped(frames.phone, 0, 'телефон');
     expectDropped(frames.phoneFull, 0, 'телефон без разговора');
 
-    // Высота месяца над водой — доля неба, а не пиксели и не доля кадра: в каждом виде своя
-    // высота неба, и месяц стоит на той же её части. Мерка одна на все четыре кадра —
-    // отдельного телефонного отсчёта тут нет и быть не должно.
-    for (const [label, frame] of [
-        ['широкое окно', frames.desk],
-        ['широкое окно без разговора', frames.deskFull],
-        ['телефон', frames.phone],
-        ['телефон без разговора', frames.phoneFull],
+    // Высота месяца над водой — доля потолка неба, а не пиксели, не доля кадра и не доля нынешней
+    // высоты неба: потолок в окне один, и месяц берёт от него всегда одно и то же. Мерка одна
+    // на все четыре кадра — отдельного телефонного отсчёта тут нет и быть не должно.
+    for (const [label, frame, window] of [
+        ['широкое окно', frames.desk, SKY_DESK_WINDOW],
+        ['широкое окно без разговора', frames.deskFull, SKY_DESK_WINDOW],
+        ['телефон', frames.phone, SKY_PHONE_WINDOW],
+        ['телефон без разговора', frames.phoneFull, SKY_PHONE_WINDOW],
     ] as const) {
-        const expected = frame.skyHeight * MOON_ABOVE_SHARE;
-        expect(Math.abs(frame.moonAbove - expected), `${label}: месяц стоит не на своей доле неба`).toBeLessThanOrEqual(
-            1
-        );
+        const expected = window.height * SKY_SHARE * MOON_ABOVE_SHARE;
+        expect(
+            Math.abs(frame.moonAbove - expected),
+            `${label}: месяц стоит не на своей доле потолка неба`
+        ).toBeLessThanOrEqual(1);
     }
 
-    // Следствие того же правила, и ради него оно и заведено: ушедший разговор открывает небо —
-    // значит, месяц поднимается над водой выше. Прежде на телефоне было наоборот: месяц был
-    // прибит к строке состояния и оставался на месте, пока небо под ним росло.
-    //
-    // Стоячее окно тут одно: сбоку разговор отнимает у кадра ширину, а не высоту, и небу
-    // от его ухода не прибавляется ничего. Это и проверяется следом.
-    expect(frames.phoneFull.moonAbove, 'телефон: без разговора месяц не поднялся над водой выше').toBeGreaterThan(
+    // Ради этого правило и заведено: сжатие кадра разговором не возит месяц по стоячим звёздам.
+    // Считай он долей нынешней высоты неба — на телефоне ездил бы на 40px, в стоячем окне на 60,
+    // и глаз ловил бы это раньше всего остального: месяц в сцене — вторая после созвездий
+    // узнаваемая точка.
+    expect(frames.phoneFull.moonAbove, 'телефон: месяц поехал над водой от ухода разговора').toBe(
         frames.phone.moonAbove
     );
-    expect(frames.phoneFull.moonTop, 'телефон: ушедший разговор не опустил месяц ниже кромки кадра').toBeGreaterThan(
+    expect(frames.deskFull.moonAbove, 'сбоку месяц поехал от ухода разговора').toBe(frames.desk.moonAbove);
+
+    // Стоячее над водой — не стоячее в кадре: небо открывается вверх, и верхняя кромка отходит
+    // от месяца. На телефоне тесный кадр срезает его, кадр во весь экран показывает целиком —
+    // это и значит «месяц вышел из-за кромки», а не «месяц переехал».
+    expect(frames.phoneFull.moonTop, 'телефон: ушедший разговор не отпустил месяц от кромки кадра').toBeGreaterThan(
         frames.phone.moonTop
     );
-    expect(frames.deskFull.moonAbove, 'сбоку месяц поехал от ухода разговора').toBe(frames.desk.moonAbove);
+    // Сбоку разговор отнимает у кадра ширину, а не высоту: небу от его ухода не прибавляется ничего.
     expect(frames.deskFull.skyHeight, 'сбоку небо выросло от ухода разговора').toBe(frames.desk.skyHeight);
 });
 
