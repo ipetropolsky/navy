@@ -1,4 +1,4 @@
-import { KeyboardEvent, MouseEvent, PointerEvent, useRef, useState } from 'react';
+import { KeyboardEvent, MouseEvent, PointerEvent, Ref, useRef, useState } from 'react';
 
 import { ChannelError, MemberDraft } from '@/backend';
 import MemberName from '@/components/ships/MemberName';
@@ -73,6 +73,13 @@ interface MemberFormProps {
      */
     open?: boolean;
     onOpen?: () => void;
+    /**
+     * Ссылка на кнопку закрытой формы. Читает её App: коробка разговора для закрытой формы
+     * стоит не долей хода, как для настоящего разговора, а по этой самой кнопке — единственном,
+     * что в ней есть (см. `gateRef` в App). Пока форма открыта, ссылка не у дел: коробка там
+     * во весь размер слоя, и мерить в ней нечего.
+     */
+    gateRef?: Ref<HTMLButtonElement>;
 }
 
 const randomHullNumber = (): string => String(Math.floor(Math.random() * 900) + 100);
@@ -122,6 +129,7 @@ export default function MemberForm({
     onCancel,
     open = true,
     onOpen,
+    gateRef,
 }: MemberFormProps) {
     const takenColors = crew.filter((member) => member.memberId !== myId).map((member) => member.color);
     const [name, setName] = useState(initial?.name ?? '');
@@ -208,7 +216,9 @@ export default function MemberForm({
         return (
             <Panel>
                 <div className={styles.gate}>
-                    <Button onClick={onOpen}>Встать на рейд</Button>
+                    <Button ref={gateRef} onClick={onOpen}>
+                        Встать на рейд
+                    </Button>
                 </div>
             </Panel>
         );

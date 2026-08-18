@@ -83,6 +83,31 @@ test('канал по ссылке встречает закрытой форм�
     await expect(berths(page).first(), 'открытая форма не показала места на рейде').toBeVisible();
 });
 
+/**
+ * GH-52: закрытая форма — одна кнопка посреди плашки, и коробка под неё не обязана стоять
+ * долей хода, как настоящий разговор: смотреть там больше не на что. Коробка встаёт по самой
+ * кнопке (см. `gateHeight` в App), и тянуть её не за что — ни ручки, ни коридора у кромки нет.
+ */
+test('закрытая форма стоит по кнопке, а не долей хода, и её нечем тянуть', async ({ page }) => {
+    await openChannel(page, DEMO);
+    // Под кадром: сбоку разговор и так стоит во весь рост окна, мерить там нечего.
+    await page.setViewportSize({ width: 420, height: 900 });
+
+    const gate = page.getByRole('button', { name: 'Встать на рейд' });
+    await expect(gate).toBeVisible();
+    const gateBox = (await gate.boundingBox())!;
+    const contentBox = (await page.locator('main').boundingBox())!;
+
+    // Коробка выше кнопки — на поле плашки сверху и снизу, — и никак не на треть окна:
+    // до открытой формы (её пришлось бы открыть, чтобы сверить) тут в разы меньше.
+    expect(contentBox.height).toBeGreaterThan(gateBox.height);
+    expect(contentBox.height).toBeLessThan(gateBox.height + 100);
+
+    // Тянуть коробку нечем: ни ручки снизу кадра, ни коридора вдоль кромки разговора.
+    await expect(page.locator('[class*="sheetHandle"]')).toHaveCount(0);
+    await expect(page.locator('[class*="grip_"]')).toHaveCount(0);
+});
+
 test('свой, только что заведённый канал открывается сразу формой', async ({ page }) => {
     // Исключение из закрытого состояния: заводивший канал только что отвечал на вопросы о нём,
     // и спрашивать его же, хочет ли он встать на собственный рейд, незачем.
