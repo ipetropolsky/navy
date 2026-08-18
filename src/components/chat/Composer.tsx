@@ -171,7 +171,7 @@ export default function Composer({
     };
 
     return (
-        <form className={styles.composer} ref={ref} onSubmit={handleSubmit}>
+        <form className={styles.composer} ref={ref} onSubmit={handleSubmit} autoComplete="off">
             {replyTo && (
                 <div className={styles.replyBar}>
                     <ReplyQuote author={replyToAuthor ?? undefined} text={<MessageBody message={replyTo} />} />
