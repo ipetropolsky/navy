@@ -509,6 +509,24 @@ function SeaScene({ members, myId, morseFeeds, ready, berths, onEditShip, onShow
     const overhang = Math.max(0, aside);
     const beyond = Math.max(0, -aside);
 
+    /**
+     * Мерки, закреплённые за идущим кораблём: точка, к которой он идёт, и запас моря, по которому
+     * ему проложен путь. Снимаются они в тот миг, когда корабль тронулся, и держатся до конца хода.
+     *
+     * Без этого ход обрывался на полпути. Обе мерки считаются от кадра, кадр меняется вместе
+     * с раскладкой, и конец пути пересчитывался у корабля прямо под килем. А переход в CSS,
+     * которому посреди хода поменяли конечное значение, начинается заново: с того места, где
+     * корабль сейчас, и на всю длительность целиком. На глаз это выглядит остановкой — корабль
+     * гаснет на входе в новую кривую, стоит долю секунды и трогается снова, — и приходит он
+     * с опозданием на целый ход. Замер: переход на 2.9с, если посреди него сменить окно,
+     * растягивается до 3.8с.
+     *
+     * Стоящих кораблей это не касается: их точку пересчитать можно когда угодно, они переедут
+     * на неё дорожкой (см. .shipLane в стилях) и никакого хода этим не собьют. А идущий доходит
+     * туда, куда шёл, и уже на месте, отпустив мерку, доезжает до новой точки той же дорожкой.
+     */
+    const motionHold = useRef(new Map<string, { left: number; overhang: number }>());
+
     // Где корабли стоят в кадре: разброс внутри своей полосы да расхождение с тесным соседом.
     // Считается по кадру, а не по составу канала: пока уходящий корабль виден, он и давит
     // на соседа — резинка отпускает не тогда, когда сосед снялся с рейда, а когда он ушёл.
@@ -518,7 +536,8 @@ function SeaScene({ members, myId, morseFeeds, ready, berths, onEditShip, onShow
     // Кто из них в пути, расстановке важно знать: на линию, где стоят двое, третьим уходящий
     // уже не считается — см. fleetLefts.
     const lefts = fleetLefts(placed, new Set(leavingById.current.keys()), beyond);
-    const leftOf = (member: Member): number => lefts[member.memberId] ?? restingLeft(member, beyond);
+    const leftOf = (member: Member): number =>
+        motionHold.current.get(member.memberId)?.left ?? lefts[member.memberId] ?? restingLeft(member, beyond);
 
     // Пока вкладка в фоне, браузер не рисует кадров, и анимации в ней стоят. Само событие
     // доходит вовремя — useChannel применяет его сразу, — и разметка обновляется, а движение
@@ -577,6 +596,9 @@ function SeaScene({ members, myId, morseFeeds, ready, berths, onEditShip, onShow
         window.clearTimeout(motionTimers.current.get(id));
         motionTimers.current.delete(id);
         motionStartedAt.current.delete(id);
+        // Ход кончился — и закреплённые за ним мерки кадра отпускаются: дальше корабль стоит
+        // там, где ему велит нынешняя раскладка, и доедет он туда дорожкой.
+        motionHold.current.delete(id);
         enteringIds.current.delete(id);
         // Перешедший по воде на этом и всё: он никуда не уходил и остаётся там же, где встал.
         shiftingById.current.delete(id);
@@ -621,6 +643,13 @@ function SeaScene({ members, myId, morseFeeds, ready, berths, onEditShip, onShow
         movingShips().forEach(({ id, kind, element }) => {
             if (motionStartedAt.current.get(id)?.kind !== kind) {
                 motionStartedAt.current.set(id, { kind, at: now });
+                // Мерки кадра закрепляются за кораблём на весь ход — см. motionHold. Берутся они
+                // с той же отрисовки, на которой корабль тронулся: конец пути уже посчитан,
+                // и остаётся его удержать.
+                const member = placed.find((one) => one.memberId === id);
+                if (member) {
+                    motionHold.current.set(id, { left: leftOf(member), overhang });
+                }
                 const seconds = Number.parseFloat(getComputedStyle(element).transitionDuration) || 0;
                 window.clearTimeout(motionTimers.current.get(id));
                 motionTimers.current.set(
@@ -1007,6 +1036,9 @@ function SeaScene({ members, myId, morseFeeds, ready, berths, onEditShip, onShow
                     // он не стоит — там стоит отметка места, а корабль разбросан внутри полосы
                     // и мог ещё и отойти от тесного соседа.
                     const shown = leftOf(member);
+                    // Запас моря идущему достаётся тот же, каким был на старте: путь до кромки
+                    // пересчитывать под килём нельзя — см. motionHold.
+                    const sea = motionHold.current.get(member.memberId)?.overhang ?? overhang;
                     // Перезаходящему обе стороны уже посчитаны разом, ещё на перемене места,
                     // — см. relocateCourse. Новичку заход достался от бэкенда вместе с местом,
                     // а уход считается здесь: обычно вперёд, но задним ходом, если впереди
@@ -1019,7 +1051,7 @@ function SeaScene({ members, myId, morseFeeds, ready, berths, onEditShip, onShow
                         // задним ходом. Видно это по месту: нос смотрит туда же, откуда пришёл.
                         astern: member.place.facing === member.place.enterFrom,
                     };
-                    const enterPath = pathToEdge(shown, width, enter.side, ENTER_GUARD, overhang);
+                    const enterPath = pathToEdge(shown, width, enter.side, ENTER_GUARD, sea);
                     const leave =
                         relocating?.leave ??
                         leaveCourse(
@@ -1034,7 +1066,7 @@ function SeaScene({ members, myId, morseFeeds, ready, berths, onEditShip, onShow
                                 )
                                 .map((other) => other.place)
                         );
-                    const leavePath = pathToEdge(shown, width, leave.side, LEAVE_GUARD, overhang);
+                    const leavePath = pathToEdge(shown, width, leave.side, LEAVE_GUARD, sea);
                     const enterAstern = enter.astern;
                     const enterSeconds = sailSeconds(enterPath, member.place.slot, member.shipKind, enterAstern);
                     // Задний ход отличается только длительностью: кривая та же, а скорость ниже.
