@@ -34,6 +34,7 @@ import {
     hullCenter,
     isSameBerth,
     otherSide,
+    projectLeft,
     shipWidthPercent,
     slotDepth,
     slotScale,
@@ -476,25 +477,29 @@ function SeaScene({ members, myId, morseFeeds, ready, berths, onEditShip, onShow
     const sceneRef = useRef<HTMLDivElement>(null);
 
     /**
-     * Насколько кромка кадра отстоит от кромки рейда с каждой стороны, % ширины рейда.
-     * Положительное — рейд уже кадра и по бокам от него море; отрицательное — рейд шире кадра
-     * и края его срезаны (см. `--raid-overhang`).
+     * Две мерки кадра, нужные ходу корабля: сколько за рейдом моря и насколько поджат дальний
+     * край рейда.
      *
-     * Разница нужна обеим сторонам дела, и каждой — своим знаком, поэтому здесь она хранится
-     * со знаком, а разбирают её по местам: `overhang` — море, которое кораблю надо пройти
-     * (уходит он не за край рейда, где его прекрасно видно, а за кромку сцены), `beyond` —
-     * вылет, из-за которого нос у кромки пришлось бы срезать, и расстановка его учитывает
-     * (см. `edgesFor` в placement.ts). Оба считаются в долях рейда — в них же меряются
-     * и корабль, и расстановка.
+     * `overhang` — на сколько кадр шире рейда с каждой стороны, % ширины рейда. Уходит корабль
+     * не за край рейда, где его прекрасно видно, а за кромку сцены, и это лишнее море ему
+     * приходится пройти. Отрицательной эта мерка не бывает: передний край рейда шире кадра —
+     * значит проходить нечего, корабль скрывается раньше.
      *
-     * Мерку приходится обновлять: рейд идёт за высотой кадра, кадр — за шторкой и за окном.
-     * Меряем оба блока сразу, потому что меняться они умеют порознь: раздали окно в ширину —
-     * рейд упёрся в свою пропорцию и остался прежним, а моря по бокам прибавилось. Снимается
-     * она по затишью (см. observeSettled): путь кораблю прокладывают в тот миг, когда он
-     * тронулся, и посередине чужого перехода эта мерка всё равно ничего не значит.
+     * `reachFar` — во сколько раз дальний край рейда уже переднего (`--raid-reach-far`).
+     * Стоянку по нему проецирует CSS, а сцене он нужен, чтобы считать путь от настоящего
+     * места корабля в кадре, а не от рейдовой доли: на дальней линии проекция уводит корабль
+     * к середине, и до кромки ему дальше, чем значится в расстановке.
+     *
+     * Обе снимаются с вёрстки, а не считаются: рейд идёт за высотой кадра, кадр — за шторкой
+     * и за окном, а размах едет вместе с шириной окна (`--wide`). Меряем оба блока сразу,
+     * потому что меняться они умеют порознь: раздали окно в ширину — рейд упёрся в свою
+     * пропорцию и остался прежним, а моря по бокам прибавилось. Снимается всё по затишью
+     * (см. observeSettled): путь кораблю прокладывают в тот миг, когда он тронулся,
+     * и посередине чужого перехода эти мерки всё равно ничего не значат.
      */
     const raidRef = useRef<HTMLDivElement>(null);
     const [aside, setAside] = useState(0);
+    const [reachFar, setReachFar] = useState(1);
     useEffect(() => {
         const raid = raidRef.current;
         const scene = sceneRef.current;
@@ -504,12 +509,12 @@ function SeaScene({ members, myId, morseFeeds, ready, berths, onEditShip, onShow
         const measure = (): void => {
             const raidWidth = raid.clientWidth;
             setAside(raidWidth > 0 ? ((scene.clientWidth - raidWidth) / 2 / raidWidth) * 100 : 0);
+            setReachFar(Number.parseFloat(getComputedStyle(scene).getPropertyValue('--raid-reach-far')) || 1);
         };
         measure();
         return observeSettled([raid, scene], measure);
     }, []);
     const overhang = Math.max(0, aside);
-    const beyond = Math.max(0, -aside);
 
     /**
      * Мерки, закреплённые за идущим кораблём: точка, к которой он идёт, и запас моря, по которому
@@ -527,7 +532,7 @@ function SeaScene({ members, myId, morseFeeds, ready, berths, onEditShip, onShow
      * на неё дорожкой (см. .shipLane в стилях) и никакого хода этим не собьют. А идущий доходит
      * туда, куда шёл, и уже на месте, отпустив мерку, доезжает до новой точки той же дорожкой.
      */
-    const motionHold = useRef(new Map<string, { left: number; overhang: number }>());
+    const motionHold = useRef(new Map<string, { left: number; overhang: number; reach: number }>());
 
     // Где корабли стоят в кадре: разброс внутри своей полосы да расхождение с тесным соседом.
     // Считается по кадру, а не по составу канала: пока уходящий корабль виден, он и давит
@@ -537,9 +542,9 @@ function SeaScene({ members, myId, morseFeeds, ready, berths, onEditShip, onShow
     // достаётся его отжатая точка, а не своя: с места он снимается оттуда, где стоял.
     // Кто из них в пути, расстановке важно знать: на линию, где стоят двое, третьим уходящий
     // уже не считается — см. fleetLefts.
-    const lefts = fleetLefts(placed, new Set(leavingById.current.keys()), beyond);
+    const lefts = fleetLefts(placed, new Set(leavingById.current.keys()));
     const leftOf = (member: Member): number =>
-        motionHold.current.get(member.memberId)?.left ?? lefts[member.memberId] ?? restingLeft(member, beyond);
+        motionHold.current.get(member.memberId)?.left ?? lefts[member.memberId] ?? restingLeft(member);
 
     // Пока вкладка в фоне, браузер не рисует кадров, и анимации в ней стоят. Само событие
     // доходит вовремя — useChannel применяет его сразу, — и разметка обновляется, а движение
@@ -650,7 +655,7 @@ function SeaScene({ members, myId, morseFeeds, ready, berths, onEditShip, onShow
                 // и остаётся его удержать.
                 const member = placed.find((one) => one.memberId === id);
                 if (member) {
-                    motionHold.current.set(id, { left: leftOf(member), overhang });
+                    motionHold.current.set(id, { left: leftOf(member), overhang, reach: reachFar });
                 }
                 const seconds = Number.parseFloat(getComputedStyle(element).transitionDuration) || 0;
                 window.clearTimeout(motionTimers.current.get(id));
@@ -1046,8 +1051,14 @@ function SeaScene({ members, myId, morseFeeds, ready, berths, onEditShip, onShow
                     // и мог ещё и отойти от тесного соседа.
                     const shown = leftOf(member);
                     // Запас моря идущему достаётся тот же, каким был на старте: путь до кромки
-                    // пересчитывать под килём нельзя — см. motionHold.
-                    const sea = motionHold.current.get(member.memberId)?.overhang ?? overhang;
+                    // пересчитывать под килём нельзя — см. motionHold. Поджатие дальнего края
+                    // держится за корабль по той же причине: оно едет вместе с шириной окна.
+                    const held = motionHold.current.get(member.memberId);
+                    const sea = held?.overhang ?? overhang;
+                    // Откуда корабль трогается на самом деле: рейдовую долю проекция уводит
+                    // от середины на ближних линиях и к середине на дальних, а идти ему
+                    // до настоящей кромки кадра.
+                    const onScreen = projectLeft(shown, slotShare(member.place.slot + drift), held?.reach ?? reachFar);
                     // Перезаходящему обе стороны уже посчитаны разом, ещё на перемене места,
                     // — см. relocateCourse. Новичку заход достался от бэкенда вместе с местом,
                     // а уход считается здесь: обычно вперёд, но задним ходом, если впереди
@@ -1060,7 +1071,7 @@ function SeaScene({ members, myId, morseFeeds, ready, berths, onEditShip, onShow
                         // задним ходом. Видно это по месту: нос смотрит туда же, откуда пришёл.
                         astern: member.place.facing === member.place.enterFrom,
                     };
-                    const enterPath = pathToEdge(shown, width, enter.side, ENTER_GUARD, sea);
+                    const enterPath = pathToEdge(onScreen, width, enter.side, ENTER_GUARD, sea);
                     const leave =
                         relocating?.leave ??
                         leaveCourse(
@@ -1075,7 +1086,7 @@ function SeaScene({ members, myId, morseFeeds, ready, berths, onEditShip, onShow
                                 )
                                 .map((other) => other.place)
                         );
-                    const leavePath = pathToEdge(shown, width, leave.side, LEAVE_GUARD, sea);
+                    const leavePath = pathToEdge(onScreen, width, leave.side, LEAVE_GUARD, sea);
                     const enterAstern = enter.astern;
                     const enterSeconds = sailSeconds(enterPath, member.place.slot, member.shipKind, enterAstern);
                     // Задний ход отличается только длительностью: кривая та же, а скорость ниже.
@@ -1157,6 +1168,11 @@ function SeaScene({ members, myId, morseFeeds, ready, berths, onEditShip, onShow
                             style={
                                 {
                                     ...laneStyle(member.place, width, shown, drift),
+                                    // Идущему проекция замирает такой, какой была на старте.
+                                    // Не замри — смена окна сдвинула бы точку, к которой корабль
+                                    // наведён, а с ней и перешла бы заново вся дорога: на глаз
+                                    // это остановка на полпути (см. motionHold).
+                                    ...(held ? { '--raid-reach-far': held.reach.toFixed(4) } : {}),
                                     // Ближний перекрывает дальнего: порядок наложения идёт от слота.
                                     // Отход от линии его не меняет — он меньше половины промежутка,
                                     // и порядок линий от него не переворачивается (см. DEPTH_SCATTER).

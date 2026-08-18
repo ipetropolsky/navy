@@ -1005,10 +1005,15 @@ test('берег острова стоит на горизонте, а не от
  * на десктопе корабль рисовался уже отведённого, больше нет — см. «Ширина силуэта в пикселях»
  * в истории шагов.
  *
- * Меряется поле у носа и от ближней кромки — рейда или кадра, смотря какая ближе. Кромки эти
- * не всегда одни и те же: на телефоне рейд шире кадра (RAID_OVERHANG), и поле у носа отмеряет
- * тогда сам кадр, а не рейд. Корма в такой кадр может и не поместиться — ей это не беда, —
- * а нос обязан быть виден целиком: на нём бортовой номер (см. `edgesFor` в placement.ts).
+ * Меряется поле у носа и от кромки рейда — кадр к этому отношения не имеет вовсе. Кромку
+ * кадра корабль на ближней линии телефона переходит нарочно: рейд там шире окна, и выводит
+ * за окно проекция, а не расстановка (см. `--raid-reach` в SeaScene.module.less). Поле же
+ * отмерено рейдом, и рейд один и тот же на любом экране — оттого и доля одна.
+ *
+ * Экранную мерку приходится возвращать на рейд делением на множитель проекции: сам множитель
+ * собирается из доли дальности дорожки и поджатия дальнего края, оба лежат в вёрстке. На
+ * ближней линии он около единицы, но ровно единицей не бывает — корабль отходит от линии
+ * (см. restingDrift), и отход этот на каждом корабле свой.
  *
  * Оттого курс кораблю задаётся нарочно, а не оставляется тем, что предложила форма: одна и та
  * же доля выходит на всех ширинах только у носа. Нос глядит в свою кромку — в ту, к которой
@@ -1019,13 +1024,16 @@ const edgeGap = (page: Page): Promise<number> =>
         const hull = document.querySelector('[class*="shipRock"] img')!;
         const box = hull.getBoundingClientRect();
         const raid = document.querySelector('[class*="raid_"]')!;
-        const frame = raid.parentElement!.getBoundingClientRect();
         const water = raid.getBoundingClientRect();
-        const bow =
-            hull.closest('[data-facing]')!.getAttribute('data-facing') === 'right'
-                ? Math.min(water.right, frame.right) - box.right
-                : box.left - Math.max(water.left, frame.left);
-        return (bow / water.width) * 100;
+        const lane = hull.closest('[class*="shipLane"]')!;
+        const share = Number(getComputedStyle(lane).getPropertyValue('--slot-share'));
+        const reachFar = Number(getComputedStyle(raid).getPropertyValue('--raid-reach-far'));
+        const reach = reachFar + (1 - reachFar) * share;
+        const facing = hull.closest('[data-facing]')!.getAttribute('data-facing');
+        const bow = facing === 'right' ? box.right : box.left;
+        // С экрана — обратно на рейд: проекция разводит точки от середины, туда же и возвращаем.
+        const at = 50 + (((bow - water.left) / water.width) * 100 - 50) / reach;
+        return facing === 'right' ? 100 - at : at;
     });
 
 test('корабль не встаёт бортом на обрез кадра, и поле у него одно на всех экранах', async ({ page }) => {

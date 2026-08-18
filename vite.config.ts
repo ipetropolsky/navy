@@ -10,7 +10,8 @@ import {
     CHAT_OVERLAP,
     COLUMN_WIDTH,
     MOBILE_MAX_WIDTH,
-    RAID_OVERHANG,
+    RAID_SPREAD_FAR,
+    RAID_SPREAD_NEAR,
     SCENE_MIN_HEIGHT,
     SCENE_MIN_SHARE,
     SHEET_HANDLE,
@@ -33,8 +34,10 @@ export default defineConfig({
                     // Долей, а не готовой высотой: в стилях от неё берут долю окна (dvh),
                     // и второе число — те же проценты — разошлось бы с этим при первой правке.
                     `@scene-min-share: ${SCENE_MIN_SHARE.toFixed(4)};\n` +
-                    // Процентами: вылет рейда отмеряется кадром, как и весь рейд.
-                    `@raid-overhang: ${RAID_OVERHANG}%;\n` +
+                    // Числами, а не процентами: из размаха рейда в стилях считается и ширина
+                    // переднего края, и множитель проекции, — а множителю единицы ни к чему.
+                    `@raid-spread-near: ${RAID_SPREAD_NEAR};\n` +
+                    `@raid-spread-far: ${RAID_SPREAD_FAR};\n` +
                     `@chat-overlap: ${CHAT_OVERLAP}px;\n` +
                     `@sheet-width: ${SHEET_WIDTH}px;\n` +
                     `@sheet-inset: ${SHEET_INSET}px;\n` +

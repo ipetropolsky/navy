@@ -111,6 +111,16 @@
     initial-value: 0px;
 }
 
+// Во сколько раз дальний край рейда уже переднего (см. --raid-reach в SeaScene.module.less).
+// Объявлено ради счёта, а не ради перехода: числом его читает и сцена — путь корабля за кромку
+// кадра считается по спроецированной точке, а не по рейдовой. Не объяви — getComputedStyle
+// вернул бы незасчитанный calc со ссылкой на --wide, и разбирать его пришлось бы строкой.
+@property --raid-reach-far {
+    syntax: '<number>';
+    inherits: true;
+    initial-value: 1;
+}
+
 @property --berth-dot-far {
     syntax: '<length>';
     inherits: true;
