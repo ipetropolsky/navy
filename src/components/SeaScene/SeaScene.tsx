@@ -1434,7 +1434,9 @@ function SeaScene({ members, myId, morseFeeds, ready, berths, onEditShip, onShow
                                             // Огонёк качается той же волной, что и корабль, который
                                             // сюда встанет, — и по тем же общим часам.
                                             data-wave={wavePhase(berth).toFixed(2)}
-                                            data-lit={key}
+                                            // Метка из семьи data-berth-*: это огонёк места,
+                                            // а не огонь корабля (у тех своя, data-lit).
+                                            data-berth-light={key}
                                             className={[
                                                 styles.berthDotLight,
                                                 near ? styles.berthDotNear : '',

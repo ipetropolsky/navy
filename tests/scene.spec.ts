@@ -68,12 +68,18 @@ const shipFormSubmit = (page: Page) =>
         .filter({ has: page.getByPlaceholder('Гром') })
         .locator('button[type=submit]');
 
-/** Огни каждого корабля в кадре: чем является каждый и где он стоит по вертикали. */
+/**
+ * Горящие огни каждого корабля в кадре: чем является каждый и где он стоит по вертикали.
+ *
+ * Спрашиваем `data-lit`, а не просто `data-light`: на месте стоят оба набора огней разом —
+ * и ходовые, и якорные, — потому что потушенному надо догореть (см. Ship.module.less).
+ * Горящие из них те, что помечены.
+ */
 const lights = (page: Page, within = '[class*="shipSlot"]'): Promise<{ kind: string; top: number }[][]> =>
     page.evaluate(
         (selector) =>
             [...document.querySelectorAll(selector)].map((slot) =>
-                [...slot.querySelectorAll<HTMLElement>('[data-light]')].map((light) => ({
+                [...slot.querySelectorAll<HTMLElement>('[data-lit="true"]')].map((light) => ({
                     kind: light.dataset.light ?? '',
                     top: light.getBoundingClientRect().top,
                 }))
@@ -532,9 +538,9 @@ test('рейд подсвечивает одно место и только по
     // за 160мс перехода, и ожидающая проверка это переждёт.
     const litMarks = (): Promise<string[]> =>
         page.evaluate(() =>
-            [...document.querySelectorAll<HTMLElement>('[data-lit]')]
+            [...document.querySelectorAll<HTMLElement>('[data-berth-light]')]
                 .filter((light) => light.getBoundingClientRect().width > light.getBoundingClientRect().height * 1.5)
-                .map((light) => light.dataset.lit!)
+                .map((light) => light.dataset.berthLight!)
                 .sort()
         );
 
@@ -676,7 +682,7 @@ test('под своим кораблём лежит стрелка курса, �
     // косинус наклона, и втрое с лишним — это её запас, а не тот, что видно в кадре.
     // Круг от такого далёк на любом месте рейда: у него стороны равны.
     const stretch = (): Promise<number> =>
-        page.locator(`[data-lit="${key}"]`).evaluate((mark) => {
+        page.locator(`[data-berth-light="${key}"]`).evaluate((mark) => {
             const box = getComputedStyle(mark);
             return parseFloat(box.width) / parseFloat(box.height);
         });
@@ -717,7 +723,9 @@ test('повторное нажатие по выбранному месту р�
     // Разбираем строку DOMMatrix'ем, а не регуляркой: у объёмной матрицы само слово «matrix3d»
     // содержит цифру, и первое число, выуженное из строки, — это тройка из названия.
     const mirrored = (): Promise<boolean> =>
-        page.locator(`[data-lit="${key}"]`).evaluate((mark) => new DOMMatrix(getComputedStyle(mark).transform).a < 0);
+        page
+            .locator(`[data-berth-light="${key}"]`)
+            .evaluate((mark) => new DOMMatrix(getComputedStyle(mark).transform).a < 0);
     await expect.poll(mirrored, { message: 'стрелка смотрит не туда, куда курс' }).toBe(false);
 
     // Нажали по тому же месту — курс развернулся, и форма показывает то же самое: и стрелка,
@@ -897,7 +905,7 @@ test('пока выбирают место, призраками становя�
 
     // Огни на призраке горят в полную силу: по ним и видно, что на месте кто-то стоит.
     const lights = await page
-        .locator('[class*="shipRock"] [data-light]')
+        .locator('[class*="shipRock"] [data-lit="true"]')
         .evaluateAll((marks) => marks.map((mark) => getComputedStyle(mark).opacity));
     expect(lights.length, 'огней в кадре не нашлось, проверять нечего').toBeGreaterThan(0);
     expect(
@@ -1361,6 +1369,134 @@ test('переключатель огней меняет огни портрет
         'якорь не вернул якорные огни'
     ).toBe(true);
     await expect.poll(pillAt, { message: 'пилюля не вернулась на прежнее место' }).toBe(wasAt);
+});
+
+/** Накал огня на портрете: сама лампочка и ореол вокруг неё. */
+interface Burn {
+    /** Мс от начала записи. */
+    t: number;
+    /** Накал зажигающегося ходового огня, 0…1. */
+    on: number;
+    /** Накал гаснущего якорного, 0…1. */
+    off: number;
+}
+
+/**
+ * Записать покадрово, как на портрете меняются огни. Заводят запись до нажатия и ждут после:
+ * первые кадры разгорания иначе уходят в дорогу до браузера и обратно.
+ */
+const burnRun = (page: Page, span = 1500): Promise<Burn[]> =>
+    page.evaluate(
+        (ms: number) =>
+            new Promise<Burn[]>((resolve, reject) => {
+                const started = performance.now();
+                const frames: Burn[] = [];
+                const dim = (kind: string): number | null => {
+                    const light = document.querySelector(`[class*="portraitShip"] [data-light="${kind}"]`);
+                    return light ? Number.parseFloat(getComputedStyle(light).opacity) : null;
+                };
+                const tick = () => {
+                    const on = dim('masthead');
+                    const off = dim('anchor-fore');
+                    if (on === null || off === null) {
+                        reject(new Error('огней на портрете не нашлось: мерить накал не на чем'));
+                        return;
+                    }
+                    const t = performance.now() - started;
+                    frames.push({ t, on, off });
+                    if (t < ms) {
+                        requestAnimationFrame(tick);
+                    } else {
+                        resolve(frames);
+                    }
+                };
+                tick();
+            }),
+        span
+    );
+
+/**
+ * Огни хода и якоря не щёлкают, а разгораются и гаснут — как лампы накаливания.
+ *
+ * Мгновенная подмена читалась не сменой огней, а сменой картинки: якорные исчезали, ходовые
+ * возникали на других местах, и что именно поменялось, разобрать было нельзя. Гореть при этом
+ * они обязаны по-разному: нить набирает накал быстро и упирается в предел, а остывает долго —
+ * потому разгорание и короче затухания, и спад идёт не поровну на каждый кадр.
+ *
+ * Меряем на обычной скорости времени: под ускоренной вдесятеро всё движение занимает шесть
+ * сотых секунды, и кадров в нём не остаётся вовсе.
+ */
+test('огни хода и якоря разгораются и гаснут, а не щёлкают', async ({ page }) => {
+    takes(9);
+    await openChannel(page, DEMO, ALBATROS);
+    await openShipCard(page, 'Вымпел');
+    const switcher = page.getByRole('region', { name: 'Корабль' }).getByRole('group', { name: 'Огни' });
+    await page.evaluate(() => document.documentElement.style.setProperty('--time-scale', '1'));
+
+    const burning = burnRun(page);
+    await switcher.getByText('Ход').click();
+    const frames = await burning;
+
+    // Оба огня прошли через промежуточный накал, а не перескочили из нуля в единицу.
+    const between = (value: number) => value > 0.02 && value < 0.98;
+    expect(frames.filter((frame) => between(frame.on)).length, 'ходовой огонь зажёгся щелчком').toBeGreaterThan(2);
+    expect(frames.filter((frame) => between(frame.off)).length, 'якорный огонь погас щелчком').toBeGreaterThan(2);
+
+    // Разгорание короче затухания. Отсчёт у каждого свой — от кадра, в котором огонь тронулся
+    // с места: запись заводится до нажатия, и до него оба стоят.
+    const at = (hit: (frame: Burn) => boolean, what: string): number => {
+        const frame = frames.find(hit);
+        expect(frame, what).toBeDefined();
+        return frame!.t;
+    };
+    const rise = at((frame) => frame.on >= 0.99, 'ходовой огонь не разгорелся до полного накала');
+    const rose = rise - at((frame) => frame.on > 0.01, 'ходовой огонь не тронулся с места');
+    const fall = at((frame) => frame.off <= 0.01, 'якорный огонь не погас до конца');
+    const fell = fall - at((frame) => frame.off < 0.99, 'якорный огонь не тронулся с места');
+    expect(rose, 'огонь разгорается не быстрее, чем гаснет').toBeLessThan(fell);
+
+    // И гаснет он не поровну на каждый кадр: к середине пути накала остаётся меньше трети —
+    // свет обваливается сразу, а последняя четверть тянется дольше всего.
+    const half = frames.find((frame) => frame.t >= fall - fell / 2);
+    expect(half, 'середины затухания в записи не нашлось').toBeDefined();
+    expect(half!.off, 'якорный огонь гаснет ровно, как по линейке').toBeLessThan(0.3);
+
+    // Ореол меняется вместе с накалом, а не только заливка лампочки: у горящего огня он
+    // разошёлся на полный размер, у потушенного ужат к лампочке.
+    const halo = (kind: string) =>
+        page
+            .locator(`[class*="portraitShip"] [data-light="${kind}"]`)
+            .evaluate((light) => new DOMMatrix(getComputedStyle(light, '::after').transform).a);
+    expect(await halo('masthead'), 'ореол горящего огня не разошёлся').toBeCloseTo(1, 1);
+    expect(await halo('anchor-fore'), 'ореол потушенного огня остался прежним').toBeLessThan(0.9);
+});
+
+/**
+ * Кому движение мешает, тому огни просто меняются: гореть они всё равно обязаны — по ним
+ * и видно, стоит корабль или идёт, — а вот разгораться и тлеть уже незачем.
+ */
+test('с отключённым движением огни меняются без разгорания', async ({ page }) => {
+    takes(6);
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await openChannel(page, DEMO, ALBATROS);
+    await openShipCard(page, 'Вымпел');
+    const portrait = '[class*="portraitShip"]';
+
+    const pace = (kind: string) =>
+        page.locator(`${portrait} [data-light="${kind}"]`).evaluate((light) => ({
+            lamp: getComputedStyle(light).transitionDuration,
+            halo: getComputedStyle(light, '::after').transitionDuration,
+        }));
+    expect(await pace('anchor-fore'), 'у огня остался переход').toEqual({ lamp: '0s', halo: '0s' });
+
+    // Переключились — и огни на месте сразу, без промежуточного накала.
+    await page.getByRole('region', { name: 'Корабль' }).getByRole('group', { name: 'Огни' }).getByText('Ход').click();
+    const kinds = (await lights(page, portrait))[0].map((light) => light.kind);
+    expect(
+        kinds.some((kind) => kind.startsWith('masthead')),
+        'ходовые огни не зажглись'
+    ).toBe(true);
+    expect(await pace('masthead'), 'у зажжённого огня появился переход').toEqual({ lamp: '0s', halo: '0s' });
 });
 
 /**
