@@ -265,6 +265,30 @@ describe('старшинство на рейде', () => {
         expect(await ownerOf(backend, channelId)).toBe(third.memberId);
     });
 
+    test('старший называет преемника — старшинство достаётся ему, а не самому давнему', async () => {
+        const backend = createLocalBackend();
+        const channelId = await freshChannel(backend);
+        const { member: first } = await backend.join({ channelId, member: draft('Первый', '101') });
+        const { member: second } = await backend.join({ channelId, member: draft('Второй', '102') });
+        const { member: third } = await backend.join({ channelId, member: draft('Третий', '103') });
+
+        // Дольше всех на рейде — «Второй», но старший называет «Третьего».
+        await backend.leave({ channelId, memberId: first.memberId, nextOwnerId: third.memberId });
+        expect(await ownerOf(backend, channelId)).toBe(third.memberId);
+        expect(await ownerOf(backend, channelId)).not.toBe(second.memberId);
+    });
+
+    test('названный преемник уже ушёл — старшинство достаётся тому, кто дольше всех на рейде', async () => {
+        const backend = createLocalBackend();
+        const channelId = await freshChannel(backend);
+        const { member: first } = await backend.join({ channelId, member: draft('Первый', '101') });
+        const { member: second } = await backend.join({ channelId, member: draft('Второй', '102') });
+
+        // Подсказка устарела (названного уже нет на рейде) — правило по умолчанию не ломается.
+        await backend.leave({ channelId, memberId: first.memberId, nextOwnerId: 'm-nikogo-net' });
+        expect(await ownerOf(backend, channelId)).toBe(second.memberId);
+    });
+
     test('ушли все — старшим станет следующий пришедший', async () => {
         const backend = createLocalBackend();
         const channelId = await freshChannel(backend);

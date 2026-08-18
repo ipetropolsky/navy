@@ -695,9 +695,9 @@ export default function App() {
     // настроек корабля, который через секунду уйдёт, незачем.
     const handleLeave = () => act({ type: 'ask-course' });
 
-    const handleLeaveConfirm = (course: string) => {
+    const handleLeaveConfirm = (course: string, nextOwnerId?: string) => {
         void channelState
-            .leave(course)
+            .leave(course, nextOwnerId)
             .then(() => act({ type: 'left' }))
             // Отказ бэкенда (например, курс длиннее предела) оставляет шторку открытой:
             // набранное не потеряно, и сказанное снекбаром можно исправить на месте.
@@ -1397,7 +1397,12 @@ export default function App() {
                 sideWidth={taken.side}
                 cover
             >
-                <LeaveRaid onConfirm={handleLeaveConfirm} onCancel={() => act({ type: 'close-course' })} />
+                <LeaveRaid
+                    others={members.filter((member) => member.memberId !== myId)}
+                    iAmSenior={Boolean(myId) && myId === channel?.channel.owner?.memberId}
+                    onConfirm={handleLeaveConfirm}
+                    onCancel={() => act({ type: 'close-course' })}
+                />
             </Shade>
         </div>
     );

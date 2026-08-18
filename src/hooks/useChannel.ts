@@ -40,8 +40,12 @@ export interface ChannelController {
     lastLook: Look | null;
     join: (draft: MemberDraft) => Promise<void>;
     updateMe: (draft: MemberDraft) => Promise<void>;
-    /** Сняться с рейда, сказав новый курс: с ним уход и встаёт строчкой в ленте. */
-    leave: (course: string) => Promise<void>;
+    /**
+     * Сняться с рейда, сказав новый курс: с ним уход и встаёт строчкой в ленте.
+     * `nextOwnerId` — кого старший оставляет за себя, если он не последний на рейде
+     * (см. `components/channel/LeaveRaid`).
+     */
+    leave: (course: string, nextOwnerId?: string) => Promise<void>;
     /** Высадить чужой корабль. Доступно только старшему на рейде — это проверяет бэкенд. */
     kick: (memberId: string) => Promise<void>;
     sendMessage: (draft: MessageDraft) => Promise<void>;
@@ -226,9 +230,9 @@ export function useChannel(slug: string | null, memberIdFromUrl: string | null):
     );
 
     const leave = useCallback(
-        async (course: string) => {
+        async (course: string, nextOwnerId?: string) => {
             if (channelId && myId) {
-                await backend.leave({ channelId, memberId: myId, course });
+                await backend.leave({ channelId, memberId: myId, course, nextOwnerId });
                 forgetMemberId(channelId);
                 setMyId(null);
             }

@@ -3,6 +3,7 @@ import { Locator, Page, expect } from '@playwright/test';
 import {
     ALBATROS,
     DEMO,
+    REZVY,
     SAIL_TIMEOUT,
     VYMPEL,
     berths,
@@ -661,6 +662,51 @@ test('не старшему высаживать нечем, а после ег�
     await openChannel(page, DEMO, VYMPEL);
     await shipsButton(page).click();
     await expect(page.getByLabel(/^Высадить/)).toHaveCount(1);
+});
+
+/**
+ * Старший может назвать преемника сам, а не отдавать выбор давности постановки в строй.
+ * Резвый пришёл позже Вымпела, и без выбора старшинство досталось бы Вымпелу (см. проверку выше) —
+ * названный выбор его перебивает.
+ */
+test('старший называет преемника — старшинство достаётся ему, а не самому давнему', async ({ page }) => {
+    await openChannel(page, DEMO, ALBATROS);
+    await expect(ships(page)).toHaveCount(3);
+
+    await leaveRaid(page, 'В Кронштадт, на зимовку', 'Резвый');
+
+    await expect
+        .poll(async () => (await readState(page)).channels['ch-demo'].channel.owner?.memberId, {
+            message: 'старшинство не досталось названному преемнику',
+        })
+        .toBe(REZVY);
+});
+
+/**
+ * Уход последнего участника — тот самый случай, из-за которого рейд не должен пропадать молча.
+ * Выбирать преемника здесь не из кого, поле не показывается вовсе, и уход завершается тем же
+ * возвратом к постановке в строй, что и любой другой, — без ошибки и снекбара.
+ */
+test('уходит последний участник — рейд остаётся, и зайти в него можно снова', async ({ page }) => {
+    await openNewChannel(page, 'odin-na-reyde');
+    await join(page, 'Гром', '101');
+    await expect(ships(page)).toHaveCount(1);
+
+    await leaveRaid(page, 'На отстой');
+    await expect(page.getByRole('button', { name: 'Встать на рейд' })).toBeVisible();
+    // Прежде здесь всплывал снекбар «Канал не найден» — уйти не получалось вовсе.
+    await expect(page.locator('[role="status"]:visible')).toHaveCount(0);
+
+    const emptied = await readState(page);
+    const channel = Object.values(emptied.channels).find((entry) => entry.channel.slug === 'odin-na-reyde');
+    expect(channel, 'канал пропал вместе с последним участником').toBeDefined();
+    expect(channel!.members).toHaveLength(0);
+
+    // Зашли туда, где никого, — встали старшим на рейде: бэкенд решает это сам.
+    await join(page, 'Шторм', '202');
+    const arrived = await readState(page);
+    const reopened = Object.values(arrived.channels).find((entry) => entry.channel.slug === 'odin-na-reyde')!;
+    expect(reopened.channel.owner?.memberId).toBe(reopened.members[0].memberId);
 });
 
 /**

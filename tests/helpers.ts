@@ -109,6 +109,7 @@ export const DEMO = 'demo';
 /** Корабли демо-канала: их id заданы руками в seed.ts, на них можно ссылаться. */
 export const ALBATROS = 'm-albatros';
 export const VYMPEL = 'm-vympel';
+export const REZVY = 'm-rezvy';
 
 /**
  * Сколько идёт проявление сцены, мс: те же 600 мс из стилей, поделённые на скорость времени,
@@ -341,11 +342,18 @@ export const leaveButton = (page: Page) => page.getByRole('button', { name: /^У
  * Курс обязателен: молча с рейда не уходят, и без набранного курса подтверждение недоступно.
  * Дорог к выходу две — эта и кнопка в шапке, пока открыта форма своего корабля, — но шторка
  * прощания у них одна, и проверкам, которым нужен сам уход, а не путь к нему, хватает короткой.
+ *
+ * `successorName` называет, кого оставить старшим, — тычком по его строчке в шторке. Поле это
+ * не обязательное (см. `LeaveRaid`), и большинству проверок оно не нужно вовсе: не назвали —
+ * старшинство решает бэкенд сам, по прежнему правилу.
  */
-export const leaveRaid = async (page: Page, course = 'В Кронштадт'): Promise<void> => {
+export const leaveRaid = async (page: Page, course = 'В Кронштадт', successorName?: string): Promise<void> => {
     await openSheet(page);
     const mark = await before(page);
     await leaveButton(page).click();
+    if (successorName) {
+        await page.getByLabel(`Оставить старшим «${successorName}»`).click();
+    }
     await page.getByLabel('Задайте новый курс').fill(course);
     await page.getByRole('button', { name: 'Курс верный' }).click();
     await awaitWrite(page, mark);

@@ -14,3 +14,44 @@
 .course {
     padding-top: 12px;
 }
+
+// Список кандидатов в преемники — колонкой, как и список кораблей, которым выбор навеян.
+.successors {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+// Строчка кандидата: тот же вид нажимаемой строчки, что и в списке кораблей (MembersList),
+// но здесь она не открывает корабль, а выбирает его — оттого и рамка, а не одна заливка:
+// не выбранный кандидат должен читаться как «можно нажать», а не просто как текст.
+.successor {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-control);
+    color: var(--color-text);
+    cursor: pointer;
+
+    @media (hover: hover) {
+        &:hover {
+            background: var(--color-accent-faint);
+        }
+    }
+
+    &:focus-visible {
+        outline: 2px solid var(--color-accent);
+        outline-offset: -2px;
+    }
+}
+
+// Выбранный кандидат — та же подсветка, что у своей строчки в списке кораблей: одна и та же
+// заливка везде значит «вот этот», и вводить для неё второй цвет незачем.
+.successorActive {
+    .successor();
+
+    border-color: var(--color-accent);
+    background: var(--color-accent-faint);
+}

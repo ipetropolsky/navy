@@ -220,7 +220,10 @@ export function createLocalBackend(): ChannelBackend {
      * Вычеркнуть корабль из канала и передать старшинство, если ушёл сам старший. Общее
      * для ухода и высадки: событий это два разных, а происходит одно и то же.
      *
-     * Старшинство переходит к тому, кто дольше всех на рейде. Оставлять канал без старшего
+     * Преемника называет сам уходящий старший (`nextOwnerId`) — на рейде решает не бэкенд,
+     * а тот, кто его оставляет. Названный должен и правда остаться на рейде: подсказка
+     * могла устареть, пока корабль набирал курс, — тогда, как и без подсказки вовсе,
+     * старшинство переходит к тому, кто дольше всех на рейде. Оставлять канал без старшего
      * нельзя: высаживать тогда некому, и первый же ушедший запирал бы правило навсегда.
      * Ушли все — старшего снова нет, и им станет тот, кто придёт следующим.
      *
@@ -231,7 +234,8 @@ export function createLocalBackend(): ChannelBackend {
     const dropMember = async (
         channelId: string,
         memberId: string,
-        check?: (snapshot: ChannelSnapshot) => void
+        check?: (snapshot: ChannelSnapshot) => void,
+        nextOwnerId?: string
     ): Promise<Member | null> => {
         const { gone, channel } = await mutate(channelId, (snapshot) => {
             check?.(snapshot);
@@ -240,7 +244,8 @@ export function createLocalBackend(): ChannelBackend {
             if (snapshot.channel.owner?.memberId !== memberId) {
                 return { gone: member, channel: null };
             }
-            const senior = [...snapshot.members].sort((one, other) => one.joinedAt - other.joinedAt)[0];
+            const named = snapshot.members.find((item) => item.memberId === nextOwnerId);
+            const senior = named ?? [...snapshot.members].sort((one, other) => one.joinedAt - other.joinedAt)[0];
             snapshot.channel.owner = senior ? { memberId: senior.memberId } : undefined;
             return { gone: member, channel: { ...snapshot.channel } };
         });
@@ -398,7 +403,7 @@ export function createLocalBackend(): ChannelBackend {
             return delay({ member: updated });
         },
 
-        leave: async ({ channelId, memberId, course = '' }) => {
+        leave: async ({ channelId, memberId, course = '', nextOwnerId }) => {
             // Длину курса проверяет бэкенд, а не только шторка ухода: интерфейсов может стать
             // больше одного, и правило должно жить там, где данные, а не там, где поле ввода.
             const newCourse = course.trim();
@@ -407,7 +412,7 @@ export function createLocalBackend(): ChannelBackend {
             }
             // Кем корабль был, узнаём до того, как вычеркнем его: после вычёркивания
             // называть в строчке будет нечего.
-            const gone = await dropMember(channelId, memberId);
+            const gone = await dropMember(channelId, memberId, undefined, nextOwnerId);
             if (gone) {
                 // Курса может и не быть — тогда поля в записи нет вовсе, а не пустая строка:
                 // «не сказал» и «сказал пустое» в хранилище одно и то же, и хранить это
