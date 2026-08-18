@@ -3,8 +3,8 @@ import { useState } from 'react';
 import MemberName from '@/components/ships/MemberName';
 import Pennant from '@/components/ships/Pennant';
 import ShipPortrait, { shipSpecLine } from '@/components/ships/ShipPortrait';
-import Actions from '@/components/ui/Actions';
 import Button from '@/components/ui/Button';
+import Sheet from '@/components/ui/Sheet';
 import { useSnackbar } from '@/components/ui/Snackbar';
 import Switch from '@/components/ui/Switch';
 import { BeaconIcon } from '@/components/ui/icons';
@@ -69,14 +69,13 @@ export default function ShipCard({ member, senior }: ShipCardProps) {
     };
 
     return (
-        <div className={styles.card}>
-            {/* Мотается только тело: полоса кнопок стоит под ним своей строкой (см. ui/Actions). */}
-            <div className={styles.body}>
-                <div className={styles.title}>
+        <Sheet
+            title={
+                <div className={styles.name}>
                     <MemberName name={member.name} color={member.color} large />
                     {/* Отвечает званием по нажатию — так же, как в списке кораблей: вымпел
-                    в карточке ничем не подписан, и спросить, что он значит, человек может
-                    только тычком. */}
+                        в карточке ничем не подписан, и спросить, что он значит, человек может
+                        только тычком. */}
                     {senior && (
                         <button
                             type="button"
@@ -89,9 +88,36 @@ export default function ShipCard({ member, senior }: ShipCardProps) {
                         </button>
                     )}
                 </div>
-                <div className={styles.hullNumber}>Бортовой номер {member.hullNumber}</div>
+            }
+            /* Ряд тот же, что внизу форм, но по содержимому и влево: переключатель рядом
+               тянуть нельзя (см. ui/Actions и ui/Switch). */
+            actions={
+                <>
+                    <Button variant="secondary" onClick={handleSignal}>
+                        <BeaconIcon />
+                        {/* «Подать сигнал» — там, где карточка широка, и просто «Сигнал», где узка.
+                            Меряется карточка, а не окно: она живёт в шторке, а та бывает и в треть
+                            экрана шириной (см. .signalWide). */}
+                        <span className={styles.signalWide}>Подать сигнал</span>
+                        <span className={styles.signalNarrow}>Сигнал</span>
+                    </Button>
+                    {/* Положения, а не действия: кнопка тут показывала обратное нынешнему —
+                        на якоре предлагала ход, — и прочесть по ней, как корабль стоит сейчас,
+                        было нельзя. */}
+                    <Switch
+                        label="Огни"
+                        options={UNDERWAY_OPTIONS}
+                        value={underway ? 'underway' : 'anchored'}
+                        onChange={(mode) => setUnderway(mode === 'underway')}
+                    />
+                </>
+            }
+            ownWidth
+            inset
+        >
+            <div className={styles.hullNumber}>Бортовой номер {member.hullNumber}</div>
 
-                {/* По умолчанию корабль на якоре — он и правда стоит на рейде, и огни у него
+            {/* По умолчанию корабль на якоре — он и правда стоит на рейде, и огни у него
                 якорные. Ходовые зажигает кнопка внизу, и только на портрете.
 
                 Нажатие на сам портрет приближает корабль: силуэт занимает место целиком,
@@ -100,42 +126,19 @@ export default function ShipCard({ member, senior }: ShipCardProps) {
                 (см. shipSizeShare), и катер обязан быть мельче корвета. Разглядеть его при
                 этом всё равно хочется, и приближение — единственное место в приложении,
                 где корабль показан не в масштабе флота, а сам по себе. */}
-                <ShipPortrait
-                    kind={member.shipKind}
-                    hullNumber={member.hullNumber}
-                    facing={member.place.facing}
-                    mode={underway ? 'underway' : 'anchored'}
-                    morseFeed={reply}
-                    ownHeight
-                    zoomed={zoomed}
-                    onZoom={() => setZoomed((was) => !was)}
-                />
+            <ShipPortrait
+                kind={member.shipKind}
+                hullNumber={member.hullNumber}
+                facing={member.place.facing}
+                mode={underway ? 'underway' : 'anchored'}
+                morseFeed={reply}
+                ownHeight
+                zoomed={zoomed}
+                onZoom={() => setZoomed((was) => !was)}
+            />
 
-                <div className={styles.kind}>{SHIP_KIND_LABELS[member.shipKind]}</div>
-                <div className={styles.spec}>{shipSpecLine(member.shipKind)}</div>
-            </div>
-
-            {/* Ряд тот же, что внизу форм, но по содержимому и влево: переключатель рядом
-                тянуть нельзя (см. ui/Actions и ui/Switch). */}
-            <Actions ownWidth>
-                <Button variant="secondary" onClick={handleSignal}>
-                    <BeaconIcon />
-                    {/* «Подать сигнал» — там, где карточка широка, и просто «Сигнал», где узка.
-                        Меряется карточка, а не окно: она живёт в шторке, а та бывает и в треть
-                        экрана шириной (см. .signalWide). */}
-                    <span className={styles.signalWide}>Подать сигнал</span>
-                    <span className={styles.signalNarrow}>Сигнал</span>
-                </Button>
-                {/* Положения, а не действия: кнопка тут показывала обратное нынешнему —
-                    на якоре предлагала ход, — и прочесть по ней, как корабль стоит сейчас,
-                    было нельзя. */}
-                <Switch
-                    label="Огни"
-                    options={UNDERWAY_OPTIONS}
-                    value={underway ? 'underway' : 'anchored'}
-                    onChange={(mode) => setUnderway(mode === 'underway')}
-                />
-            </Actions>
-        </div>
+            <div className={styles.kind}>{SHIP_KIND_LABELS[member.shipKind]}</div>
+            <div className={styles.spec}>{shipSpecLine(member.shipKind)}</div>
+        </Sheet>
     );
 }

@@ -3,7 +3,7 @@ import { CSSProperties, ReactNode } from 'react';
 import { useSheetDrag } from '@/hooks/useSheetDrag';
 import { useSlide } from '@/hooks/useSlide';
 
-import IconButton from '@/components/ui/IconButton';
+import CloseButton from '@/components/ui/CloseButton';
 import { useShadeFloor } from '@/components/ui/ShadeStack';
 
 import styles from './Shade.module.less';
@@ -163,19 +163,7 @@ export default function Shade({
                 <span className={styles.handle} aria-hidden="true" {...handlers}>
                     <span className={styles.grip} />
                 </span>
-                <div className={styles.close}>
-                    <IconButton variant="muted" onClick={onClose} aria-label="Закрыть">
-                        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
-                            <path
-                                d="M7 7l10 10M17 7L7 17"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                                strokeLinecap="round"
-                                fill="none"
-                            />
-                        </svg>
-                    </IconButton>
-                </div>
+                <CloseButton onClick={onClose} />
                 {children}
             </section>
         </>

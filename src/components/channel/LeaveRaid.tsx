@@ -1,9 +1,9 @@
-import { SyntheticEvent, useState } from 'react';
+import { useState } from 'react';
 
-import Actions from '@/components/ui/Actions';
 import Button from '@/components/ui/Button';
 import Field from '@/components/ui/Field';
 import Input from '@/components/ui/Input';
+import Sheet from '@/components/ui/Sheet';
 import { useSnackbar } from '@/components/ui/Snackbar';
 import { LeaveIcon } from '@/components/ui/icons';
 import { MAX_COURSE_LENGTH } from '@/types/channel';
@@ -40,8 +40,7 @@ export default function LeaveRaid({ onConfirm, onCancel }: LeaveRaidProps) {
 
     const wanted = course.trim();
 
-    const handleSubmit = (event: SyntheticEvent) => {
-        event.preventDefault();
+    const handleSubmit = () => {
         if (!wanted) {
             return;
         }
@@ -55,13 +54,28 @@ export default function LeaveRaid({ onConfirm, onCancel }: LeaveRaidProps) {
     };
 
     return (
-        <form className={styles.card} onSubmit={handleSubmit}>
-            {/* Мотается только тело: полоса кнопок стоит под ним своей строкой (см. ui/Actions). */}
-            <div className={styles.body}>
-                <h2 className={styles.title}>Вы уходите с рейда</h2>
-
-                {/* Подписи к полю хватает: «Задайте новый курс» говорит ровно то же, что говорила
-                    бы объясняющая строчка над ним, и повторять её значило бы не доверять человеку. */}
+        <Sheet
+            title={<h2 className={styles.title}>Вы уходите с рейда</h2>}
+            /* Уход стоит первым, потому что за ним сюда и пришли: шторка открылась нажатием
+               на выход, и подтверждение — продолжение того же движения. «Полный назад»
+               рядом второй кнопкой и уводит обратно в список — туда же, куда крестик
+               и нажатие мимо шторки. */
+            actions={
+                <>
+                    <Button type="submit" disabled={!wanted}>
+                        <LeaveIcon />
+                        <span>Курс верный</span>
+                    </Button>
+                    <Button variant="secondary" onClick={onCancel}>
+                        Полный назад
+                    </Button>
+                </>
+            }
+            onSubmit={handleSubmit}
+        >
+            {/* Подписи к полю хватает: «Задайте новый курс» говорит ровно то же, что говорила
+                бы объясняющая строчка над ним, и повторять её значило бы не доверять человеку. */}
+            <div className={styles.course}>
                 <Field label="Задайте новый курс">
                     <Input
                         value={course}
@@ -74,20 +88,6 @@ export default function LeaveRaid({ onConfirm, onCancel }: LeaveRaidProps) {
                     />
                 </Field>
             </div>
-
-            {/* Уход стоит первым, потому что за ним сюда и пришли: шторка открылась нажатием
-                на выход, и подтверждение — продолжение того же движения. «Полный назад»
-                рядом второй кнопкой и уводит обратно в список — туда же, куда крестик
-                и нажатие мимо шторки. */}
-            <Actions>
-                <Button type="submit" disabled={!wanted}>
-                    <LeaveIcon />
-                    <span>Курс верный</span>
-                </Button>
-                <Button variant="secondary" onClick={onCancel}>
-                    Полный назад
-                </Button>
-            </Actions>
-        </form>
+        </Sheet>
     );
 }
