@@ -1,3 +1,5 @@
+// Колонка с полосой кнопок внизу — см. actions.less.
+@import '@/actions.less';
 // Сброс браузерной кнопки: нажимают саму картинку, а не оправу вокруг неё, — см. button.less.
 @import '@/button.less';
 // Прокрутка с местом под полосу — см. scroll.less.
@@ -12,8 +14,8 @@
     // и мерить надо то, во что подпись должна влезть. См. .badge.
     container-type: inline-size;
 
-    display: flex;
-    flex-direction: column;
+    .actions-column();
+
     flex: 1 1 auto;
     min-height: 0;
 }

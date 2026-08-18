@@ -1,3 +1,5 @@
+// Колонка с полосой кнопок внизу — см. actions.less.
+@import '@/actions.less';
 // Прокрутка с местом под полосу — см. scroll.less.
 @import '@/scroll.less';
 
@@ -23,8 +25,8 @@
 
     // Плашка занимает всё, что осталось от сцены: кнопкам внизу нужна нижняя кромка,
     // и она должна быть кромкой панели, а не концом текста.
-    display: flex;
-    flex-direction: column;
+    .actions-column();
+
     flex: 1 1 auto;
     min-height: 0;
 
