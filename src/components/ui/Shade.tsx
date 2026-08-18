@@ -25,6 +25,15 @@ interface ShadeProps {
      */
     onScene?: boolean;
     /**
+     * Ширина боковой панели, px: на столько шторка на сцене отступает справа. Панель тянут
+     * за коридор вдоль её кромки, и шторка рядом обязана двигаться вместе с этой кромкой.
+     *
+     * Числом от хозяина, а не переменной с приложения: мерка эта меняется на каждый шаг
+     * тянущего пальца, и наследуемой она делала бы недействительным всё дерево разом
+     * (см. @property в index.less). Под кадром панели нет вовсе, и там это ноль.
+     */
+    sideWidth?: number;
+    /**
      * Лечь поверх уже открытых шторок, а не закрывать их за собой.
      *
      * Так открывают продолжение: карточку корабля из строчки списка. Закрыв её, человек ждёт
@@ -74,7 +83,15 @@ interface ShadeProps {
  * Сам свайп — общий (см. hooks/useSheetDrag): так же тянут и форму своего корабля, которую
  * приспускают, чтобы разглядеть рейд под ней.
  */
-export default function Shade({ open, onClose, label, onScene = false, cover = false, children }: ShadeProps) {
+export default function Shade({
+    open,
+    onClose,
+    label,
+    onScene = false,
+    sideWidth = 0,
+    cover = false,
+    children,
+}: ShadeProps) {
     const { mounted, ref } = useSlide(open);
     // Этаж в стопке: открытая позже лежит выше открытой раньше, а не так, как их написали
     // в разметке. Считает его ShadeStack, он же и закрывает нижние, если эта не `cover`.
@@ -130,6 +147,10 @@ export default function Shade({ open, onClose, label, onScene = false, cover = f
                 style={
                     {
                         '--shade-floor': floor,
+                        // Ширина панели, от которой шторка на сцене отступает. Стоит она
+                        // на самой шторке, а не наследуется с приложения: меняется мерка
+                        // на каждый шаг тянущего кромку пальца.
+                        '--side-width': `${sideWidth}px`,
                         ...(held === null ? {} : { transform: `translateY(${held}px)` }),
                     } as CSSProperties
                 }

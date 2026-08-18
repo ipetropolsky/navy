@@ -752,6 +752,28 @@ export default function App() {
     // а ровно под приезжающую коробку, и щели между ними не бывает ни на одном кадре.
     const chatNow = atEdge ? 0 : size;
 
+    // Раздача мерок. Наборов два, и каждый идёт ровно тем, кто его читает.
+    //
+    // Мерки ненаследуемые (см. @property в index.less): поставленные на приложение, они
+    // на каждый шаг тянущего пальца делали бы недействительными стили всему дереву — полусотне
+    // кораблей, сотне пузырей ленты, — притом что читают их считанные узлы. Ненаследуемая
+    // мерка останавливается на том узле, которому её дали, и стоит замер это разницы в полсотни
+    // раз (2.4 мс против 0.05 на телефоне).
+    //
+    // Отсюда и раздача поимённо: список читающих виден в одном месте — здесь.
+
+    // Сама коробка: её размер и уход за кромку. Читают их коробка разговора и слои в ней —
+    // форма своего корабля и список кораблей: своей коробки у них нет, они стоят в этой же.
+    const boxSize = {
+        '--chat-box': `${chatBox}px`,
+        '--chat-off': `${chatOff}px`,
+    } as CSSProperties;
+
+    // Сколько коробки видно. Читают его те, кто стоит по её видимой кромке: кадр со сценой
+    // (из этого числа считается высота сцены и её правая кромка сбоку), полоса шапки над кадром
+    // и коридор для свайпа вдоль самой кромки.
+    const boxEdge = { '--chat-to': `${chatNow}px` } as CSSProperties;
+
     /**
      * Потяг за коридор вдоль кромки разговора — один на обе раскладки.
      *
@@ -879,27 +901,12 @@ export default function App() {
             ]
                 .filter(Boolean)
                 .join(' ')}
-            // Мерки коробки внизу экрана в вертикальной раскладке и справа в горизонтальной.
-            // Высота это или ширина, говорит раскладка, а не число. Коробка одна на всё, что
-            // в ней стоит: и на разговор, и на выехавший поверх него слой.
-            //
-            // --chat-box — коробка разговора: в каком размере она стоит. Свёрнутый честно
-            //   садится в свой пол — ручку с плашкой ввода; убранная кнопкой панель размера
-            //   не теряет и уезжает за кромку целиком.
-            // --chat-off — насколько коробка разговора за эту кромку ушла. У стоящего разговора
-            //   ноль, у убранной панели — вся она.
-            // --chat-to — сколько панели на экране. По нему ходит коридор для свайпа — он
-            //   держится видимой кромки, — и из него же считается всё, что поджимает кадр:
-            //   высота сцены, её правая кромка сбоку, ширина шторок на сцене.
-            style={
-                {
-                    '--chat-box': `${chatBox}px`,
-                    '--chat-off': `${chatOff}px`,
-                    '--chat-to': `${chatNow}px`,
-                } as CSSProperties
-            }
         >
-            <header className={styles.header}>
+            {/* Мерки коробки внизу экрана в вертикальной раскладке и справа в горизонтальной.
+                Высота это или ширина, говорит раскладка, а не число. Коробка одна на всё, что
+                в ней стоит: и на разговор, и на выехавший поверх него слой, — и потому мерки
+                у них общие, просто розданы поимённо (см. boxSize и boxEdge выше). */}
+            <header className={styles.header} style={boxEdge}>
                 <div className={styles.scene} ref={sceneRef}>
                     <SeaScene
                         members={members}
@@ -926,7 +933,7 @@ export default function App() {
                         berths={berths}
                     />
                 </div>
-                <div className={styles.headerBar}>
+                <div className={styles.headerBar} style={boxEdge}>
                     <div className={styles.headerInfo}>
                         {/* Название канала — это и кнопка «кто на связи»: по нажатию открывается
                             список кораблей. Значок стоит в конце названия, а не отдельной кнопкой
@@ -1048,6 +1055,7 @@ export default function App() {
                 className={[styles.content, atSide ? styles.contentSide : '', tight ? styles.contentTight : '']
                     .filter(Boolean)
                     .join(' ')}
+                style={boxSize}
                 inert={!shown}
             >
                 {/* Ручка для хвата — единственное место, за которое эту коробку тянут. Движение
@@ -1078,6 +1086,7 @@ export default function App() {
             {shown && (
                 <div
                     className={[styles.grip, atSide ? styles.gripSide : styles.gripUnder].join(' ')}
+                    style={boxEdge}
                     {...gripHandlers}
                     onKeyDown={handleGripKey}
                     role="separator"
@@ -1111,6 +1120,7 @@ export default function App() {
                     className={[styles.list, listOpen ? '' : styles.listLeaving, broughtPanel ? styles.layerStill : '']
                         .filter(Boolean)
                         .join(' ')}
+                    style={boxSize}
                     aria-label="Корабли на связи"
                     // Глохнет он не только за кромкой, но и под накрывшей его формой: видно
                     // из-под неё нечего, а фокус по Tab уходил бы в невидимое.
@@ -1173,6 +1183,7 @@ export default function App() {
                     className={[styles.form, editing ? '' : styles.formLeaving, broughtPanel ? styles.layerStill : '']
                         .filter(Boolean)
                         .join(' ')}
+                    style={boxSize}
                     inert={!shown}
                 >
                     <MemberForm
@@ -1197,7 +1208,14 @@ export default function App() {
 
                 Ложится она поверх (cover): открытая из строчки списка, она его продолжает,
                 и закрыв её, человек ждёт увидеть список, а не пустой рейд. */}
-            <Shade open={Boolean(shownMember)} onClose={() => setShownId(null)} label="Корабль" onScene={atSide} cover>
+            <Shade
+                open={Boolean(shownMember)}
+                onClose={() => setShownId(null)}
+                label="Корабль"
+                onScene={atSide}
+                sideWidth={atSide ? chatNow : 0}
+                cover
+            >
                 {shownCard && (
                     <ShipCard
                         key={shownCard.memberId}
@@ -1216,6 +1234,7 @@ export default function App() {
                 onClose={() => setLeaving(false)}
                 label="Вы уходите с рейда"
                 onScene={atSide}
+                sideWidth={atSide ? chatNow : 0}
                 cover
             >
                 <LeaveRaid onConfirm={handleLeaveConfirm} onCancel={() => setLeaving(false)} />
