@@ -56,6 +56,20 @@ export function BeaconIcon({ size = 18 }: IconProps) {
 }
 
 /**
+ * Крестик: закрыть выехавшее поверх. Стоит на шторке и на слое в блоке разговора — рисует его
+ * `ui/CloseButton`, и больше нигде он не нужен.
+ *
+ * Ростом он крупнее прочих значков: крестик сидит в кнопке шапки, а не в кнопке с подписью.
+ */
+export function CloseIcon({ size = 22 }: IconProps) {
+    return (
+        <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden="true">
+            <path d="M7 7l10 10M17 7L7 17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" fill="none" />
+        </svg>
+    );
+}
+
+/**
  * Стрелка из двери: уйти с рейда. Стоит на самой кнопке выхода, на её подтверждении
  * («Курс верный») и в шапке, пока открыта форма своего корабля.
  */
