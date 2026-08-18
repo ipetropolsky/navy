@@ -29,12 +29,11 @@ import Panel from '@/components/ui/Panel';
 import Shade from '@/components/ui/Shade';
 import { useSnackbar } from '@/components/ui/Snackbar';
 import { LeaveIcon } from '@/components/ui/icons';
-import { FEED_MIN, GATE_PAD, SHEET_HANDLE } from '@/config/layout';
+import { GATE_PAD, SHEET_HANDLE } from '@/config/layout';
 import { paced } from '@/config/time';
 import { HAIL_SIGNAL, morseDuration } from '@/hooks/morse';
 import { useChannel } from '@/hooks/useChannel';
 import { Layout, chatMagnets, useLayout } from '@/hooks/useLayout';
-import { useSettled } from '@/hooks/useSettled';
 import { useSlide } from '@/hooks/useSlide';
 import { useSwipe } from '@/hooks/useSwipe';
 import { useUnread } from '@/hooks/useUnread';
@@ -206,18 +205,6 @@ export default function App() {
      * пачкой в тот миг, когда он повернёт телефон.
      */
     const unread = useUnread(channel, myId, shown);
-
-    // Ленте не досталось и одной реплики: разговор либо стоит на полу, либо его ведут от пола
-    // вверх и он ещё не дорос. Выглядит он в этом случае одинаково — ручка и плашка ввода, —
-    // а ленты нет вовсе, см. FEED_MIN в config/layout и .contentTight в стилях. Сбоку такого
-    // не бывает: там разговор либо во всю высоту окна, либо убран целиком.
-    //
-    // Решение это про коробку, какой она станет, а рисуем по тому, какая она сейчас: коробка
-    // едет к своему размеру полсекунды, и лента, погашенная в начале дороги, пропадала бы
-    // из ещё полной коробки. `useSettled` придерживает до конца движения только исчезновение
-    // ленты; возвращается она первым же кадром — место под неё в едущей коробке уже есть.
-    const contentRef = useRef<HTMLElement>(null);
-    const tight = useSettled(!atSide && size - layout.floor < FEED_MIN, contentRef);
 
     const sceneRef = useRef<HTMLDivElement>(null);
 
@@ -1222,10 +1209,7 @@ export default function App() {
                 ни чтению вслух. Свёрнутый до пола разговор, наоборот, остаётся живым: плашка
                 ввода на экране, и писать в неё можно, ничего не разворачивая. */}
             <main
-                ref={contentRef}
-                className={[styles.content, atSide ? styles.contentSide : '', tight ? styles.contentTight : '']
-                    .filter(Boolean)
-                    .join(' ')}
+                className={[styles.content, atSide ? styles.contentSide : ''].filter(Boolean).join(' ')}
                 style={boxSize}
                 inert={!shown}
             >
