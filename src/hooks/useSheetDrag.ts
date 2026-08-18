@@ -171,6 +171,7 @@ export const useSheetDrag = ({ open, onClose, magnet }: SheetDragSettings): Shee
             to: drag.run - drag.shift,
             velocity: drag.fling.speed(event.timeStamp),
             points: drag.points,
+            pointsOnly: magnet?.pointsOnly,
         });
         // Закрытой коробки на месте не бывает: съехавшую в ноль убирают совсем, и уезжает
         // она обычным уходом — сдвиг с неё поэтому снимаем, иначе он спорил бы с ним.
