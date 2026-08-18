@@ -914,14 +914,15 @@ test('пока выбирают место, призраками становя�
     ).toBe(true);
 
     // Высветляется корпус, а не тень: тень тёмная, и то же осветление вывернуло бы её
-    // в светлое пятно под кораблём. Свой размывающий фильтр у тени есть всегда, поэтому
-    // сравнивать не с «none», а с отсутствием осветления.
+    // в светлое пятно под кораблём. Свой фильтр (brightness+blur) у тени есть всегда, поэтому
+    // сравниваем не с «none», а с отсутствием именно призрачного фильтра — GHOST добавляет
+    // contrast и saturate, которых больше нигде в проекте нет.
     const shadows = await page
         .locator('[class*="shipShadow"]')
         .evaluateAll((marks) => marks.map((mark) => getComputedStyle(mark).filter));
     expect(shadows.length, 'теней в кадре не нашлось, проверять нечего').toBeGreaterThan(0);
     expect(
-        shadows.every((filter) => !filter.includes('brightness')),
+        shadows.every((filter) => !filter.includes('contrast')),
         'тень на воде высветлилась вместе с кораблём'
     ).toBe(true);
 
@@ -1065,8 +1066,11 @@ const watchLamps = (page: Page, within = '[class*="shipLane"]'): Promise<void> =
         window.__flashes = {};
         for (const lane of document.querySelectorAll(selector)) {
             const lamp = lane.querySelector('[class*="lamp"]')!;
-            // Корабли различаем по подписи спрайта: своего имени у дорожки нет.
-            const name = lane.querySelector('img')?.alt ?? '?';
+            // Корабли различаем по подписи спрайта: своего имени у дорожки нет. Спрайтов
+            // на дорожке теперь два — сам корпус и его тень (см. GH-60), а у тени подпись
+            // пустая и нарочно скрыта от читалки экрана (alt=""), — поэтому берём картинку
+            // с непустой подписью, а не первую попавшуюся.
+            const name = lane.querySelector('img[alt]:not([alt=""])')?.getAttribute('alt') ?? '?';
             window.__flashes[name] = 0;
             new MutationObserver(() => {
                 if (lamp.className.includes('lampOn')) {
@@ -1938,16 +1942,18 @@ test('корабль качается сам и не замирает', async ({
 
     // Полцикла волны: WAVE_SECONDS в компоненте сцены — 10 секунд.
     const swing = await page.evaluate(async () => {
-        const rock = document.querySelector('[class*="shipLane"] [class*="shipRock"]')!;
+        // Подъём и спуск (--heave, translate) держит .shipWave — общий предок корпуса и тени,
+        // качка которого разведена с наклоном (.shipRock) на отдельные блоки.
+        const wave = document.querySelector('[class*="shipLane"] [class*="shipWave"]')!;
         // Размах приходит инлайном от компонента: он свой у каждой дальности — дальние
         // качаются меньше ближних.
-        const heave = parseFloat(getComputedStyle(rock).getPropertyValue('--heave'));
+        const heave = parseFloat(getComputedStyle(wave).getPropertyValue('--heave'));
         const seen: number[] = [];
         await new Promise<void>((resolve) => {
             const started = performance.now();
             const tick = (): void => {
                 // Вторым числом в translate идёт подъём: по горизонтали качка корабль не носит.
-                seen.push(parseFloat(getComputedStyle(rock).translate.split(' ')[1] ?? '0'));
+                seen.push(parseFloat(getComputedStyle(wave).translate.split(' ')[1] ?? '0'));
                 if (performance.now() - started < 5000) {
                     requestAnimationFrame(tick);
                 } else {
