@@ -7,6 +7,7 @@ import {
     berths,
     bubbles,
     clickShip,
+    closeSheet,
     join,
     leaveButton,
     leaveRaid,
@@ -349,9 +350,12 @@ test('строчка о корабле стоит по его сторону л�
     await expect(bubbles(page).last()).toContainText('Курс норд');
 
     // Меняем один бортовой номер: тип и позывной остаются прежними.
-    await shipsButton(page).click();
+    await openSheet(page);
     await page.getByRole('button', { name: 'Настроить корабль' }).click();
     await join(page, 'Альбатрос', '512');
+    // И убираем список: форма ушла, а он под ней остался — так и задумано, — но лежит он
+    // слоем поверх ленты и нажатия по строчке забирал бы себе.
+    await closeSheet(page);
 
     const note = systemLines(page).last();
     // Сказано только, что сменилось: новый номер стоит на аватарке рядом, старый — выше
