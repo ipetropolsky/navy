@@ -133,9 +133,15 @@ export const chatMode = (view: WindowShape): LayoutMode =>
  * Сбоку это вся ширина окна. Под кадром — высота окна без полоски, на которую смотрит шапка:
  * «во весь рост» у разговора значит «до низа шапки», а не «до верха окна», — кнопками из шапки
  * он и убирается. От этого же числа считаются и доли: треть — это треть того, что под шапкой.
+ *
+ * Полоска (`topGap`) приходит снаружи, а не берётся числом здесь: шапка текучая, растёт
+ * с шириной окна вместе с кеглем и кнопками (см. `.fluid()` в App.module.less), и без замера
+ * постоянное число разошлось бы с ней при первой же смене ширины (см. GH-58). Умолчание —
+ * `SHEET_TOP_GAP`, тот же запасной рост шапки, каким открывается первый кадр до того, как
+ * App успеет её замерить.
  */
-export const chatRoom = (mode: LayoutMode, view: WindowShape): number =>
-    mode === 'side' ? view.width : Math.max(view.height - SHEET_TOP_GAP, 0);
+export const chatRoom = (mode: LayoutMode, view: WindowShape, topGap = SHEET_TOP_GAP): number =>
+    mode === 'side' ? view.width : Math.max(view.height - topGap, 0);
 
 /**
  * Пол раскладки, px: самое малое, чем разговор стоит на экране.
@@ -156,10 +162,15 @@ const chatFloor = (mode: LayoutMode, floor: number): number => (mode === 'side' 
  * лента. Сверху — мерка кадра: рейд про ширину, и отдавать ему меньше 600px незачем. В тесном
  * окне потолок оказывается ниже пола, и пол сильнее: разговор уже своего минимума не бывает.
  */
-export const chatLimits = (mode: LayoutMode, view: WindowShape, floor = 0): { min: number; max: number } =>
+export const chatLimits = (
+    mode: LayoutMode,
+    view: WindowShape,
+    floor = 0,
+    topGap = SHEET_TOP_GAP
+): { min: number; max: number } =>
     mode === 'side'
         ? { min: SIDE_MIN_WIDTH, max: Math.max(SIDE_MIN_WIDTH, view.width - SCENE_MIN_WIDTH) }
-        : { min: chatFloor(mode, floor), max: chatRoom('under', view) };
+        : { min: chatFloor(mode, floor), max: chatRoom('under', view, topGap) };
 
 /**
  * Размер, зажатый пределами раскладки, px.
@@ -248,10 +259,10 @@ export const defaultWish = (): LayoutWish => ({
  *
  * Функция чистая: ни окна, ни хранилища она не знает — их знает хук ниже. Так её и проверяют.
  */
-export const allowedLayout = (wish: LayoutWish, view: WindowShape, floor = 0): Layout => {
+export const allowedLayout = (wish: LayoutWish, view: WindowShape, floor = 0, topGap = SHEET_TOP_GAP): Layout => {
     const mode = chatMode(view);
-    const full = chatRoom(mode, view);
-    const { min, max } = chatLimits(mode, view, floor);
+    const full = chatRoom(mode, view, topGap);
+    const { min, max } = chatLimits(mode, view, floor, topGap);
     const ground = chatFloor(mode, floor);
     const { share } = wish[mode];
     // Округляем до пикселя: дробный размер разговора даёт дробный кадр, а кадр рисует корабли
@@ -445,8 +456,12 @@ export interface LayoutControls {
  * `floor` — пол вертикальной раскладки в пикселях: ручка с полем ввода под ней. Меряет его
  * App по живой разметке и передаёт сюда: высота поля ввода зависит и от плашки ответа над ним,
  * и от выреза экрана снизу, и постоянным числом её не запишешь.
+ *
+ * `topGap` — та же живая мерка, только про полоску под шапку сверху (см. `chatRoom`). Умолчание
+ * то же самое, каким открывается первый кадр: App передаёт настоящую высоту шапки, как только
+ * успевает её замерить.
  */
-export function useLayout(floor = 0): LayoutControls {
+export function useLayout(floor = 0, topGap = SHEET_TOP_GAP): LayoutControls {
     const view = useWindowShape();
     const [wish, setWish] = useState(readWish);
     const mode = chatMode(view);
@@ -482,14 +497,14 @@ export function useLayout(floor = 0): LayoutControls {
     // возвращался куда-нибудь в сотню пикселей, мимо которой палец пролетел на полном ходу.
     const resize = useCallback<LayoutControls['resize']>(
         (size, remember = false) => {
-            const full = chatRoom(mode, view);
-            const { min, max } = chatLimits(mode, view, floor);
+            const full = chatRoom(mode, view, topGap);
+            const { min, max } = chatLimits(mode, view, floor, topGap);
             const ground = chatFloor(mode, floor);
             const fitted = full <= 0 ? 0 : fitSize(size, ground, min, max);
             const share = full <= 0 ? 0 : fitted / full;
             apply((was) => ({ share, back: remember && isRealSize(fitted, ground) ? share : was.back }), remember);
         },
-        [apply, floor, mode, view]
+        [apply, floor, mode, view, topGap]
     );
 
     // Записывается сам выбор, а не то, во что его урезало окно: раздастся окно — разговор
@@ -501,12 +516,12 @@ export function useLayout(floor = 0): LayoutControls {
         () =>
             setWish((was) => {
                 const here = was[mode];
-                const real = isRealSize(here.share * chatRoom(mode, view), chatFloor(mode, floor));
+                const real = isRealSize(here.share * chatRoom(mode, view, topGap), chatFloor(mode, floor));
                 const next = { ...was, [mode]: { ...here, back: real ? here.share : here.back } };
                 writeWish(next);
                 return next;
             }),
-        [floor, mode, view]
+        [floor, mode, view, topGap]
     );
 
     // Убран разговор или нет — общее на обе раскладки, в отличие от размера. Человек убирает
@@ -529,5 +544,5 @@ export function useLayout(floor = 0): LayoutControls {
     const hide = useCallback(() => both((was) => ({ ...was, share: 0 })), [both]);
     const show = useCallback(() => both((was) => ({ ...was, share: was.back })), [both]);
 
-    return { layout: allowedLayout(wish, view, floor), resize, keep, hide, show };
+    return { layout: allowedLayout(wish, view, floor, topGap), resize, keep, hide, show };
 }

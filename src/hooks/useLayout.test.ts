@@ -69,6 +69,12 @@ describe('chatRoom', () => {
     it('в окне ниже шапки ход не уходит в минус', () => {
         expect(chatRoom('under', view(390, 40))).toBe(0);
     });
+
+    it('полоска под шапку приходит снаружи, а не постоянным числом', () => {
+        // Настоящая высота шапки текучая (см. GH-58) — вызывающий передаёт замеренное число,
+        // и от умолчания оно ничем не хуже: считается ровно так же.
+        expect(chatRoom('under', view(390, 844), 90)).toBe(844 - 90);
+    });
 });
 
 describe('chatLimits', () => {
@@ -116,6 +122,13 @@ describe('allowedLayout', () => {
         const layout = allowedLayout(wish({ under: { share: 1 / 2, back: 1 / 2 } }), view(390, 864));
         expect(layout.mode).toBe('under');
         expect(layout.size).toBe((864 - SHEET_TOP_GAP) / 2);
+    });
+
+    it('замеренная высота шапки подменяет запасное число целиком', () => {
+        // Широкое окно — шапка выше умолчания (см. GH-58): переданное число, а не SHEET_TOP_GAP,
+        // и должно определять, сколько места разговору осталось под шапкой.
+        const layout = allowedLayout(wish({ under: { share: 1 / 2, back: 1 / 2 } }), view(390, 864), 0, 90);
+        expect(layout.size).toBe((864 - 90) / 2);
     });
 
     it('сбоку не даёт разговору стать уже своего минимума', () => {
