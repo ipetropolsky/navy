@@ -1009,6 +1009,10 @@ test('берег острова стоит на горизонте, а не от
  * не всегда одни и те же: на телефоне рейд шире кадра (RAID_OVERHANG), и поле у носа отмеряет
  * тогда сам кадр, а не рейд. Корма в такой кадр может и не поместиться — ей это не беда, —
  * а нос обязан быть виден целиком: на нём бортовой номер (см. `edgesFor` в placement.ts).
+ *
+ * Оттого курс кораблю задаётся нарочно, а не оставляется тем, что предложила форма: одна и та
+ * же доля выходит на всех ширинах только у носа. Нос глядит в свою кромку — в ту, к которой
+ * корабль и прижат коридором.
  */
 const edgeGap = (page: Page): Promise<number> =>
     page.evaluate(() => {
@@ -1027,6 +1031,10 @@ const edgeGap = (page: Page): Promise<number> =>
 test('корабль не встаёт бортом на обрез кадра, и поле у него одно на всех экранах', async ({ page }) => {
     takes(5);
     await openNewChannel(page, 'polya');
+    // Курс — первым делом: им развёрнуты силуэты в форме, и выбор корабля идёт уже по нему.
+    // Влево — это к той же кромке, у которой корабль встанет левым коридором: поле меряется
+    // у носа, и нос должен смотреть в неё.
+    await page.getByLabel('Курс влево').click();
     // Самый крупный корабль справочника стоит в списке первым: проекты идут по убыванию длины.
     await page.locator('[role="button"]:has([class*="portraitShip"])').first().click();
     await page.locator('[data-berth="9-left"]').click();
@@ -4348,36 +4356,77 @@ test('лента возвращается в начале дороги, а не 
     // Бросок вверх на палец: отпускают его ниже порога — ленты в этот миг нет и быть не должно, —
     // а усилия хватает, чтобы разговор поехал к следующей точке, где место под ленту есть.
     const { x, y } = await gripSpot(page);
-    await page.mouse.move(x, y);
-    await page.mouse.down();
-    await [1, 2, 3].reduce(
-        (before, step) =>
-            before.then(() => page.waitForTimeout(10)).then(() => page.mouse.move(x, y - (30 * step) / 3)),
-        Promise.resolve()
-    );
-    await page.mouse.up();
+    const fling = async (): Promise<void> => {
+        await page.mouse.move(x, y);
+        await page.mouse.down();
+        await [1, 2, 3].reduce(
+            (before, step) =>
+                before.then(() => page.waitForTimeout(10)).then(() => page.mouse.move(x, y - (30 * step) / 3)),
+            Promise.resolve()
+        );
+        await page.mouse.up();
+    };
 
-    // Ловим дорогу на ходу и отматываем к её началу: дальше меряется тот самый первый кадр.
-    await expect
-        .poll(
-            async () =>
-                page.evaluate(() => {
-                    const moving = document
-                        .querySelector('main')!
-                        .getAnimations()
-                        .filter((animation) => animation.playState === 'running');
-                    moving.forEach((animation) => {
-                        animation.pause();
-                        animation.currentTime = 0;
-                    });
-                    return moving.length;
-                }),
-            { intervals: [10], message: 'разговор не поехал к точке: дороги, на которой мерить, не случилось' }
-        )
-        .toBeGreaterThan(0);
+    // Ловим дорогу на ходу: останавливаем и смотрим оба её конца — куда ведёт и откуда начата.
+    // Конец нужен затем, что бросок долетает не всегда: усилие меряется временем между кадрами
+    // указателя, а под параллельными воркерами кадры расходятся, и разговор возвращается на пол.
+    // Дорога на пол выглядит так же, ленты в её конце нет и быть не должно — мерить на ней
+    // нечего. Начало же — тот самый первый кадр, ради которого всё и затевалось.
+    const road = { started: 0, target: 0 };
+    const caught = (): Promise<{ started: number; target: number } | null> =>
+        page.evaluate(() => {
+            const box = document.querySelector('main')!;
+            const moving = box.getAnimations().filter((animation) => animation.playState === 'running');
+            if (!moving.length) {
+                return null;
+            }
+            const at = (time: number): number => {
+                moving.forEach((animation) => {
+                    animation.pause();
+                    animation.currentTime = time;
+                });
+                return box.getBoundingClientRect().height;
+            };
+            const ends = Math.max(
+                ...moving.map((animation) => Number(animation.effect?.getComputedTiming().endTime ?? 0))
+            );
+            const target = at(ends);
+            return { target, started: at(0) };
+        });
 
-    const started = await chatHeight(page);
-    expect(started, 'коробка уже доехала: судить по ней о начале дороги нельзя').toBeLessThan(floor + FEED_MIN);
+    const flown = async (): Promise<boolean> => {
+        await fling();
+        await expect
+            .poll(
+                async () => {
+                    const now = await caught();
+                    if (now) {
+                        Object.assign(road, now);
+                    }
+                    return Boolean(now);
+                },
+                { intervals: [10], message: 'разговор не поехал к точке: дороги, на которой мерить, не случилось' }
+            )
+            .toBe(true);
+        return road.target >= floor + FEED_MIN;
+    };
+
+    // Не долетевший бросок оставил разговор на пути к полу и с остановленной дорогой: ведём его
+    // на пол сами, оттуда и бросаем заново.
+    const flownWithin = async (tries: number): Promise<boolean> => {
+        if (await flown()) {
+            return true;
+        }
+        if (tries <= 0) {
+            return false;
+        }
+        await leadChat(page, -chatSize(PHONE));
+        return flownWithin(tries - 1);
+    };
+
+    expect(await flownWithin(3), 'бросок так и не долетел до точки, где ленте есть место').toBe(true);
+
+    expect(road.started, 'коробка уже доехала: судить по ней о начале дороги нельзя').toBeLessThan(floor + FEED_MIN);
     expect(await feedShown(page), 'лента ждёт конца дороги вместо того, чтобы встать сразу').toBe(true);
 });
 
