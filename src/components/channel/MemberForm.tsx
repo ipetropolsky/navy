@@ -42,6 +42,12 @@ interface MemberFormProps {
     myId: string | null;
     initial?: MemberDraft;
     /**
+     * Каким цветом эта личность ходила в прошлый раз (`useChannel.lastLook`). Годится только
+     * входящему: у стоящего в строю цвет свой, он приходит в `initial`. Занят на этом рейде —
+     * берём первый свободный, как и без всякой памяти.
+     */
+    lastColor?: string;
+    /**
      * Выбранный силуэт. Живёт снаружи: от размера корабля зависит, куда он влезет на рейде,
      * а свободные места показывает не форма, а сцена.
      */
@@ -107,6 +113,7 @@ export default function MemberForm({
     crew,
     myId,
     initial,
+    lastColor,
     shipKind,
     onShipKind,
     facing,
@@ -119,9 +126,11 @@ export default function MemberForm({
     const takenColors = crew.filter((member) => member.memberId !== myId).map((member) => member.color);
     const [name, setName] = useState(initial?.name ?? '');
     const [hullNumber, setHullNumber] = useState(initial?.hullNumber ?? randomHullNumber);
-    // Цвет по умолчанию — первый свободный: два одинаковых позывных в ленте не различить.
+    // Цвет по умолчанию — прошлый свой, если он на этом рейде свободен, иначе первый свободный:
+    // два корабля одного цвета в ленте не различить.
+    const freeColor = MEMBER_COLORS.find((option) => !takenColors.includes(option)) ?? MEMBER_COLORS[0];
     const [color, setColor] = useState(
-        initial?.color ?? MEMBER_COLORS.find((option) => !takenColors.includes(option)) ?? MEMBER_COLORS[0]
+        initial?.color ?? (lastColor && !takenColors.includes(lastColor) ? lastColor : freeColor)
     );
     const [busy, setBusy] = useState(false);
     // Отклик выбранного корабля: ткнули в кнопку — он мигнул лампой ровно так же, как чужой

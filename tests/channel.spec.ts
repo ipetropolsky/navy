@@ -91,6 +91,46 @@ test('свой, только что заведённый канал открыв
     await expect(page.getByRole('button', { name: 'Встать на рейд' })).toHaveCount(0);
 });
 
+/** Цвет, который сам по себе форме не достанется: по умолчанию она берёт первый свободный. */
+const OWN_COLOR = '#d8b4f8';
+
+/** Силуэт не по умолчанию — умолчание у формы «Малый противолодочный корабль». */
+const OWN_SHIP = 'Ракетный катер';
+
+/**
+ * Личность у человека одна, а корабли у неё в каждом канале свои. Вкладка помнит и то,
+ * и другое: в какой канал каким кораблём ходит — чтобы возврат был возвратом на своё место,
+ * а не новой постановкой в строй, — и чем эта личность выходила в море в последний раз,
+ * чтобы в новом канале не собирать корабль заново.
+ *
+ * Позывной с номером при этом не подставляются нарочно: они на каждом рейде свои, номер вдобавок
+ * может оказаться занят, и подставленный требовал бы не подтверждения, а исправления.
+ */
+test('в новом канале форма открывается прошлым кораблём, а в прежнем — своим', async ({ page }) => {
+    takes(12);
+    await openNewChannel(page, 'pamyat-odin');
+    await page.getByLabel(`Цвет ${OWN_COLOR}`).click();
+    await join(page, 'Гроза', '101', OWN_SHIP);
+    await expect(page.getByPlaceholder('Сообщение'), 'корабль не встал в строй').toBeVisible();
+
+    // Другой канал той же вкладкой: корабля тут ещё нет, но внешность прошлого форма помнит.
+    await openNewChannel(page, 'pamyat-dva');
+    await expect(page.locator('[class*="kindActive"]'), 'силуэт не достался от прошлого корабля').toContainText(
+        OWN_SHIP
+    );
+    await expect(page.locator('[class*="colorActive"]'), 'цвет не достался от прошлого корабля').toHaveAttribute(
+        'aria-label',
+        `Цвет ${OWN_COLOR}`
+    );
+    // А позывной с номером — свои: подставленный чужой номер пришлось бы стирать.
+    await expect(page.getByPlaceholder('Гром'), 'позывной подставился из прошлого канала').toHaveValue('');
+
+    // Возврат в первый канал — возврат на своё место: форма о постановке в строй не спрашивает.
+    await openChannel(page, 'pamyat-odin');
+    await expect(page.getByPlaceholder('Сообщение'), 'своя личность в канале забылась').toBeVisible();
+    await expect(page.getByRole('button', { name: 'Встать на рейд' })).toHaveCount(0);
+});
+
 test('реплика уходит и привязывается ответом', async ({ page }) => {
     await openChannel(page, DEMO, ALBATROS);
     const before = await bubbles(page).count();

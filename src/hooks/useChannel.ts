@@ -2,7 +2,15 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 
 import { ChannelEvent, ChannelSnapshot, MemberDraft, MessageDraft, backend } from '@/backend';
-import { forgetMemberId, readMemberId, rememberMemberId } from '@/backend/identity';
+import {
+    Look,
+    forgetMemberId,
+    readLastLook,
+    readMemberId,
+    rememberLastLook,
+    rememberMemberId,
+} from '@/backend/identity';
+import { Member } from '@/types/channel';
 
 import useReception, { Reception } from '@/hooks/useReception';
 
@@ -24,6 +32,12 @@ export interface ChannelController {
     myId: string | null;
     /** Что печатается прямо сейчас: пришедшая чужая реплика (см. `useReception`). */
     reception: Reception | null;
+    /**
+     * Чем эта личность выходила в море в последний раз — силуэт и цвет. Ими открывается форма
+     * у того, кто в этом канале ещё не стоит: позывной с номером в новом канале свои,
+     * а корабль человек чаще берёт тот же. Ни разу не выходила — null.
+     */
+    lastLook: Look | null;
     join: (draft: MemberDraft) => Promise<void>;
     updateMe: (draft: MemberDraft) => Promise<void>;
     /** Сняться с рейда, сказав новый курс: с ним уход и встаёт строчкой в ленте. */
@@ -37,6 +51,9 @@ export function useChannel(slug: string | null, memberIdFromUrl: string | null):
     const [loading, setLoading] = useState(true);
     const [channel, setChannel] = useState<ChannelSnapshot | null>(null);
     const [myId, setMyId] = useState<string | null>(null);
+    // Внешность держим состоянием, а не перечитыванием на каждом проходе: хранилище отвечает
+    // синхронно, а проходов у приложения много — по одному на всякое движение шторки.
+    const [lastLook, setLastLook] = useState<Look | null>(readLastLook);
     const { reception, receive } = useReception();
     /**
      * Кто мы — для подписки. Подписка заведена на канал и переживает постановку в строй,
@@ -174,6 +191,17 @@ export function useChannel(slug: string | null, memberIdFromUrl: string | null):
         }
     }, [channel, myId]);
 
+    /**
+     * Запомнить, чем человек вышел в море. Берём от бэкенда, а не из заявки: цвет он мог
+     * и переназначить, если выбранный оказался занят, а подставлять в следующий канал стоит
+     * то, чем корабль в итоге вышел.
+     */
+    const keepLook = useCallback((member: Member) => {
+        const look = { shipKind: member.shipKind, color: member.color };
+        rememberLastLook(look);
+        setLastLook(look);
+    }, []);
+
     const join = useCallback(
         async (draft: MemberDraft) => {
             if (!channelId) {
@@ -181,18 +209,20 @@ export function useChannel(slug: string | null, memberIdFromUrl: string | null):
             }
             const { member } = await backend.join({ channelId, member: draft });
             rememberMemberId(channelId, member.memberId);
+            keepLook(member);
             setMyId(member.memberId);
         },
-        [channelId]
+        [channelId, keepLook]
     );
 
     const updateMe = useCallback(
         async (draft: MemberDraft) => {
             if (channelId && myId) {
-                await backend.updateMember({ channelId, memberId: myId, member: draft });
+                const { member } = await backend.updateMember({ channelId, memberId: myId, member: draft });
+                keepLook(member);
             }
         },
-        [channelId, myId]
+        [channelId, myId, keepLook]
     );
 
     const leave = useCallback(
@@ -224,5 +254,5 @@ export function useChannel(slug: string | null, memberIdFromUrl: string | null):
         [channelId, myId]
     );
 
-    return { loading, channel, myId, reception, join, updateMe, leave, kick, sendMessage };
+    return { loading, channel, myId, reception, lastLook, join, updateMe, leave, kick, sendMessage };
 }

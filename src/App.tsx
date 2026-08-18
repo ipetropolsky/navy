@@ -49,7 +49,7 @@ import styles from './App.module.less';
  */
 const HAIL_HOLD_MS = morseDuration(HAIL_SIGNAL) + 1200;
 
-/** С каким кораблём открывается форма у того, кто ещё не в строю. */
+/** С каким кораблём открывается форма у того, кто ещё не в строю и ничем прежде не ходил. */
 const DEFAULT_SHIP_KIND: ShipKind = 'pr12412';
 
 /**
@@ -86,7 +86,7 @@ const randomCourse = (): Side => (Math.random() < 0.5 ? 'left' : 'right');
 export default function App() {
     const route = useRoute();
     const channelState = useChannel(route.channel, route.memberId);
-    const { channel, myId, reception, loading } = channelState;
+    const { channel, myId, reception, lastLook, loading } = channelState;
     const [replyTo, setReplyTo] = useState<Message | null>(null);
     // Открыт ли список кораблей. Он выезжает вторым слоем поверх разговора, а не подменяет
     // собой содержимое: подмена уносила вместе с разговором и место прокрутки, и набранное
@@ -312,7 +312,7 @@ export default function App() {
     // куда этот корабль вообще влезет, и точки свободных мест на воде обязаны это знать.
     // Пока форма закрыта, выбор ничей — как и выбранное место, см. ниже.
     const [pickedKind, setPickedKind] = useState<ShipKind | null>(null);
-    const shipKind = pickedKind ?? me?.shipKind ?? DEFAULT_SHIP_KIND;
+    const shipKind = pickedKind ?? me?.shipKind ?? lastLook?.shipKind ?? DEFAULT_SHIP_KIND;
 
     // Курс — здесь по той же причине: его показывает стрелка на выбранном месте, и оттуда же
     // его меняют повторным нажатием. Начальный достаётся от своего корабля, а новичку — монеткой:
@@ -729,6 +729,7 @@ export default function App() {
                     mode="join"
                     crew={members}
                     myId={myId}
+                    lastColor={lastLook?.color}
                     shipKind={shipKind}
                     onShipKind={setPickedKind}
                     facing={facing}
