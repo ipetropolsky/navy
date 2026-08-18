@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { MAX_COURSE_LENGTH, MAX_MESSAGE_LENGTH, Member, Message, ShipNoticeMessage } from '@/types/channel';
 
 import { createLocalBackend } from '@/backend/localBackend';
-import { ChannelBackend, ChannelError, ChannelEvent, MAX_MEMBERS, MemberDraft } from '@/backend/types';
+import { ChannelBackend, ChannelError, ChannelEvent, MemberDraft } from '@/backend/types';
 
 /**
  * Эмулятор сервера целиком: правила входа, старшинство, высадка, пределы длины и провод
@@ -195,16 +195,19 @@ describe('вход на рейд', () => {
         expect(await members(backend, channelId)).toHaveLength(2);
     });
 
-    test('шестому кораблю в канале места нет', async () => {
+    test('шестому кораблю в канале место находится: предела числом больше нет', async () => {
+        // Предел был числом («не больше пяти») и не имел отношения к тому, вмещает ли рейд
+        // ещё один корабль. Реальный предел кладёт расстановка (см. placement.test.ts,
+        // «мест нет вовсе — расстановка отказывает») — здесь проверяется только то, что
+        // здесь этого искусственного числа больше нет.
         const backend = createLocalBackend();
         const channelId = await freshChannel(backend);
-        await [...Array(MAX_MEMBERS).keys()].reduce(async (before, index) => {
+        await [...Array(6).keys()].reduce(async (before, index) => {
             await before;
             await backend.join({ channelId, member: draft(`Борт ${index}`, `10${index}`) });
         }, Promise.resolve());
 
-        await failsWith(() => backend.join({ channelId, member: draft('Лишний', '999') }), 'channel-full');
-        expect(await members(backend, channelId)).toHaveLength(MAX_MEMBERS);
+        expect(await members(backend, channelId)).toHaveLength(6);
     });
 
     test('вход отмечается в ленте, и позывной в записи — тот, с каким вошли', async () => {

@@ -168,6 +168,3 @@ export interface ChannelBackend {
      */
     subscribe(request: ChannelAddress & { onEvent: (event: ChannelEvent) => void }): Unsubscribe;
 }
-
-/** Сколько кораблей помещается в сцену. */
-export const MAX_MEMBERS = 5;
