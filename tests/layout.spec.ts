@@ -4465,6 +4465,49 @@ test('короткий сильный свайп вниз сворачивает
 });
 
 /**
+ * Плашка ввода не тонет, пока разговор сминается.
+ *
+ * Коробка едет к полу, и лента в ней уходит в ничто целиком — вместе со своими полями. Поля
+ * не сжимаются никогда, и оставленные на самой ленте, они выдавили бы плашку ввода за нижнюю
+ * кромку коробки; а обрезана та наглухо, и стоит по кромке экрана — то есть поле ввода уезжало
+ * бы под неё, чтобы вернуться, когда движение кончится.
+ *
+ * Ловится это только на ходу: в покое ленты у свёрнутого разговора нет вовсе (`FEED_MIN`),
+ * и выдавливать нечем. Отсюда сторож на каждый кадр падения.
+ */
+test('плашка ввода не уходит под кромку, пока разговор сминается', async ({ page }) => {
+    await page.setViewportSize(PHONE);
+    await openChannel(page, DEMO, ALBATROS);
+    await leadChat(page, chatSize(PHONE));
+
+    // Самое низкое место плашки за всё падение — относительно нижней кромки коробки.
+    const watch = page.evaluate(
+        () =>
+            new Promise<number>((resolve) => {
+                let worst = 0;
+                const started = performance.now();
+                const tick = (): void => {
+                    const plate = document.querySelector('[class*="composer_"]')?.getBoundingClientRect();
+                    const box = document.querySelector('main')?.getBoundingClientRect();
+                    if (plate && box) {
+                        worst = Math.max(worst, plate.bottom - box.bottom);
+                    }
+                    if (performance.now() - started < 1000) {
+                        requestAnimationFrame(tick);
+                    } else {
+                        resolve(worst);
+                    }
+                };
+                requestAnimationFrame(tick);
+            })
+    );
+
+    await flingChatDown(page, 400);
+    // Пиксель — обводка коробки: она верхняя, а рост коробке задан по внешней кромке.
+    expect(await watch, 'плашка ввода вылезла за нижнюю кромку коробки').toBeLessThanOrEqual(1);
+});
+
+/**
  * То же самое медленно: подвели кромку к самой нижней и поставили. Разговор сворачивается
  * до пола и так — пол на то и точка, — но по своей воле, а не по инерции.
  */

@@ -280,132 +280,138 @@ function MessageList({ messages, members, myId, onReply, onHail }: MessageListPr
 
     return (
         <div ref={listRef} className={styles.list}>
-            {messages.length > 0 && <div className={styles.dateChip}>{formatDate(messages[0].sentAt)}</div>}
-            {messages.map((message, index) => {
-                const own = message.author.memberId === myId;
-                const author = lookOf(message.author);
-                // На рейде ли он ещё. Оклик есть только у тех, кто есть: окликать некого,
-                // и мигать в кадре нечему — корабль ушёл.
-                const afloat = byId.has(message.author.memberId);
-                const firstOfGroup = index === 0 || groupKeys[index - 1] !== groupKeys[index];
-                const lastOfGroup = index === messages.length - 1 || groupKeys[index + 1] !== groupKeys[index];
-                // Место под аватарку держим у всякой чужой строки, системной в том числе:
-                // системная запись стоит в цепочке своего корабля и с его аватаркой.
-                const avatar = !own && (
-                    <div className={styles.avatarCell}>
-                        {lastOfGroup && author && (
-                            <Avatar
-                                number={author.hullNumber}
-                                name={author.name}
-                                action={
-                                    afloat
-                                        ? {
-                                              title: `Окликнуть «${author.name}»`,
-                                              onClick: () => onHail(message.author.memberId),
-                                          }
-                                        : undefined
-                                }
-                            />
-                        )}
-                    </div>
-                );
-
-                /*
-                 * Системная запись стоит на месте пузыря и живёт по тем же правилам: своя
-                 * плашка, время в углу, ответ по нажатию. Отличается она одним цветом —
-                 * ни размером, ни отступами, ни скруглениями: это такое же сообщение канала,
-                 * и выглядеть заплаткой в ленте ему незачем.
-                 */
-                const system = message.kind === 'system';
-                const plaque = system
-                    ? { own: styles.systemNoteOwn, other: styles.systemNote }
-                    : { own: styles.bubbleOwn, other: styles.bubble };
-
-                /*
-                 * Позывной у служебной строчки стоит всегда — и у своей, и у второй подряд
-                 * в цепочке. Фраза в ней безличная («Сменил позывной»), и без имени над ней
-                 * непонятно, кто сменил; у реплики такой беды нет — там кто говорит, видно
-                 * по стороне ленты и по аватарке.
-                 *
-                 * Рядом с позывным — ответный вымпел: он и помечает строчку служебной вместо
-                 * прежних полоски и мелкого кегля. Нажатие по нему говорит, что он значит,
-                 * и дальше пузыря не идёт: нажатие по самому пузырю — это ответ на строчку,
-                 * а вымпел не про ответ.
-                 */
-                const noticeHead = system && author && (
-                    <span className={styles.noticeHead}>
-                        <MemberName name={author.name} color={author.color} />
-                        <button
-                            type="button"
-                            className={styles.pennantButton}
-                            aria-label={NOTICE_TITLE}
-                            title={NOTICE_TITLE}
-                            // Нажатие по вымпелу не утапливает плашку: оно про вымпел, а не про
-                            // ответ, и плашка на него отзываться не должна. Останавливаем именно
-                            // нажатие, а не только щелчок ниже: утопление плашки заводится
-                            // с `pointerdown`, и до `onClick` она успела бы моргнуть.
-                            onPointerDown={(event) => event.stopPropagation()}
-                            onClick={(event) => {
-                                event.stopPropagation();
-                                notify(NOTICE_TITLE);
-                            }}
-                        >
-                            <CodePennant />
-                        </button>
-                    </span>
-                );
-
-                const thread = system ? undefined : message.thread;
-                const replyTo = thread ? byMessageId.get(thread.messageId) : undefined;
-
-                return (
-                    <div key={message.messageId} className={own ? styles.rowOwn : styles.row}>
-                        {avatar}
-                        <div
-                            role="button"
-                            tabIndex={0}
-                            className={own ? plaque.own : plaque.other}
-                            onPointerDown={handlePress}
-                            onClick={(event) => handleTap(event, message)}
-                            onKeyDown={(event) => handleKey(event, message)}
-                            title="Ответить"
-                        >
-                            {noticeHead}
-                            {!system && !own && firstOfGroup && author && (
-                                <MemberName name={author.name} color={author.color} />
-                            )}
-                            {replyTo && (
-                                <span className={styles.replyCell}>
-                                    <ReplyQuote
-                                        author={lookOf(replyTo.author)}
-                                        text={<MessageBody message={replyTo} />}
-                                    />
-                                </span>
-                            )}
-                            {/*
-                             * Фраза обёрнута в один блок нарочно: плашка выкладывает содержимое
-                             * колонкой, и без обёртки каждый кусок строчки — текст, помеченное
-                             * слово — вставал бы на свою строку.
-                             */}
-                            <span className={styles.text}>
-                                <MessageBody message={message} />
-                                <span className={styles.time}>{formatTime(message.sentAt)}</span>
-                            </span>
-                        </div>
-                    </div>
-                );
-            })}
             {/*
-             * Якорь низа: полоска в пиксель под последней строчкой. Она одна в ленте помечена
-             * `overflow-anchor: auto`, поэтому именно за неё браузер держится, когда содержимое
-             * над ней меняется, — новое сообщение вставляется сверху от якоря, а вид остаётся
-             * на месте. Прокрутки при этом нет вовсе: место держит раскладка, до кадра,
-             * а не скрипт после него.
-             *
-             * Стоит в конце списка, а не в начале с перевёрнутым порядком: лента обязана лежать
-             * в DOM по времени — от этого зависят и выделение с копированием, и чтение вслух.
+             * Строчки лежат отдельным блоком внутри ленты, а не прямо в ней: поля и просветы
+             * между ними живут на нём (см. .rows в стилях).
              */}
-            <div className={styles.bottomAnchor} />
+            <div className={styles.rows}>
+                {messages.length > 0 && <div className={styles.dateChip}>{formatDate(messages[0].sentAt)}</div>}
+                {messages.map((message, index) => {
+                    const own = message.author.memberId === myId;
+                    const author = lookOf(message.author);
+                    // На рейде ли он ещё. Оклик есть только у тех, кто есть: окликать некого,
+                    // и мигать в кадре нечему — корабль ушёл.
+                    const afloat = byId.has(message.author.memberId);
+                    const firstOfGroup = index === 0 || groupKeys[index - 1] !== groupKeys[index];
+                    const lastOfGroup = index === messages.length - 1 || groupKeys[index + 1] !== groupKeys[index];
+                    // Место под аватарку держим у всякой чужой строки, системной в том числе:
+                    // системная запись стоит в цепочке своего корабля и с его аватаркой.
+                    const avatar = !own && (
+                        <div className={styles.avatarCell}>
+                            {lastOfGroup && author && (
+                                <Avatar
+                                    number={author.hullNumber}
+                                    name={author.name}
+                                    action={
+                                        afloat
+                                            ? {
+                                                  title: `Окликнуть «${author.name}»`,
+                                                  onClick: () => onHail(message.author.memberId),
+                                              }
+                                            : undefined
+                                    }
+                                />
+                            )}
+                        </div>
+                    );
+
+                    /*
+                     * Системная запись стоит на месте пузыря и живёт по тем же правилам: своя
+                     * плашка, время в углу, ответ по нажатию. Отличается она одним цветом —
+                     * ни размером, ни отступами, ни скруглениями: это такое же сообщение канала,
+                     * и выглядеть заплаткой в ленте ему незачем.
+                     */
+                    const system = message.kind === 'system';
+                    const plaque = system
+                        ? { own: styles.systemNoteOwn, other: styles.systemNote }
+                        : { own: styles.bubbleOwn, other: styles.bubble };
+
+                    /*
+                     * Позывной у служебной строчки стоит всегда — и у своей, и у второй подряд
+                     * в цепочке. Фраза в ней безличная («Сменил позывной»), и без имени над ней
+                     * непонятно, кто сменил; у реплики такой беды нет — там кто говорит, видно
+                     * по стороне ленты и по аватарке.
+                     *
+                     * Рядом с позывным — ответный вымпел: он и помечает строчку служебной вместо
+                     * прежних полоски и мелкого кегля. Нажатие по нему говорит, что он значит,
+                     * и дальше пузыря не идёт: нажатие по самому пузырю — это ответ на строчку,
+                     * а вымпел не про ответ.
+                     */
+                    const noticeHead = system && author && (
+                        <span className={styles.noticeHead}>
+                            <MemberName name={author.name} color={author.color} />
+                            <button
+                                type="button"
+                                className={styles.pennantButton}
+                                aria-label={NOTICE_TITLE}
+                                title={NOTICE_TITLE}
+                                // Нажатие по вымпелу не утапливает плашку: оно про вымпел, а не про
+                                // ответ, и плашка на него отзываться не должна. Останавливаем именно
+                                // нажатие, а не только щелчок ниже: утопление плашки заводится
+                                // с `pointerdown`, и до `onClick` она успела бы моргнуть.
+                                onPointerDown={(event) => event.stopPropagation()}
+                                onClick={(event) => {
+                                    event.stopPropagation();
+                                    notify(NOTICE_TITLE);
+                                }}
+                            >
+                                <CodePennant />
+                            </button>
+                        </span>
+                    );
+
+                    const thread = system ? undefined : message.thread;
+                    const replyTo = thread ? byMessageId.get(thread.messageId) : undefined;
+
+                    return (
+                        <div key={message.messageId} className={own ? styles.rowOwn : styles.row}>
+                            {avatar}
+                            <div
+                                role="button"
+                                tabIndex={0}
+                                className={own ? plaque.own : plaque.other}
+                                onPointerDown={handlePress}
+                                onClick={(event) => handleTap(event, message)}
+                                onKeyDown={(event) => handleKey(event, message)}
+                                title="Ответить"
+                            >
+                                {noticeHead}
+                                {!system && !own && firstOfGroup && author && (
+                                    <MemberName name={author.name} color={author.color} />
+                                )}
+                                {replyTo && (
+                                    <span className={styles.replyCell}>
+                                        <ReplyQuote
+                                            author={lookOf(replyTo.author)}
+                                            text={<MessageBody message={replyTo} />}
+                                        />
+                                    </span>
+                                )}
+                                {/*
+                                 * Фраза обёрнута в один блок нарочно: плашка выкладывает содержимое
+                                 * колонкой, и без обёртки каждый кусок строчки — текст, помеченное
+                                 * слово — вставал бы на свою строку.
+                                 */}
+                                <span className={styles.text}>
+                                    <MessageBody message={message} />
+                                    <span className={styles.time}>{formatTime(message.sentAt)}</span>
+                                </span>
+                            </div>
+                        </div>
+                    );
+                })}
+                {/*
+                 * Якорь низа: полоска в пиксель под последней строчкой. Она одна в ленте помечена
+                 * `overflow-anchor: auto`, поэтому именно за неё браузер держится, когда содержимое
+                 * над ней меняется, — новое сообщение вставляется сверху от якоря, а вид остаётся
+                 * на месте. Прокрутки при этом нет вовсе: место держит раскладка, до кадра,
+                 * а не скрипт после него.
+                 *
+                 * Стоит в конце списка, а не в начале с перевёрнутым порядком: лента обязана лежать
+                 * в DOM по времени — от этого зависят и выделение с копированием, и чтение вслух.
+                 */}
+                <div className={styles.bottomAnchor} />
+            </div>
         </div>
     );
 }
