@@ -6,6 +6,11 @@ interface ActionsProps {
     children: ReactNode;
     /** Под кнопками есть приписка: тогда вырез экрана внизу достаётся ей, а не полосе. */
     aboveFooter?: boolean;
+    /**
+     * В ряду есть контрол, которого нельзя тянуть, — переключатель. Тогда ширину не делит
+     * никто: все стоят по содержимому и прижаты влево.
+     */
+    ownWidth?: boolean;
 }
 
 /**
@@ -18,7 +23,9 @@ interface ActionsProps {
  * `--actions-side`: поле по бокам, то же самое, каким отступает от краёв текст над кнопками.
  * Подробности — в стилях.
  */
-export default function Actions({ children, aboveFooter = false }: ActionsProps) {
-    const look = [styles.actions, aboveFooter && styles.actionsAboveFooter].filter(Boolean).join(' ');
+export default function Actions({ children, aboveFooter = false, ownWidth = false }: ActionsProps) {
+    const look = [styles.actions, aboveFooter && styles.actionsAboveFooter, ownWidth && styles.actionsOwnWidth]
+        .filter(Boolean)
+        .join(' ');
     return <div className={look}>{children}</div>;
 }

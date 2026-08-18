@@ -6,6 +6,8 @@ import ShipPortrait, { shipSpecLine } from '@/components/ships/ShipPortrait';
 import Actions from '@/components/ui/Actions';
 import Button from '@/components/ui/Button';
 import { useSnackbar } from '@/components/ui/Snackbar';
+import Switch from '@/components/ui/Switch';
+import { BeaconIcon } from '@/components/ui/icons';
 import { HAIL_SIGNAL } from '@/hooks/morse';
 import { Member, MorseFeed, SHIP_KIND_LABELS } from '@/types/channel';
 
@@ -19,6 +21,16 @@ interface ShipCardProps {
 
 /** Что означает вымпел. То же слово, что и в списке: звание одно. */
 const SENIOR_TITLE = 'Старший на рейде';
+
+/**
+ * Положения переключателя огней. Порядок тут и есть порядок на дорожке: «Ход» слева, «Якорь»
+ * справа. Список постоянный и лежит снаружи разметки — как и всё, что от состояния карточки
+ * не зависит.
+ */
+const UNDERWAY_OPTIONS = [
+    { value: 'underway', label: 'Ход' },
+    { value: 'anchored', label: 'Якорь' },
+] as const;
 
 /**
  * Карточка чужого корабля: портрет с бортовым номером, позывной, силуэт и его характеристики.
@@ -103,21 +115,26 @@ export default function ShipCard({ member, senior }: ShipCardProps) {
                 <div className={styles.spec}>{shipSpecLine(member.shipKind)}</div>
             </div>
 
-            {/* Ряд кнопок тот же, что внизу форм: одна механика на всё приложение — как они
-                делят ширину и когда переносятся. */}
-            <Actions>
+            {/* Ряд тот же, что внизу форм, но по содержимому и влево: переключатель рядом
+                тянуть нельзя (см. ui/Actions и ui/Switch). */}
+            <Actions ownWidth>
                 <Button variant="secondary" onClick={handleSignal}>
-                    Сигнал
+                    <BeaconIcon />
+                    {/* «Подать сигнал» — там, где карточка широка, и просто «Сигнал», где узка.
+                        Меряется карточка, а не окно: она живёт в шторке, а та бывает и в треть
+                        экрана шириной (см. .signalWide). */}
+                    <span className={styles.signalWide}>Подать сигнал</span>
+                    <span className={styles.signalNarrow}>Сигнал</span>
                 </Button>
-                {/* Подпись — действие, а не положение: пока корабль на якоре, кнопка предлагает
-                    дать ход, а под парами — отдать якорь. Обе подписи лежат в кнопке разом,
-                    чтобы переключение не меняло её ширину (см. .swap). */}
-                <Button variant="secondary" onClick={() => setUnderway((was) => !was)}>
-                    <span className={styles.swap}>
-                        <span className={underway ? styles.swapHidden : undefined}>Ход</span>
-                        <span className={underway ? undefined : styles.swapHidden}>Якорь</span>
-                    </span>
-                </Button>
+                {/* Положения, а не действия: кнопка тут показывала обратное нынешнему —
+                    на якоре предлагала ход, — и прочесть по ней, как корабль стоит сейчас,
+                    было нельзя. */}
+                <Switch
+                    label="Огни"
+                    options={UNDERWAY_OPTIONS}
+                    value={underway ? 'underway' : 'anchored'}
+                    onChange={(mode) => setUnderway(mode === 'underway')}
+                />
             </Actions>
         </div>
     );

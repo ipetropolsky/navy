@@ -1432,23 +1432,37 @@ test('«Сигнал» зажигает лампу на портрете, а р�
     expect(onRaid, 'сигнал из карточки дошёл до рейда').toHaveLength(0);
 });
 
-test('«Ход» и «Якорь» переключают огни портрета, не меняя ширины кнопки', async ({ page }) => {
+/**
+ * Переключатель огней в карточке: и что он делает с портретом, и что по нему видно.
+ *
+ * Второе тут не придирка. Прежде на этом месте стояла кнопка, а кнопка подписана тем,
+ * что случится по нажатию, — то есть в каждом положении показывала обратное нынешнему:
+ * на якоре предлагала ход. Прочесть по ней, как корабль стоит сейчас, было нельзя вовсе.
+ * Поэтому и смотрим на пару разом: что помечено на дорожке и что горит на портрете.
+ * Разойдись они — и переключатель врёт.
+ */
+test('переключатель огней меняет огни портрета и показывает положение', async ({ page }) => {
     await openChannel(page, DEMO, ALBATROS);
     await openShipCard(page, 'Вымпел');
     const card = page.getByRole('region', { name: 'Корабль' });
     const portrait = '[class*="portraitShip"]';
+    const switcher = card.getByRole('group', { name: 'Огни' });
+    // Пилюля одна на оба положения и ездит между ними — потому и спрашиваем её место.
+    // Спрашиваем в пикселях и округлённо: посреди переезда сдвиг идёт долями, и сравнивать
+    // на них нечего — важно, у какого положения пилюля встала.
+    const pill = switcher.locator('[class*="pill_"]');
+    const pillAt = () => pill.evaluate((el) => Math.round(new DOMMatrix(getComputedStyle(el).transform).m41));
 
-    // На рейде корабль стоит на якоре — с этого карточка и начинается.
+    // На рейде корабль стоит на якоре — с этого карточка и начинается, и это же помечено.
     const anchored = (await lights(page, portrait))[0].map((light) => light.kind);
     expect(
         anchored.some((kind) => kind.startsWith('anchor')),
         'на якоре не горят якорные огни'
     ).toBe(true);
+    await expect(switcher.getByRole('radio', { name: 'Якорь' }), 'корабль на якоре, а помечен ход').toBeChecked();
+    const wasAt = await pillAt();
 
-    // Кнопка подписана действием, а не положением: пока корабль на якоре, она предлагает ход.
-    const toggle = card.getByRole('button', { name: 'Ход', exact: true });
-    const width = (await toggle.boundingBox())!.width;
-    await toggle.click();
+    await switcher.getByText('Ход').click();
 
     const underway = (await lights(page, portrait))[0].map((light) => light.kind);
     expect(
@@ -1459,20 +1473,28 @@ test('«Ход» и «Якорь» переключают огни портре�
         underway.some((kind) => kind.startsWith('anchor')),
         'под парами остались якорные огни'
     ).toBe(false);
+    await expect(switcher.getByRole('radio', { name: 'Ход' }), 'нажатый ход не пометился').toBeChecked();
 
-    // Подпись сменилась, ширина — нет: обе подписи лежат в кнопке разом, и место занимает
-    // более длинная из них. Иначе на каждом переключении дёргалась бы и она, и соседняя.
-    const back = card.getByRole('button', { name: 'Якорь', exact: true });
-    await expect(back).toBeVisible();
-    expect((await back.boundingBox())!.width, 'кнопка сменила ширину вместе с подписью').toBe(width);
+    // Обе подписи на дорожке и в обоих положениях: у переключателя видны все — в этом и смысл.
+    await expect(switcher, 'с дорожки пропала подпись положения').toContainText('Якорь');
+
+    // Пилюля переехала, а не зажглась на новом месте: это та же самая пилюля, у неё сменился
+    // сдвиг, и меняется он переходом. Ждём пробой: сам переезд глазами не ловим — под
+    // проверками время идёт вдесятеро быстрее, и на него приходится кадр-другой.
+    await expect.poll(pillAt, { message: 'пилюля не переехала к нажатому положению' }).not.toBe(wasAt);
+    expect(
+        await pill.evaluate((el) => getComputedStyle(el).transitionProperty),
+        'пилюля меняет место скачком, без перехода'
+    ).toContain('transform');
 
     // И обратно: якорь гасит ходовые.
-    await back.click();
+    await switcher.getByText('Якорь').click();
     const again = (await lights(page, portrait))[0].map((light) => light.kind);
     expect(
         again.some((kind) => kind.startsWith('anchor')),
         'якорь не вернул якорные огни'
     ).toBe(true);
+    await expect.poll(pillAt, { message: 'пилюля не вернулась на прежнее место' }).toBe(wasAt);
 });
 
 test('позывной в карточке стоит вровень с крестиком', async ({ page }) => {
