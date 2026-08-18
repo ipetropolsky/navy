@@ -1,4 +1,4 @@
-import { Page, expect } from '@playwright/test';
+import { Locator, Page, expect } from '@playwright/test';
 
 import { Anchored, EDGE_MARGIN, restingDrift, restingYaw } from '@/backend/placement';
 import { SHIP_TAP_MIN } from '@/config/layout';
@@ -1361,6 +1361,38 @@ test('переключатель огней меняет огни портрет
         'якорь не вернул якорные огни'
     ).toBe(true);
     await expect.poll(pillAt, { message: 'пилюля не вернулась на прежнее место' }).toBe(wasAt);
+});
+
+/**
+ * Углы переключателя. Стоит он в одном ряду с кнопкой, одного с ней роста и набран той же
+ * строкой — и скруглён обязан быть так же, иначе рядом с кнопкой читается плашкой другого
+ * сорта. А пилюля внутри дорожки скругляется меньше ровно на поле между ними: две дуги
+ * тогда идут вложенно, и просвет между ними на углу тот же, что и на прямой стороне.
+ *
+ * Меряем у соседей заодно и поле — из него же считается разница скруглений, и подбирать
+ * её числом в проверке значило бы сверять код с копией кода, а не с правилом.
+ */
+test('переключатель скруглён как соседняя кнопка, а пилюля внутри — на поле меньше', async ({ page }) => {
+    await openChannel(page, DEMO, ALBATROS);
+    await openShipCard(page, 'Вымпел');
+    const card = page.getByRole('region', { name: 'Корабль' });
+    const switcher = card.getByRole('group', { name: 'Огни' });
+
+    const radius = (locator: Locator) => locator.evaluate((el) => parseFloat(getComputedStyle(el).borderTopLeftRadius));
+    // Подпись у кнопки своя на широкой карточке и на узкой (см. ShipCard) — ловим по общему.
+    const button = await radius(card.getByRole('button', { name: /сигнал/i }));
+    const track = await radius(switcher);
+    const pill = switcher.locator('[class*="pill_"]');
+
+    expect(track, 'дорожка скруглена не так, как соседняя кнопка').toBeCloseTo(button, 1);
+
+    // Поле дорожки — просвет между её кромкой и кромкой пилюли, и с обеих сторон он один.
+    const boxes = await Promise.all([switcher.boundingBox(), pill.boundingBox()]);
+    const [trackBox, pillBox] = boxes.map((box) => box!);
+    const inset = pillBox.y - trackBox.y;
+    expect(inset, 'пилюля прижата к дорожке').toBeGreaterThan(0);
+
+    expect(await radius(pill), 'угол пилюли идёт не вложенно в угол дорожки').toBeCloseTo(track - inset, 1);
 });
 
 test('позывной в карточке стоит вровень с крестиком', async ({ page }) => {
