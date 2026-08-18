@@ -174,11 +174,11 @@ const berthShapes = (page: Page): Promise<BerthShape[]> =>
     page.evaluate(() => {
         // Сцена — родитель слоя воды: под этот же класс попадает обёртка в шапке приложения.
         const horizon = document.querySelector('[class*="sea_"]')!.getBoundingClientRect().top;
-        return [...document.querySelectorAll<HTMLElement>('[data-lit]')].map((light) => {
+        return [...document.querySelectorAll<HTMLElement>('[data-berth-light]')].map((light) => {
             const paint = getComputedStyle(light);
             const box = light.getBoundingClientRect();
             return {
-                key: light.dataset.lit!,
+                key: light.dataset.berthLight!,
                 width: box.width,
                 height: box.height,
                 // Нижняя кромка дорожки — сама точка стоянки, на ней огонёк и стоит серединой.
@@ -192,7 +192,7 @@ const berthShapes = (page: Page): Promise<BerthShape[]> =>
 
 /** Навести указатель на место и дождаться, пока его точка вырастет в круг света. */
 const hoverBerth = async (page: Page, key: string): Promise<BerthShape> => {
-    const light = page.locator(`[data-lit="${key}"]`);
+    const light = page.locator(`[data-berth-light="${key}"]`);
     const dot = (await light.boundingBox())!;
     await page.mouse.move(dot.x + dot.width / 2, dot.y + dot.height / 2);
     // Растёт круг переходом, поэтому ждём — и ждём не «стало больше точки», а «перестало

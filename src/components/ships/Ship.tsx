@@ -107,6 +107,9 @@ export default function Ship({
     // Куда светят направленные огни на экране: вперёд — туда же, куда смотрит нос.
     const foreGlow = flip ? styles.glowRight : styles.glowLeft;
     const aftGlow = flip ? styles.glowLeft : styles.glowRight;
+    // Горит огонь или потушен. Классом, а не снятием с разметки: потушенному надо догореть,
+    // а снятого гасить нечему.
+    const burn = (lit: boolean, ...rest: string[]): string => [...rest, lit ? styles.lightOn : ''].join(' ');
 
     return (
         // data-facing — по той же причине, что и data-light ниже: курс виден только по тому,
@@ -122,30 +125,52 @@ export default function Ship({
                 {hullNumber}
             </span>
             <i className={`${styles.lamp} ${on ? styles.lampOn : ''}`} style={at(lights.signal)} />
-            {/* data-light — чтобы огни можно было пересчитать со стороны: правило «от 50 метров
-                второй огонь, и носовой якорный выше кормового» иначе проверяется только глазом. */}
-            {underway ? (
-                <>
-                    <i data-light="masthead" className={`${styles.white} ${foreGlow}`} style={at(lights.masthead)} />
-                    {twoLights && (
-                        <i
-                            data-light="masthead-aft"
-                            className={`${styles.white} ${foreGlow}`}
-                            style={at(lights.mastheadAft)}
-                        />
-                    )}
-                    <i
-                        data-light={flip ? 'starboard' : 'port'}
-                        className={flip ? styles.green : styles.red}
-                        style={at(lights.side)}
-                    />
-                    <i data-light="stern" className={`${styles.white} ${aftGlow}`} style={at(lights.stern)} />
-                </>
-            ) : (
-                <>
-                    <i data-light="anchor-fore" className={styles.white} style={at(lights.anchorFore)} />
-                    {twoLights && <i data-light="anchor-aft" className={styles.white} style={at(lights.anchorAft)} />}
-                </>
+            {/* Оба набора стоят на месте всегда, а меняется у них накал: ходовые и якорные
+                не подменяют друг друга рывком, а гаснут и разгораются, как лампы накаливания
+                (см. .lightOn). Снимать потушенные с разметки нельзя — гаснуть тогда нечему.
+
+                data-light говорит, что это за огонь, data-lit — горит ли он сейчас. Со стороны
+                иначе не спросить: правило «от 50 метров второй огонь, и носовой якорный выше
+                кормового» проверялось бы только глазом. */}
+            <i
+                data-light="masthead"
+                data-lit={underway}
+                className={burn(underway, styles.white, foreGlow)}
+                style={at(lights.masthead)}
+            />
+            {twoLights && (
+                <i
+                    data-light="masthead-aft"
+                    data-lit={underway}
+                    className={burn(underway, styles.white, foreGlow)}
+                    style={at(lights.mastheadAft)}
+                />
+            )}
+            <i
+                data-light={flip ? 'starboard' : 'port'}
+                data-lit={underway}
+                className={burn(underway, flip ? styles.green : styles.red)}
+                style={at(lights.side)}
+            />
+            <i
+                data-light="stern"
+                data-lit={underway}
+                className={burn(underway, styles.white, aftGlow)}
+                style={at(lights.stern)}
+            />
+            <i
+                data-light="anchor-fore"
+                data-lit={!underway}
+                className={burn(!underway, styles.white)}
+                style={at(lights.anchorFore)}
+            />
+            {twoLights && (
+                <i
+                    data-light="anchor-aft"
+                    data-lit={!underway}
+                    className={burn(!underway, styles.white)}
+                    style={at(lights.anchorAft)}
+                />
             )}
         </div>
     );
