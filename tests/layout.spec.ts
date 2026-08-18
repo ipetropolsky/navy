@@ -564,10 +564,20 @@ interface ActionsBar {
  *
  * Хозяин — колонка из тела с прокруткой и полосы под ним, и полоса занимает его ширину целиком:
  * место под полосу прокрутки держит тело, а не он сам, и отнимать у кнопок ей нечего.
+ *
+ * Полос на экране бывает несколько разом: слои стоят в коробке стопкой, и под открытой формой
+ * остаётся список кораблей со своими «Координатами рейда» и «Уйти с рейда». Поэтому меряемую
+ * называют подписью её кнопки, а не берут первую попавшуюся: у списка кнопки длинные и в строку
+ * на телефоне не влезают — правильно и по замыслу, — и первая попавшаяся полоса отвечала бы
+ * про них на вопрос про форму.
  */
-const actionsBar = (page: Page): Promise<ActionsBar> =>
-    page.evaluate(() => {
-        const bar = document.querySelector('[class*="actions"]')!;
+const actionsBar = (page: Page, button: string): Promise<ActionsBar> =>
+    page.evaluate((label) => {
+        const named = [...document.querySelectorAll('button')].find((one) => one.textContent === label);
+        if (!named) {
+            throw new Error(`кнопки «${label}» на экране нет, полосу не найти`);
+        }
+        const bar = named.closest('[class*="actions"]')!;
         const box = bar.getBoundingClientRect();
         const style = getComputedStyle(bar);
         const left = box.left + Number.parseFloat(style.paddingLeft);
@@ -587,7 +597,7 @@ const actionsBar = (page: Page): Promise<ActionsBar> =>
                 width: button.width,
             })),
         };
-    });
+    }, button);
 
 /**
  * Полоса кнопок — такая же панель, как та, в которой стоит поле ввода в ленте: черта сверху,
@@ -637,7 +647,7 @@ test.describe('телефон', () => {
 
         // Две кнопки в строку делят ширину слота целиком: они и промежуток между ними —
         // это вся ширина, и по краям не остаётся ничего.
-        const row = await actionsBar(page);
+        const row = await actionsBar(page, 'Готово');
         expectBandLooksLikePanel(row);
         expect(row.rows, 'кнопки разъехались по строкам там, где влезали в одну').toBe(1);
         expect(row.buttons[0].left, 'первая кнопка отошла от левого края').toBeCloseTo(0, 0);
@@ -652,11 +662,11 @@ test.describe('телефон', () => {
         // Ожидающим expect: новая ширина окна доходит до вёрстки не тем же кадром, в котором
         // о ней сказали, и разовый замер застаёт кнопки ещё в одной строке.
         await expect
-            .poll(async () => (await actionsBar(page)).rows, {
+            .poll(async () => (await actionsBar(page, 'Готово')).rows, {
                 message: 'подписи не влезли в строку, а кнопки остались в ней',
             })
             .toBe(2);
-        const stack = await actionsBar(page);
+        const stack = await actionsBar(page, 'Готово');
         for (const button of stack.buttons) {
             expect(button.width, 'кнопка на своей строке не заняла всю ширину').toBeCloseTo(stack.width, 0);
         }
@@ -863,7 +873,7 @@ test.describe('десктоп', () => {
         await openJoinForm(page);
         // Кнопок в форме постановки в строй две — «Встать на рейд» и «Отмена», — и делят они
         // ширину слота целиком, как и в форме своего корабля: слот один на все формы приложения.
-        const bar = await actionsBar(page);
+        const bar = await actionsBar(page, 'Готово');
         expectBandLooksLikePanel(bar);
         expect(bar.rows, 'кнопки разъехались по строкам там, где влезали в одну').toBe(1);
         expect(bar.buttons[0].left, 'первая кнопка отошла от левого края').toBeCloseTo(0, 0);
@@ -886,7 +896,7 @@ test.describe('кнопки у нижней кромки', () => {
     test('кнопка формы видна сразу и на высоком окне, и на низком', async ({ page }) => {
         await openChannel(page, DEMO);
         await openJoinForm(page);
-        expect((await actionsBar(page)).position, 'полосе кнопок незачем липнуть').toBe('static');
+        expect((await actionsBar(page, 'Готово')).position, 'полосе кнопок незачем липнуть').toBe('static');
         await expect(page.locator('button[type=submit]'), 'кнопка формы не видна').toBeInViewport();
 
         // Телефон на боку: окно ниже всего, что бывает, — и кнопка всё так же на виду.
@@ -900,7 +910,7 @@ test.describe('кнопки у нижней кромки', () => {
     test('домотанная форма не двигает полосу кнопок', async ({ page }) => {
         await openChannel(page, DEMO);
         await openJoinForm(page);
-        const before = await actionsBar(page);
+        const before = await actionsBar(page, 'Готово');
 
         const scrolled = await page.getByPlaceholder('Гром').evaluate((input) => {
             const body = input.closest<HTMLElement>('[class*="body"]')!;
@@ -909,7 +919,7 @@ test.describe('кнопки у нижней кромки', () => {
         });
         expect(scrolled, 'форму не удалось домотать: мотать нечего').toBe(true);
 
-        const after = await actionsBar(page);
+        const after = await actionsBar(page, 'Готово');
         expect(after.buttons[0].width, 'кнопки поехали от прокрутки').toBeCloseTo(before.buttons[0].width, 0);
         expect(after.bandWidth, 'полоса кнопок поехала от прокрутки').toBeCloseTo(before.bandWidth, 0);
         expect(after.bandWidth, 'полоса кнопок не во всю ширину хозяина').toBeCloseTo(after.ownerWidth, 0);
