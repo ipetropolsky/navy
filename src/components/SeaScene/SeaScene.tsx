@@ -20,6 +20,7 @@ import skyUrl from '@/assets/scene/sky.png';
 import { fleetLefts, restingDrift, restingLeft, restingYaw } from '@/backend';
 import MemberName from '@/components/ships/MemberName';
 import Ship from '@/components/ships/Ship';
+import ShipShadow from '@/components/ships/ShipShadow';
 import { paced } from '@/config/time';
 import {
     Berth,
@@ -992,6 +993,19 @@ function SeaScene({ members, myId, morseFeeds, ready, berths, onEditShip, onShow
             style={{ '--sky-img-px': `${skyImageHeight}px` } as CSSProperties}
             ref={sceneRef}
         >
+            {/* Размытие тени задано в долях её собственной ширины, а не в пикселях: у корабля
+                вблизи и у корабля у горизонта один и тот же силуэт, разного размера, и размытие
+                должно расти вместе с ним. CSS-юниты вроде cqw для этого не годятся — размерные
+                query-юниты для Firefox совсем свежие, а нам нужно то, что работает везде и давно.
+                SVG-фильтр с primitiveUnits="objectBoundingBox" — как раз это: stdDeviation ниже
+                читается не в пикселях, а в долях собственного бокса того элемента, что фильтр
+                на себя навесил (см. .shipShadow в SeaScene.module.less), и работает так уже
+                двадцать лет. Сам блок пустой и невидимый — тут только определение фильтра. */}
+            <svg width="0" height="0" style={{ position: 'absolute' }} aria-hidden="true">
+                <filter id="ship-shadow-blur" primitiveUnits="objectBoundingBox">
+                    <feGaussianBlur stdDeviation="0.025" />
+                </filter>
+            </svg>
             <div className={styles.sky}>
                 {/* Небо-текстура: картинка стыкуется сама с собой, поэтому плитки одинаковы
                     и просто лежат в ряд. Орион — в средней: см. .skyStrip в стилях. */}
@@ -1028,6 +1042,17 @@ function SeaScene({ members, myId, morseFeeds, ready, berths, onEditShip, onShow
                 {placed.map((member) => {
                     const depth = slotDepth(member.place.slot);
                     const width = shipWidthPercent(member.place.slot, member.shipKind);
+                    // Крутизна волны идёт от её высоты, поэтому угол считаем из неё, а не из хода
+                    // корпуса: осадка корабля уклон воды не меняет. Знак зависит от того, куда
+                    // смотрит корабль: положительный поворот поднимает левый край, отрицательный —
+                    // правый, а вверх вместе с корпусом должен идти нос, а не корма. Общий для
+                    // корпуса и тени: у тени тот же угол берёт обратный знак прямо в CSS
+                    // (см. @keyframes shadow-pitch).
+                    const pitchAngle = `${(
+                        waveAmplitude(depth) *
+                        PITCH_PER_PX *
+                        (member.place.facing === 'left' ? 1 : -1)
+                    ).toFixed(2)}deg`;
                     // Отход от своей линии и разворот корпуса: и то и другое — про стоянку,
                     // а не про место, и потому считается тут же, где и разброс поперёк.
                     // Размер корабля от отхода не меняется: доля линии — это единицы пикселей
@@ -1231,10 +1256,11 @@ function SeaScene({ members, myId, morseFeeds, ready, berths, onEditShip, onShow
                             дифферентом, и на качающемся блоке — тангажом. Свойство одно на элемент,
                             поэтому и слоёв столько же, сколько поворотов. */}
                                 <div className={styles.shipNod}>
-                                    {/* Корабль, номер, огни и тень на воде качаются как единое целое: обе анимации
-                            висят на одном блоке, потому что двигают разные свойства — translate и rotate. */}
+                                    {/* Качка — общая для корпуса и тени: обе стоят на одной волне. Наклон сюда
+                            не входит: у корпуса и тени он расходится в разные стороны (см. --pitch-angle
+                            ниже, на .shipRock и .shipShadow порознь). */}
                                     <div
-                                        className={styles.shipRock}
+                                        className={styles.shipWave}
                                         // Фаза места на общих часах качки: по ней сцена подводит анимации
                                         // после каждой отрисовки, чтобы корабль не начинал круг заново.
                                         data-wave={wavePhase(member.place).toFixed(2)}
@@ -1244,48 +1270,52 @@ function SeaScene({ members, myId, morseFeeds, ready, berths, onEditShip, onShow
                                                 // Отсюда же CSS считает задержку тангажа, отняв четверть цикла.
                                                 '--wave-start': `-${wavePhase(member.place).toFixed(2)}s`,
                                                 '--heave': `${heaveAmplitude(depth).toFixed(2)}px`,
-                                                // Крутизна волны идёт от её высоты, поэтому угол считаем из неё,
-                                                // а не из хода корпуса: осадка корабля уклон воды не меняет.
-                                                // Знак зависит от того, куда смотрит корабль: положительный
-                                                // поворот поднимает левый край, отрицательный — правый, а вверх
-                                                // вместе с корпусом должен идти нос, а не корма.
-                                                '--pitch-angle': `${(
-                                                    waveAmplitude(depth) *
-                                                    PITCH_PER_PX *
-                                                    (member.place.facing === 'left' ? 1 : -1)
-                                                ).toFixed(2)}deg`,
                                             } as CSSProperties
                                         }
                                     >
-                                        {/* Тень идёт перед кораблём в разметке, поэтому корпус её перекрывает. */}
-                                        <div className={styles.shipShadow} />
-                                        {/* Разворот на стоянке: ещё один поворот, и по тому же правилу,
+                                        {/* Тень идёт перед кораблём в разметке, поэтому корпус её перекрывает.
+                                    Наклон свой, зеркальный корпусу (см. @keyframes shadow-pitch), — общий
+                                    предок с наклоном корпуса тут был бы лишним. */}
+                                        <div
+                                            className={styles.shipShadow}
+                                            style={{ '--pitch-angle': pitchAngle } as CSSProperties}
+                                        >
+                                            <ShipShadow kind={member.shipKind} facing={member.place.facing} />
+                                        </div>
+                                        {/* Тангаж — свой блок на своё свойство, тем же приёмом, что и кивок:
+                                    rotate на элементе один, а поворотов у корабля несколько разом. */}
+                                        <div
+                                            className={styles.shipRock}
+                                            style={{ '--pitch-angle': pitchAngle } as CSSProperties}
+                                        >
+                                            {/* Разворот на стоянке: ещё один поворот, и по тому же правилу,
                                     что кивок с тангажом, — свой блок на своё свойство. Внутри него
                                     один силуэт: тень осталась снаружи и лежит на воде ровно, как
                                     ей и положено. */}
-                                        <div className={styles.shipYaw}>
-                                            <Ship
-                                                kind={member.shipKind}
-                                                name={member.name}
-                                                hullNumber={member.hullNumber}
-                                                facing={member.place.facing}
-                                                // Идёт — ходовые огни, стоит на рейде — якорные. Это про всех
-                                                // в кадре, а не только про свой корабль: огни у корабля не зависят
-                                                // от того, из чьей вкладки на него смотрят.
-                                                mode={motionKind ? 'underway' : 'anchored'}
-                                                depth={depth}
-                                                // Пока выбирают место, весь флот отходит на второй план: речь
-                                                // сейчас про рейд, и вода должна читаться сквозь любой корпус.
-                                                // Свой корабль тут не исключение — его как раз и разбирают,
-                                                // и место под ним закрыто им же.
-                                                //
-                                                // Высветляется при этом один корпус: огни горят по-прежнему,
-                                                // и тень на воде остаётся тёмной. Разбирается с этим сам
-                                                // корабль — снаружи не отделить одно от другого, — а почему
-                                                // именно так, написано у GHOST в Ship.
-                                                aside={Boolean(berths)}
-                                                morseFeed={morseFeeds[member.memberId] ?? null}
-                                            />
+                                            <div className={styles.shipYaw}>
+                                                <Ship
+                                                    kind={member.shipKind}
+                                                    name={member.name}
+                                                    hullNumber={member.hullNumber}
+                                                    facing={member.place.facing}
+                                                    // Идёт — ходовые огни, стоит на рейде — якорные. Это про всех
+                                                    // в кадре, а не только про свой корабль: огни у корабля не зависят
+                                                    // от того, из чьей вкладки на него смотрят.
+                                                    mode={motionKind ? 'underway' : 'anchored'}
+                                                    depth={depth}
+                                                    // Пока выбирают место, весь флот отходит на второй план: речь
+                                                    // сейчас про рейд, и вода должна читаться сквозь любой корпус.
+                                                    // Свой корабль тут не исключение — его как раз и разбирают,
+                                                    // и место под ним закрыто им же.
+                                                    //
+                                                    // Высветляется при этом один корпус: огни горят по-прежнему,
+                                                    // и тень на воде остаётся тёмной. Разбирается с этим сам
+                                                    // корабль — снаружи не отделить одно от другого, — а почему
+                                                    // именно так, написано у GHOST в Ship.
+                                                    aside={Boolean(berths)}
+                                                    morseFeed={morseFeeds[member.memberId] ?? null}
+                                                />
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
