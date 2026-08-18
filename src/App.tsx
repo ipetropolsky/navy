@@ -6,6 +6,7 @@ import {
     useEffect,
     useLayoutEffect,
     useMemo,
+    useReducer,
     useRef,
     useState,
 } from 'react';
@@ -36,6 +37,7 @@ import { useSettled } from '@/hooks/useSettled';
 import { useSlide } from '@/hooks/useSlide';
 import { useSwipe } from '@/hooks/useSwipe';
 import { channelLink, useRoute } from '@/routing';
+import { NOTHING_OPEN, reduce } from '@/state/layers';
 import { Berth, Message, MorseFeed, ShipKind, Side, authorLook, isSameBerth, otherSide } from '@/types/channel';
 import { copyText } from '@/utils/clipboard';
 import { Fling, settleMagnet, stepMagnet, trackFling } from '@/utils/magnet';
@@ -89,27 +91,16 @@ export default function App() {
     const channelState = useChannel(route.channel, route.memberId);
     const { channel, myId, reception, lastLook, loading } = channelState;
     const [replyTo, setReplyTo] = useState<Message | null>(null);
-    // Открыт ли список кораблей. Он выезжает вторым слоем поверх разговора, а не подменяет
-    // собой содержимое: подмена уносила вместе с разговором и место прокрутки, и набранное
-    // в поле, и выделение.
-    const [sheetOpen, setSheetOpen] = useState(false);
-    // Открыта ли форма своего корабля. Она выезжает тем же слоем и тем же движением.
-    const [editing, setEditing] = useState(false);
-    // Чей корабль показан карточкой. Своей карточки нет: свой корабль настраивают, а не
-    // разглядывают, и по нему открывается форма.
-    const [shownId, setShownId] = useState<string | null>(null);
-    // Спрашивают ли сейчас новый курс: шторка прощания с рейдом. Уход — единственное
-    // действие, после которого ничего не остаётся, и курс как раз то, что остаётся.
-    const [leaving, setLeaving] = useState(false);
-    // Открыта ли форма постановки в строй. Закрытая она по умолчанию: пришедший по ссылке
-    // попадает на рейд, а не в анкету, — и до того, как он сам решит встать в строй, канал
-    // о нём не знает ничего. Открывает её единственная кнопка посреди пустой плашки, см. ниже.
-    const [joining, setJoining] = useState(false);
-    // Подняла ли панель на экран сама открывшаяся в неё форма или список — и, значит, задвинуть
-    // ли панель обратно, когда слой закроется (см. `openLayer` ниже).
-    const [broughtPanel, setBroughtPanel] = useState(false);
-    // Слой сел в закрытую панель и ждёт кадра, чтобы та тронулась вместе с ним (там же).
-    const [bringing, setBringing] = useState(false);
+    /**
+     * Что открыто поверх рейда: список кораблей, форма своего корабля, карточка чужого, прощание
+     * с рейдом, постановка в строй — и подняла ли панель на экран сама открывшаяся в неё форма.
+     *
+     * Одним состоянием и одним набором намерений, см. state/layers: правила переходов там,
+     * и там же они проверены юнитами. Здесь остаётся сказать, что случилось («нажали название
+     * канала»), и доиграть разницу — движение панели, замеры, фокус.
+     */
+    const [layers, act] = useReducer(reduce, NOTHING_OPEN);
+    const { list: sheetOpen, form: editing, shownId, leaving, joining, brought: broughtPanel, bringing } = layers;
     const notify = useSnackbar();
 
     /**
@@ -175,10 +166,10 @@ export default function App() {
      * Размер разговора выбрал человек: потянул кромку, повёл свайпом, нажал стрелку, убрал
      * панель кнопкой.
      *
-     * Тем самым панель перестаёт быть поднятой ради открытого в неё слоя (см. `openLayer`):
+     * Тем самым панель перестаёт быть поднятой ради открытого в неё слоя (`brought` в модели):
      * задвинуть её потом за человека значило бы забрать то, что он только что выбрал сам.
      */
-    const chose = useCallback(() => setBroughtPanel(false), []);
+    const chose = useCallback(() => act({ type: 'chose' }), []);
     const toggleChat = useCallback(() => {
         chose();
         return shown ? hide() : show();
@@ -261,14 +252,14 @@ export default function App() {
      */
     const ownChannel = useRef<string | null>(null);
     useEffect(() => {
-        setJoining(route.channel !== null && route.channel === ownChannel.current);
+        act({ type: 'arrive', own: route.channel !== null && route.channel === ownChannel.current });
     }, [route.channel]);
     // Встал в строй — форма своё отработала и закрывается. Отсюда, а не из отправки: уйти
     // с рейда можно и потом, и вернуться человек должен ровно туда, куда пришёл, — на рейд
     // с закрытой формой, а не в анкету.
     useEffect(() => {
         if (inChat) {
-            setJoining(false);
+            act({ type: 'joined' });
         }
     }, [inChat]);
 
@@ -284,7 +275,7 @@ export default function App() {
     const joinOpen = !loading && Boolean(channel) && !me && joining;
     // Форма своего корабля: выезжает снизу поверх разговора и уходит туда же. Пока едет —
     // остаётся на экране, см. useSlide. Поднявшая панель форма своего хода не имеет вовсе:
-    // её везёт панель (см. `openLayer`).
+    // её везёт панель (`bringing` в модели и эффект под ним).
     const formOpen = editing && inChat;
     const formSlide = useSlide(formOpen);
 
@@ -399,7 +390,7 @@ export default function App() {
     // Показать карточку чужого корабля. Список кораблей при этом не трогаем: карточка ложится
     // поверх него (см. cover у Shade), и закрыв её, человек возвращается туда, откуда открыл.
     // Открытая из кадра, она ложится поверх пустого места — там закрывать и нечего.
-    const handleShowShip = useCallback((memberId: string) => setShownId(memberId), []);
+    const handleShowShip = useCallback((memberId: string) => act({ type: 'show-ship', memberId }), []);
 
     const handleCreate = async (draft: ChannelDraft) => {
         const { channel: created } = await backend.createChannel({ channel: draft });
@@ -412,7 +403,7 @@ export default function App() {
         const withBerth = { ...draft, berth: pickedBerth ?? undefined };
         if (editing) {
             await channelState.updateMe(withBerth);
-            setEditing(false);
+            act({ type: 'close-form' });
         } else {
             await channelState.join(withBerth);
         }
@@ -545,7 +536,7 @@ export default function App() {
     };
 
     /**
-     * Панель под открывающийся слой — форму своего корабля или список кораблей.
+     * Панель под открывшийся слой — форму своего корабля или список кораблей.
      *
      * Слой стоит в той же коробке, что и разговор, и ровно её размера. Поэтому закрытую панель
      * возвращаем на экран: открывать слой в коробку, которой на экране нет, значит открывать
@@ -560,21 +551,16 @@ export default function App() {
      * нет вовсе, и на экране остаётся одно движение вместо двух наехавших друг на друга.
      * Закрылся слой — панель тем же движением задвигается обратно, и слой уезжает в ней.
      *
-     * Помним это про нынешний слой, а не про панель вообще: перешли из формы в список — панель
-     * уже не поднятая ради слоя, а просто открытая, и закрывать её за человека не за что.
+     * Решает это модель — открывающие намерения несут ей `talking`, — а здесь остаётся движение:
+     * дождаться кадра, в котором слой уже стоит внутри закрытой панели, и тронуть панель.
+     * Кадром, а не таймером: тронуться она должна с той отрисовки, где слой уже на месте.
      */
-    const openLayer = useCallback(() => {
-        setBroughtPanel(!talking);
-        if (!talking) {
-            setBringing(true);
-        }
-    }, [talking]);
     useEffect(() => {
         if (!bringing) {
             return undefined;
         }
         const frame = requestAnimationFrame(() => {
-            setBringing(false);
+            act({ type: 'panel-moved' });
             show();
         });
         return () => cancelAnimationFrame(frame);
@@ -599,7 +585,7 @@ export default function App() {
     // именно она говорит ему стоять в панели, а не уходить вниз своим ходом.
     useEffect(() => {
         if (!layerOpen && !formSlide.mounted && !listSlide.mounted) {
-            setBroughtPanel(false);
+            act({ type: 'layers-gone' });
         }
     }, [layerOpen, formSlide.mounted, listSlide.mounted]);
 
@@ -632,14 +618,7 @@ export default function App() {
 
     // Список кораблей открывается названием канала. Поверх списка может стоять форма своего
     // корабля, и тогда то же нажатие снимает её — возвращает к списку, из которого её и позвали.
-    const handleShips = useCallback(() => {
-        const opening = editing || !sheetOpen;
-        setEditing(false);
-        setSheetOpen(opening);
-        if (opening) {
-            openLayer();
-        }
-    }, [editing, sheetOpen, openLayer]);
+    const handleShips = useCallback(() => act({ type: 'ships', talking }), [talking]);
 
     /**
      * Настроить свой корабль: та же форма и из кадра, и из списка кораблей.
@@ -650,11 +629,7 @@ export default function App() {
      * затемнение, см. .backdrop в Shade), и останься она поверх выехавшей формы, то накрыла бы
      * собой ровно то, ради чего по кораблю и нажали.
      */
-    const handleEditShip = useCallback(() => {
-        setShownId(null);
-        setEditing(true);
-        openLayer();
-    }, [openLayer]);
+    const handleEditShip = useCallback(() => act({ type: 'edit-ship', talking }), [talking]);
 
     // Уход с рейда спрашивает новый курс — куда корабль пошёл. Молча корабль не пропадает:
     // остальным виден только опустевший рейд, и курс — единственное, что от ушедшего
@@ -662,18 +637,12 @@ export default function App() {
     //
     // Форму своего корабля при этом закрываем: выход есть и в ней, а спрашивать курс поверх
     // настроек корабля, который через секунду уйдёт, незачем.
-    const handleLeave = () => {
-        setEditing(false);
-        setLeaving(true);
-    };
+    const handleLeave = () => act({ type: 'ask-course' });
 
     const handleLeaveConfirm = (course: string) => {
         void channelState
             .leave(course)
-            .then(() => {
-                setLeaving(false);
-                setSheetOpen(false);
-            })
+            .then(() => act({ type: 'left' }))
             // Отказ бэкенда (например, курс длиннее предела) оставляет шторку открытой:
             // набранное не потеряно, и сказанное снекбаром можно исправить на месте.
             .catch((failure: unknown) =>
@@ -737,10 +706,10 @@ export default function App() {
                     onFacing={setPickedFacing}
                     onSubmit={handleMemberSubmit}
                     open={joining}
-                    onOpen={() => setJoining(true)}
+                    onOpen={() => act({ type: 'open-join' })}
                     // Обратно к закрытому виду — «Отменой». Набранное при этом не теряется:
                     // форма остаётся на месте и в закрытом виде.
-                    onCancel={() => setJoining(false)}
+                    onCancel={() => act({ type: 'close-join' })}
                 />
             )}
             {channel && me && (
@@ -784,7 +753,8 @@ export default function App() {
     // и ровно её размера. Отсюда всё их поведение разом: тянут кромку — слой меняет размер
     // вместе с разговором под ним, убирают панель — слой уходит за кромку вместе с ней. Открыть
     // слой в убранную или свёрнутую панель нельзя — её сперва возвращают на экран
-    // (см. `openLayer`), иначе форма встала бы в полоску ручки с полем ввода или вовсе в ничто.
+    // (см. эффект «Панель под открывшийся слой»), иначе форма встала бы в полоску ручки с полем
+    // ввода или вовсе в ничто.
     const chatOff = Math.max(chatBox - size, 0);
 
     // Сколько разговор отнял у кадра: снизу и справа. Одно число на всю коробку — и на разговор,
@@ -1202,7 +1172,7 @@ export default function App() {
                     {/* Крестик — там же, где у шторки. Закрывается список ещё и названием канала
                         в шапке, тем же нажатием, каким его открыли, — но искать выход в другом
                         конце экрана человек не обязан. */}
-                    <CloseButton onClick={() => setSheetOpen(false)} />
+                    <CloseButton onClick={() => act({ type: 'close-list' })} />
                     <MembersList
                         members={members}
                         myId={myId}
@@ -1229,7 +1199,8 @@ export default function App() {
                 и своей ручки не заводит. Отсюда всё её поведение разом: тянут кромку — форма
                 меняет размер вместе с разговором под ней, убирают панель — уходит за кромку
                 вместе с ней и там глохнет (inert), как и разговор. Открыть форму в убранную
-                или свёрнутую панель нельзя — та сперва возвращается на экран (см. `openLayer`).
+                или свёрнутую панель нельзя — та сперва возвращается на экран (см. эффект
+                «Панель под открывшийся слой»).
 
                 Стоит она в разметке последней из слоёв — за списком кораблей, — и потому
                 рисуется поверх него: слои лежат стопкой, и открытая из списка форма его
@@ -1257,7 +1228,7 @@ export default function App() {
                         facing={facing}
                         onFacing={setPickedFacing}
                         onSubmit={handleMemberSubmit}
-                        onCancel={() => setEditing(false)}
+                        onCancel={() => act({ type: 'close-form' })}
                     />
                 </div>
             )}
@@ -1271,7 +1242,7 @@ export default function App() {
                 и закрыв её, человек ждёт увидеть список, а не пустой рейд. */}
             <Shade
                 open={Boolean(shownMember)}
-                onClose={() => setShownId(null)}
+                onClose={() => act({ type: 'close-card' })}
                 label="Корабль"
                 onScene={atSide}
                 sideWidth={taken.side}
@@ -1292,13 +1263,13 @@ export default function App() {
                 а вместе с ним — и всё, что показывают своему кораблю. */}
             <Shade
                 open={leaving && inChat}
-                onClose={() => setLeaving(false)}
+                onClose={() => act({ type: 'close-course' })}
                 label="Вы уходите с рейда"
                 onScene={atSide}
                 sideWidth={taken.side}
                 cover
             >
-                <LeaveRaid onConfirm={handleLeaveConfirm} onCancel={() => setLeaving(false)} />
+                <LeaveRaid onConfirm={handleLeaveConfirm} onCancel={() => act({ type: 'close-course' })} />
             </Shade>
         </div>
     );
