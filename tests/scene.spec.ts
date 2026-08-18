@@ -1575,6 +1575,111 @@ test('на соседний коридор своей линии корабль 
 });
 
 /**
+ * Смена раскладки посреди хода не должна сбивать корабль с курса.
+ *
+ * Точка, к которой корабль идёт, считается от кадра: на узком экране рейд шире кадра, и место
+ * в боковом коридоре отодвигается от кромки, чтобы нос с бортовым номером остался на виду
+ * (см. `edgesFor` в placement.ts). Значит, смена раскладки эту точку двигает — и, если двинуть
+ * её под килём у идущего, переход в CSS начнётся заново: с того места, где корабль сейчас,
+ * и на всю длительность целиком. На глаз это остановка на полпути.
+ *
+ * Меряется здесь само правило, а не время: пока у корабля стоит пометка хода, точка, к которой
+ * он наведён (`--slot-left`), обязана быть одна и та же. Часы для такой проверки — мерка
+ * ненадёжная: разброс машины в ускоренный ход укладывается целиком.
+ *
+ * Ход берётся самый долгий из тех, что есть, — уход с ближней линии через весь кадр: в него
+ * успевает уложиться и смена окна, и десяток снимков до неё и после. Стоит корабль в боковом
+ * коридоре: в среднем точка от кромок не зависит вовсе, и ловить там было бы нечего.
+ *
+ * Двух ловушек проверка избегает нарочно. Кадр в ней и правда должен перемениться посреди хода —
+ * об этом говорит ширина дорожки, снятая в тех же кадрах. А точка после хода должна оказаться
+ * другой — иначе раскладка ничего не сдвинула бы и в самом скверном случае.
+ */
+test('корабль доходит до места, даже если посреди хода сменилась раскладка', async ({ page }) => {
+    takes(20);
+    // Рейд свой и корабль на нём один: точка на ближней линии бокового коридора уезжает
+    // от кромки сильнее всего, и крупному силуэту достаётся весь этот отход.
+    await page.setViewportSize({ width: 800, height: 844 });
+    await openNewChannel(page, 'perehod-raskladka');
+    await page.getByText('Малый ракетный корабль', { exact: true }).click();
+    // Курс влево из правого коридора: уходить корабль будет носом вперёд, а значит — через
+    // весь кадр. Ход этот самый долгий из возможных, и только в него смена окна успевает
+    // попасть посередине.
+    await page.getByLabel('Курс влево').click();
+    await page.locator('[data-berth="9-right"]').click();
+    await join(page, 'Стриж', '111');
+    await expect(page.locator('[data-motion]'), 'корабль так и не встал на рейде').toHaveCount(0, {
+        timeout: SAIL_TIMEOUT,
+    });
+
+    // Перемена дальности — это уход с рейда и заход обратно: сперва корабль уходит за кромку
+    // со старого места, и вот этот-то уход и меряется.
+    await openShipForm(page);
+    await page.locator('[data-berth="0-center"]').click();
+    await page.getByRole('button', { name: 'Готово' }).click();
+    await expect(page.locator('[data-motion="leaving"]'), 'корабль не снялся с места').toHaveCount(1);
+
+    // Замер идёт в самой вкладке и каждый кадр: со стороны Playwright между снимками успевает
+    // пройти половина хода. Наружу отдаются только перемены — их за ход должно быть по пальцам.
+    await page.evaluate(() => {
+        const seen: { motion: string; slot: string; lane: number }[] = [];
+        (window as unknown as { __seen: typeof seen }).__seen = seen;
+        const snap = (): void => {
+            const lane = document.querySelector<HTMLElement>('[data-motion="leaving"]');
+            if (!lane) {
+                // Ход или ещё не начался, или уже кончился: во втором случае снимать больше нечего.
+                if (seen.length) {
+                    return;
+                }
+                requestAnimationFrame(snap);
+                return;
+            }
+            const now = {
+                motion: lane.dataset.motion ?? '',
+                slot: lane.style.getPropertyValue('--slot-left'),
+                lane: Math.round(lane.clientWidth),
+            };
+            const last = seen[seen.length - 1];
+            if (last?.slot !== now.slot || last.lane !== now.lane) {
+                seen.push(now);
+            }
+            requestAnimationFrame(snap);
+        };
+        requestAnimationFrame(snap);
+    });
+    // Хотя бы один снимок до перемены: без него менять окно не с чем сравнивать, а первый
+    // кадр после установки замера приходит не в тот же миг.
+    await page.waitForFunction(() => (window as unknown as { __seen: unknown[] }).__seen.length > 0);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(page.locator('[data-motion="leaving"]'), 'уход не кончился').toHaveCount(0, {
+        timeout: SAIL_TIMEOUT,
+    });
+
+    const seen = await page.evaluate(
+        () => (window as unknown as { __seen: { motion: string; slot: string; lane: number }[] }).__seen
+    );
+    expect(
+        new Set(seen.map((frame) => frame.lane)).size,
+        'кадр не переменился посреди хода — ловить было нечего'
+    ).toBeGreaterThan(1);
+    expect(
+        [...new Set(seen.map((frame) => frame.slot))],
+        'у идущего корабля переменилась точка, от которой он отсчитывает ход'
+    ).toHaveLength(1);
+
+    // И перезаход отыгрался до конца: корабль пришёл туда, куда его послали.
+    await expect(page.locator('[data-motion]'), 'перезаход не кончился').toHaveCount(0, { timeout: SAIL_TIMEOUT });
+    const arrived = await page
+        .locator('[class*="shipLane"]')
+        .first()
+        .evaluate((lane) => lane.style.getPropertyValue('--slot-left'));
+    expect(arrived, 'новая раскладка не сдвинула точку — проверять было нечего').not.toBe(seen[0].slot);
+    const state = await readState(page);
+    const [moved] = Object.values(state.channels).find((one) => one.channel.slug === 'perehod-raskladka')!.members;
+    expect(`${moved.place.slot}-${moved.place.corridor}`, 'корабль встал не на выбранное место').toBe('0-center');
+});
+
+/**
  * Качка — единственное движение в кадре, которое не кончается: корабль на якоре ходит вверх-вниз
  * и переваливается носом, пока стоит. Ломается такое молча — анимация может не завестись вовсе
  * или замереть на кадре, — и увидеть это можно только покадрово.
