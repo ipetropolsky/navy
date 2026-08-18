@@ -242,6 +242,54 @@ test('сообщение из соседней вкладки доезжает',
     await expect(bubbles(mine).last()).toContainText('Швартовы отданы');
 });
 
+/**
+ * Убранная панель считает то, что пришло без неё.
+ *
+ * Разговор с экрана убирают целиком, и тогда о новой реплике не говорит ничто: кнопка, которой
+ * его возвращают, выглядит одинаково и с непрочитанным, и без. Счётчик на ней — единственная
+ * примета, и держится он ровно до возврата разговора: показали ленту — значит, прочитано.
+ *
+ * Меряется здесь всё, что счётчик обещает: что он появляется, что цифра в нём та самая, что она
+ * есть и в подписи кнопки (сама пилюля читалке не достаётся), что возврат панели его убирает
+ * и что заново он с прочитанного не начинается.
+ */
+/** Счётчик непрочитанного у кнопки панели. Число он несёт пометкой, а не одним лишь текстом:
+ *  показывает пилюля не больше «99+», а проверять надо настоящий счёт. */
+const unreadCount = (page: Page) => page.locator('[data-unread]');
+
+test('убранная панель считает пришедшие реплики', async ({ context }) => {
+    takes(10);
+    const mine = await context.newPage();
+    const theirs = await context.newPage();
+    await openChannel(mine, DEMO, ALBATROS);
+    await openChannel(theirs, DEMO, VYMPEL);
+    const before = await bubbles(mine).count();
+
+    await mine.getByRole('button', { name: 'Убрать панель' }).click();
+    await expect(unreadCount(mine), 'на кнопке нашёлся счётчик, когда считать было нечего').toHaveCount(0);
+
+    await send(theirs, 'Швартовы отданы');
+    await send(theirs, 'Идём на выход');
+
+    await expect(unreadCount(mine), 'счётчик не сошёлся с числом пришедших реплик').toHaveAttribute('data-unread', '2');
+    // Та же цифра словами: пилюлю читалка не видит, и без подписи убранная панель молчала бы
+    // о новостях всем, кроме глаз.
+    await expect(
+        mine.getByRole('button', { name: 'Вернуть панель, 2 новых сообщения', exact: true }),
+        'счётчик не дошёл до подписи кнопки'
+    ).toBeVisible();
+
+    // Разговор вернулся — счётчик снят, и реплики в ленте на месте: считались настоящие
+    // сообщения, а не что-нибудь ещё.
+    await mine.getByRole('button', { name: 'Вернуть панель' }).click();
+    await expect(unreadCount(mine), 'счётчик пережил возврат разговора').toHaveCount(0);
+    await expect(bubbles(mine)).toHaveCount(before + 2);
+
+    // И прочитанное не пересчитывается заново: убранная во второй раз панель начинает с нуля.
+    await mine.getByRole('button', { name: 'Убрать панель' }).click();
+    await expect(unreadCount(mine), 'счётчик пересчитал уже прочитанное').toHaveCount(0);
+});
+
 test('уход с рейда отмечается в ленте и возвращает к постановке в строй', async ({ page }) => {
     await openChannel(page, DEMO, ALBATROS);
     await expect(ships(page)).toHaveCount(3);

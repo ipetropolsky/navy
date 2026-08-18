@@ -23,6 +23,7 @@ import Composer from '@/components/chat/Composer';
 import MessageList from '@/components/chat/MessageList';
 import Button from '@/components/ui/Button';
 import CloseButton from '@/components/ui/CloseButton';
+import Counter from '@/components/ui/Counter';
 import IconButton from '@/components/ui/IconButton';
 import Panel from '@/components/ui/Panel';
 import Shade from '@/components/ui/Shade';
@@ -36,11 +37,13 @@ import { chatMagnets, useLayout } from '@/hooks/useLayout';
 import { useSettled } from '@/hooks/useSettled';
 import { useSlide } from '@/hooks/useSlide';
 import { useSwipe } from '@/hooks/useSwipe';
+import { useUnread } from '@/hooks/useUnread';
 import { channelLink, useRoute } from '@/routing';
 import { NOTHING_OPEN, reduce } from '@/state/layers';
 import { Berth, Message, MorseFeed, ShipKind, Side, authorLook, isSameBerth, otherSide } from '@/types/channel';
 import { copyText } from '@/utils/clipboard';
 import { Fling, settleMagnet, stepMagnet, trackFling } from '@/utils/magnet';
+import { plural } from '@/utils/plural';
 
 import styles from './App.module.less';
 
@@ -148,6 +151,19 @@ export default function App() {
     // рост коробки под этим списком. Сам свёрнутый разговор при этом живой: в поле ввода
     // пишут, за ручку его достают обратно, и коридор для свайпа стоит по его кромке (`shown`).
     const talking = shown && !folded;
+
+    /**
+     * Сколько чужих реплик пришло, пока разговор был убран с экрана. Считает их `useUnread`,
+     * здесь остаётся показать: счётчиком на кнопке, которой панель возвращают, и той же цифрой
+     * в её подписи.
+     *
+     * Спрашиваем про `shown`, а не про `talking`: свёрнутый до пола разговор ленты не
+     * показывает, это правда, — но и кнопки, на которой стояла бы пилюля, под кадром нет вовсе.
+     * Копить непрочитанное там, где его нечем показать, значит однажды выдать его человеку
+     * пачкой в тот миг, когда он повернёт телефон.
+     */
+    const unread = useUnread(channel, myId, shown);
+
     // Ленте не досталось и одной реплики: разговор либо стоит на полу, либо его ведут от пола
     // вверх и он ещё не дорос. Выглядит он в этом случае одинаково — ручка и плашка ввода, —
     // а ленты нет вовсе, см. FEED_MIN в config/layout и .contentTight в стилях. Сбоку такого
@@ -664,6 +680,22 @@ export default function App() {
         return members.length ? `${members.length} на связи` : 'никого нет';
     };
 
+    /**
+     * Подпись кнопки панели. Непрочитанное входит в неё словами: сама пилюля со счётчиком
+     * читалке не достаётся (см. `ui/Counter`), и без этого убранная панель молчала бы
+     * о новостях всем, кроме глаз.
+     */
+    const panelLabel = (): string => {
+        if (shown) {
+            return 'Убрать панель';
+        }
+        if (unread === 0) {
+            return 'Вернуть панель';
+        }
+        const news = plural(unread, ['новое сообщение', 'новых сообщения', 'новых сообщений']);
+        return `Вернуть панель, ${unread} ${news}`;
+    };
+
     // Нижний слой блока контента: разговор или то, что стоит на его месте, пока разговаривать
     // не с кем. Форма своего корабля выезжает поверх и этот слой не разбирает.
     const baseContent = (
@@ -1063,27 +1095,43 @@ export default function App() {
                             вместе с тем, что в ней сейчас стоит. Кнопка поэтому означает
                             ровно то же, что и всегда, — «панель», — и прятать её не за что. */}
                         {atSide && (
-                            <IconButton onClick={toggleChat} aria-label={shown ? 'Убрать панель' : 'Вернуть панель'}>
-                                <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
-                                    <rect
-                                        x="3"
-                                        y="4"
-                                        width="18"
-                                        height="16"
-                                        rx="2"
-                                        stroke="currentColor"
-                                        strokeWidth="2"
-                                        fill="none"
-                                    />
-                                    <path
-                                        d="M15 4v16"
-                                        stroke="currentColor"
-                                        strokeWidth="2"
-                                        strokeLinecap="round"
-                                        fill="none"
-                                    />
-                                </svg>
-                            </IconButton>
+                            // Счётчик непрочитанного — пилюлей в углу кнопки. Место ему отводит
+                            // это гнездо, а не сама пилюля: где счётчику сидеть, знает тот,
+                            // у чьей кнопки он стоит (см. ui/Counter).
+                            //
+                            // Стоит он ровно на той кнопке, которой панель и возвращают: убранный
+                            // разговор ничем другим о себе не напоминает, а кнопка эта на экране
+                            // всегда. Пропадает счётчик вместе с возвратом панели — не по таймеру
+                            // и не по нажатию: разговор на экране, читать показано, и держать
+                            // цифру дольше было бы враньём.
+                            <span className={styles.panelSlot}>
+                                <IconButton onClick={toggleChat} aria-label={panelLabel()}>
+                                    <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+                                        <rect
+                                            x="3"
+                                            y="4"
+                                            width="18"
+                                            height="16"
+                                            rx="2"
+                                            stroke="currentColor"
+                                            strokeWidth="2"
+                                            fill="none"
+                                        />
+                                        <path
+                                            d="M15 4v16"
+                                            stroke="currentColor"
+                                            strokeWidth="2"
+                                            strokeLinecap="round"
+                                            fill="none"
+                                        />
+                                    </svg>
+                                </IconButton>
+                                {unread > 0 && (
+                                    <span className={styles.panelCount} data-unread={unread}>
+                                        <Counter value={unread} />
+                                    </span>
+                                )}
+                            </span>
                         )}
                     </div>
                 </div>
