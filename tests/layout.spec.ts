@@ -23,11 +23,11 @@ import { FLING_MS } from '@/utils/magnet';
 import {
     ALBATROS,
     DEMO,
-    SAIL_TIMEOUT,
     VYMPEL,
     bubbles,
     clickShip,
     join,
+    myShipParked,
     openChannel,
     openJoinForm,
     openNewChannel,
@@ -1040,12 +1040,8 @@ test('корабль не встаёт бортом на обрез кадра, 
     await page.locator('[data-berth="9-left"]').click();
     await join(page, 'Гроза', '404');
     // Ход у самого крупного корабля на ближней линии долгий, и меряться он мешает: по дороге
-    // корабль к кромке ближе, чем когда встанет. Ждём не срок, а конца хода — сцена сама
-    // снимает пометку движения, когда корабль пришёл.
-    await ships(page).first().waitFor();
-    await expect(page.locator('[data-motion]'), 'корабль так и не дошёл до места').toHaveCount(0, {
-        timeout: SAIL_TIMEOUT,
-    });
+    // корабль к кромке ближе, чем когда встанет. Ждём не срок, а того, что корабль стоит.
+    await myShipParked(page);
 
     // Допуск здесь и ниже — на качку: корпус на волне ещё и кренится, а прямоугольник вокруг
     // повёрнутой картинки шире самого корпуса. Замер даёт до трёх десятых процента кадра.
@@ -1633,17 +1629,24 @@ const PHONE = { width: MOBILE_MAX_WIDTH - 90, height: 844 };
  *
  * Считается покадрово и прямо в странице: сверять надо кадры движения, а не то, что осталось
  * после него, и снимать их отсюда по одному значило бы мерить скорость канала, а не разметки.
+ *
+ * Не заставший слоя ни в одном кадре замер обрывается ошибкой, а не отвечает нулём. Ноль тут
+ * значил бы «ехали вплотную» — то есть ровно то, чего проверка и ждёт, — и слой, не открывшийся
+ * вовсе, проходил бы её лучше всех. Спотыкалась после этого какая-нибудь строчка ниже,
+ * совсем не про то.
  */
 const rideGap = (page: Page, selector: string, span = 200): Promise<number> =>
     page.evaluate(
         ([sel, ms]: [string, number]) =>
-            new Promise<number>((resolve) => {
+            new Promise<number>((resolve, reject) => {
                 const started = performance.now();
                 let worst = 0;
+                let seen = false;
                 const tick = () => {
                     const layer = document.querySelector(sel);
                     const content = document.querySelector('main');
                     if (layer && content) {
+                        seen = true;
                         worst = Math.max(
                             worst,
                             Math.abs(layer.getBoundingClientRect().top - content.getBoundingClientRect().top)
@@ -1651,8 +1654,10 @@ const rideGap = (page: Page, selector: string, span = 200): Promise<number> =>
                     }
                     if (performance.now() - started < ms) {
                         requestAnimationFrame(tick);
-                    } else {
+                    } else if (seen) {
                         resolve(Math.round(worst));
+                    } else {
+                        reject(new Error(`слоя ${sel} не было на экране ни в одном кадре: мерить движение не с чем`));
                     }
                 };
                 tick();
@@ -1683,10 +1688,8 @@ test('свёрнутый разговор форма своего корабля
     // Открываем форму на почти голом кадре — нажатием по своему кораблю.
     //
     // Ждём, пока корабль встанет: идущий корабль формы не открывает, и метки `shipMine` на нём
-    // в это время нет (см. `canEdit` в SeaScene). Ожидание тут по делу, поэтому и срок ему свой.
-    await expect(page.locator('[data-motion]'), 'корабль так и не встал на место').toHaveCount(0, {
-        timeout: SAIL_TIMEOUT,
-    });
+    // в это время нет (см. `canEdit` в SeaScene).
+    await myShipParked(page);
     await clickShip(page, page.locator('[class*="shipMine"]'));
 
     // Панель разворачивается уже с готовой формой внутри: движение тут одно, панелино,
@@ -1744,9 +1747,7 @@ test('убранная сбоку панель выезжает с готово�
 
     // Форму открываем щелчком по своему кораблю — из списка её было бы не открыть: список
     // сам слой той же панели.
-    await expect(page.locator('[data-motion]'), 'корабль так и не встал на место').toHaveCount(0, {
-        timeout: SAIL_TIMEOUT,
-    });
+    await myShipParked(page);
     await clickShip(page, page.locator('[class*="shipMine"]'));
     expect(await rideGap(page, '[class*="form_"]'), 'форма выезжала своим ходом поверх панели').toBeLessThan(APART);
     await page.waitForTimeout(600);

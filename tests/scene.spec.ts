@@ -15,6 +15,7 @@ import {
     hasten,
     join,
     leaveRaid,
+    myShipParked,
     openChannel,
     openJoinForm,
     openNewChannel,
@@ -226,9 +227,7 @@ test('на одной линии помещаются двое, и борта н
     // проходит над местом соседа по дороге к своему — застигнутый в этот миг, он с ним и
     // «налезает». Прежде тут стояла пауза в 1200 мс, и держалась она на том, что за это время
     // корабль не успевал дойти даже до середины пути.
-    await expect(page.locator('[data-motion]'), 'корабли так и не встали на места').toHaveCount(0, {
-        timeout: SAIL_TIMEOUT,
-    });
+    await myShipParked(page);
 
     const after = await readState(page).then(
         (state) => Object.values(state.channels).find((item) => item.channel.slug === 'para')!.members
@@ -853,9 +852,7 @@ test('подпись стоит на точке своего места, даж�
     // Открываем её щелчком по своему кораблю: на рейде он один, и ближайшая стоянка тут
     // всегда его. Сперва дожидаемся, пока он встанет: идущий корабль формы не открывает,
     // и метки `shipMine` на нём в это время нет (см. `canEdit` в SeaScene).
-    await expect(page.locator('[data-motion]'), 'корабль так и не встал на место').toHaveCount(0, {
-        timeout: SAIL_TIMEOUT,
-    });
+    await myShipParked(page);
     await clickShip(page, page.locator('[class*="shipMine"]'));
     await expect(berths(page).first()).toBeVisible();
     await page.locator('[data-berth][aria-pressed="false"]').last().click();
@@ -1210,6 +1207,39 @@ test('нажатие по воде достаётся ближайшему ко�
     await expect(page.getByRole('region', { name: 'Корабль' }), 'нажатие по небу открыло карточку').toBeHidden();
 });
 
+/**
+ * Нажатие у самой кромки воды — тоже нажатие по воде.
+ *
+ * Полоска в полпикселя вдоль горизонта достаётся водяному слою по попаданию, а `clientY`
+ * приходит в событии обрезанным до целого — то есть на пиксель выше кромки. Пока нажатия
+ * с такой координатой отсеивались как «это небо», каждый пятый щелчок по кораблю у дальней
+ * кромки рейда пропадал впустую: подпись под указателем обещала форму, а не открывалось ничего.
+ *
+ * Целимся ровно в полпикселя над кромкой: попадание округляется вниз, до воды, а координата
+ * события обрезается вверх, за горизонт, — ровно та точка, на которой всё и ломается.
+ * Корабль на рейде один, и ближайшим к любой точке воды оказывается он.
+ *
+ * Выбор места живёт на таком же водяном слое и меряется так же (`berthNearest`), поэтому
+ * та же кромка проверяется и на нём: у горизонта ближе всего дальняя линия, её и должно выбрать.
+ */
+test('нажатие у самой кромки воды достаётся кораблю, а не пропадает', async ({ page }) => {
+    takes(6);
+    await openNewChannel(page, 'kromka');
+    await join(page, 'Гроза', '319');
+    await myShipParked(page);
+
+    const water = (await page.locator('[class*="shipWater"]').boundingBox())!;
+    await page.mouse.click(water.x + water.width / 2, water.y - 0.5);
+    await expect(berths(page).first(), 'нажатие у кромки воды не открыло форму своего корабля').toBeVisible();
+
+    const field = (await page.locator('[class*="berthWater"]').boundingBox())!;
+    await page.mouse.click(field.x + field.width / 2, field.y - 0.5);
+    await expect(
+        page.locator('[data-berth^="0-"][aria-pressed="true"]'),
+        'нажатие у кромки воды не выбрало место на дальней линии'
+    ).toHaveCount(1);
+});
+
 test('«Сигнал» зажигает лампу на портрете, а рейд остаётся тёмным', async ({ page }) => {
     await openChannel(page, DEMO, ALBATROS);
 
@@ -1514,9 +1544,7 @@ test('на соседний коридор своей линии корабль 
 
     // Заход должен отыграться до конца: пока он идёт, у корабля свой вид движения, и новый
     // на него не наложить.
-    await expect(page.locator('[data-motion]'), 'корабль так и не встал на рейде').toHaveCount(0, {
-        timeout: SAIL_TIMEOUT,
-    });
+    await myShipParked(page);
     const scene = (await page.locator('[class*="scene"]').first().boundingBox())!;
     const before = (await ships(page).first().boundingBox())!;
 
@@ -1608,9 +1636,7 @@ test('корабль доходит до места, даже если поср�
     await page.getByLabel('Курс влево').click();
     await page.locator('[data-berth="9-right"]').click();
     await join(page, 'Стриж', '111');
-    await expect(page.locator('[data-motion]'), 'корабль так и не встал на рейде').toHaveCount(0, {
-        timeout: SAIL_TIMEOUT,
-    });
+    await myShipParked(page);
 
     // Перемена дальности — это уход с рейда и заход обратно: сперва корабль уходит за кромку
     // со старого места, и вот этот-то уход и меряется.
