@@ -1,6 +1,6 @@
 import { Page, expect } from '@playwright/test';
 
-import { EDGE_MARGIN } from '@/backend/placement';
+import { Anchored, EDGE_MARGIN, restingDrift, restingYaw } from '@/backend/placement';
 import { slotShare } from '@/types/channel';
 
 import {
@@ -473,10 +473,17 @@ test('на стоянке корабль отходит от своей лини
     // стоянкой: на настоящем рейде корабли разводит ветром и течением. Отход по дальности
     // и малый разворот корпуса — это он и есть.
     //
-    // Канал свой, а не демо, и корабли в нём расставлены руками: и отход, и разворот идут
-    // от хеша по позывному и месту, а в демо-канале места раздаёт случай — вышло бы, что
-    // проверка каждый раз меряет другой рейд. Линии взяты вразбег по всей глубине: у дальних
-    // промежуток вчетверо теснее, чем у ближних, и отход обязан укладываться в оба.
+    // Насколько отходить и насколько разворачиваться, решает расстановка — хешем по участнику
+    // и его месту (restingDrift, restingYaw). Участник же заводится при постановке на рейд
+    // со случайным идентификатором, и величины эти в каждом прогоне новые: порогом их
+    // не проверить — хеш имеет полное право выдать отход в сотую долю пикселя. Сам разброс
+    // проверяется в юнитах расстановки, а здесь — что назначенное доезжает до разметки:
+    // берём числа из расстановки и сверяем с кадром.
+    //
+    // Канал свой, а не демо, и корабли в нём расставлены руками: в демо-канале места раздаёт
+    // случай — вышло бы, что проверка каждый раз меряет другой рейд. Линии взяты вразбег
+    // по всей глубине: у дальних промежуток вчетверо теснее, чем у ближних, и отход обязан
+    // укладываться в оба.
     await openNewChannel(page, 'stoyanka');
     const anchor = async (memberId: string, name: string, hullNumber: string, berth: string): Promise<void> => {
         await openChannel(page, 'stoyanka', memberId);
@@ -500,18 +507,19 @@ test('на стоянке корабль отходит от своей лини
             // качаются волной, и разовый замер застал бы их в случайной фазе. Нижняя кромка
             // дорожки — это и есть вода под килем, то самое место стоянки.
             const water = (node: Element): number => Math.round(node.getBoundingClientRect().bottom * 100) / 100;
+            // Линии рейда с их местами: подписи занятых да точки свободных. Место нужно,
+            // чтобы знать слот — по нему считается и своя линия корабля, и цена доли.
             const lines = [
-                ...document.querySelectorAll<HTMLElement>('[class*="shipNameLane"]'),
+                ...document.querySelectorAll<HTMLElement>('[data-berth-name]'),
                 ...document.querySelectorAll<HTMLElement>('[data-berth]'),
-            ].map((mark) => water(mark.closest('[class*="Lane"]') ?? mark));
+            ].map((mark) => ({
+                berth: mark.dataset.berthName ?? mark.dataset.berth!,
+                water: water(mark.closest('[class*="Lane"]') ?? mark),
+            }));
             const fleet = [...document.querySelectorAll<HTMLElement>('[data-berth-ship]')].map((hull) => {
                 const lane = hull.closest<HTMLElement>('[class*="shipLane"]')!;
-                const name = document.querySelector(`[data-berth-name="${hull.dataset.berthShip!}"]`);
                 return {
-                    // Своя линия у корабля одна: подпись его же места. Она достаётся всем,
-                    // кроме стоящего на выбранном месте, — а выбранное свободно, чужих рейд
-                    // не предлагает.
-                    line: name ? water(name) : null,
+                    berth: hull.dataset.berthShip!,
                     water: water(lane),
                     yaw: Number.parseFloat(getComputedStyle(lane.querySelector('[class*="shipYaw"]')!).rotate),
                 };
@@ -521,10 +529,9 @@ test('на стоянке корабль отходит от своей лини
 
     // И ждём, пока рейд устоится: замер тут разовый, а до него сцена успевает пошевелиться
     // трижды. Корабли идут по воде — отход считается от места, и застигнутый на полпути
-    // корабль показывает не отход, а остаток дороги. Кадр меняет рост под открытой формой —
-    // а отход считается в долях этого роста, и снятый на промежуточном кадре он выходит
-    // меньше настоящего: ловилось 0.14 вместо полутора пунктов. Ещё не размеченная сцена
-    // и вовсе отдаёт всем дорожкам нулевые коробки, и отход на них выходит ровным нулём.
+    // корабль показывает не отход, а остаток дороги. Кадр меняет рост под открытой формой,
+    // а отход считается в долях этого роста. Ещё не размеченная сцена и вовсе отдаёт всем
+    // дорожкам нулевые коробки, и отход на них выходит ровным нулём.
     // Ждём поэтому не признака готовности — их тут пришлось бы перечислять все, — а покоя:
     // двух одинаковых замеров подряд. Шевелящаяся сцена двух таких не даёт.
     let previous = '';
@@ -542,36 +549,53 @@ test('на стоянке корабль отходит от своей лини
 
     const raid = await measure();
 
-    expect(raid.fleet, 'на рейде не собралось трёх кораблей').toHaveLength(3);
-    for (const ship of raid.fleet) {
-        expect(ship.line, 'у корабля не нашлось подписи своего места').not.toBeNull();
-    }
+    // Кто где стоит: в разметке лежит одно место, а хеш отхода считается по участнику,
+    // и достать его можно только из хранилища. Расстановке участник нужен целиком, но берёт
+    // она из него позывной-идентификатор да место — оттого и приведение: из хранилища
+    // приходит он же, только с широкими типами полей.
+    const kept = await readState(page);
+    const crew = Object.values(kept.channels).find((channel) => channel.channel.slug === 'stoyanka')!.members;
+    const anchored = new Map(crew.map((member) => [`${member.place.slot}-${member.place.corridor}`, member]));
+    const slotOf = (berth: string): number => Number.parseInt(berth.split('-')[0], 10);
 
-    // Отошли все: рейд стоит не по линейке. Полпикселя тут не мерка терпимости, а порог
-    // видимости — совпади корабль с линией, разница вышла бы ровным нулём.
-    const shifts = raid.fleet.map((ship) => Math.abs(ship.water - ship.line!));
-    for (const [index, shift] of shifts.entries()) {
-        const { water, line } = raid.fleet[index];
-        // В сообщении обе кромки, а не один их разрыв: ноль тут выходит и от совпадения
-        // с линией, и от неразмеченной сцены, где нулевые обе, — а разбирать эти два случая
-        // по числу 0 в отчёте невозможно.
-        expect(shift, `корабль встал точно на свою линию (${water} против ${line})`).toBeGreaterThan(0.5);
+    expect(raid.fleet, 'на рейде не собралось трёх кораблей').toHaveLength(3);
+
+    // Цена доли: сколько пикселей кадра приходится на единицу перспективы. Своей мерки
+    // у неё нет — рейд натянут между двумя отступами, и в пикселях они тут неизвестны, —
+    // поэтому цена снимается с самих линий: они стоят по слотам, и двух крайних довольно,
+    // чтобы получить наклон.
+    const marks = raid.lines.map((mark) => ({ share: slotShare(slotOf(mark.berth)), water: mark.water }));
+    const far = marks.reduce((one, other) => (other.share < one.share ? other : one));
+    const near = marks.reduce((one, other) => (other.share > one.share ? other : one));
+    const perShare = (near.water - far.water) / (near.share - far.share);
+
+    for (const ship of raid.fleet) {
+        const member = anchored.get(ship.berth);
+        expect(member, `на месте ${ship.berth} не нашлось участника`).toBeDefined();
+        // Своя линия у корабля одна: подпись его же места. Она достаётся всем, кроме
+        // стоящего на выбранном месте, — а выбранное свободно, чужих рейд не предлагает.
+        const line = raid.lines.find((mark) => mark.berth === ship.berth);
+        expect(line, 'у корабля не нашлось подписи своего места').toBeDefined();
+
+        // Отход назначен расстановкой в слотах, а в кадре он в пикселях: переводим слоты
+        // в доли перспективы, доли — в пиксели ценой доли. Пол-пикселя допуска — округление
+        // долей в стилях, дальше сотых они не пишутся.
+        const drift = restingDrift(member as unknown as Anchored);
+        const step = perShare * (slotShare(member!.place.slot + drift) - slotShare(member!.place.slot));
+        expect(ship.water - line!.water, `отход на месте ${ship.berth} не доехал до разметки`).toBeCloseTo(step, 0);
+
+        // Разворот приходит в стили градусами и достаётся одному силуэту — сверяем его же.
+        const yaw = restingYaw(member as unknown as Anchored);
+        expect(ship.yaw, `разворот на месте ${ship.berth} не доехал до разметки`).toBeCloseTo(yaw, 1);
     }
 
     // И при этом никто не перебрался на чужую линию: отход — пятая часть промежутка,
     // а не половина. Промежуток у каждой линии свой — перспектива сводит дальние теснее, —
     // поэтому меряем его на месте: до ближайшей соседней линии в кадре.
-    for (const [index, shift] of shifts.entries()) {
-        const line = raid.fleet[index].line!;
-        const apart = raid.lines.map((other) => Math.abs(other - line)).filter((gap) => gap > 0.5);
-        expect(shift, 'корабль ушёл на чужую линию').toBeLessThan(Math.min(...apart) / 2);
-    }
-
-    // Развернуло каждого, и никого — сильнее своей меры. Само число живёт в расстановке
-    // (YAW_DEGREES), сюда оно перенесено с запасом на округление в стилях.
-    for (const { yaw } of raid.fleet) {
-        expect(Math.abs(yaw), 'корабль стоит строго вдоль кадра').toBeGreaterThan(0.01);
-        expect(Math.abs(yaw), 'корабль развернуло сильнее, чем ветром на стоянке').toBeLessThanOrEqual(1.51);
+    for (const ship of raid.fleet) {
+        const line = raid.lines.find((mark) => mark.berth === ship.berth)!.water;
+        const apart = raid.lines.map((other) => Math.abs(other.water - line)).filter((gap) => gap > 0.5);
+        expect(Math.abs(ship.water - line), 'корабль ушёл на чужую линию').toBeLessThan(Math.min(...apart) / 2);
     }
 });
 
