@@ -17,15 +17,7 @@ import { ServerState, archiveKey, restoreState } from '@/backend/migrate';
 import { refitNotices, shipTitle } from '@/backend/notice';
 import { isBerthFree, placeShip } from '@/backend/placement';
 import { DEMO_CHANNEL_ID, createDemoChannel } from '@/backend/seed';
-import {
-    ChannelBackend,
-    ChannelError,
-    ChannelEvent,
-    ChannelSnapshot,
-    MAX_MEMBERS,
-    MemberDraft,
-    Unsubscribe,
-} from '@/backend/types';
+import { ChannelBackend, ChannelError, ChannelEvent, ChannelSnapshot, MemberDraft, Unsubscribe } from '@/backend/types';
 
 /**
  * Эмулятор сервера: состояние лежит JSON-ом в localStorage, вкладки обмениваются событиями
@@ -313,14 +305,12 @@ export function createLocalBackend(): ChannelBackend {
             // позывной, и какое место достанется. Спрошенное до очереди устаревает к записи,
             // и на рейде от этого появлялись два корабля на одной точке.
             const { member, channel } = await mutate(channelId, (current) => {
-                if (current.members.length >= MAX_MEMBERS) {
-                    throw new ChannelError('channel-full', 'В канале уже пять кораблей');
-                }
                 checkDraftIsFree(current, draft);
                 // Место на рейде назначаем здесь, а не в сцене: тогда оно уедет вместе
                 // с участником во все вкладки, и корабль у всех окажется в одном и том же месте.
                 // Выбранное в форме место — пожелание: занято, значит корабль встанет
-                // на свободное.
+                // на свободное. Предела числом кораблей нет вовсе — предел кладёт само место
+                // на рейде: свободных мест не осталось, значит канал полон.
                 const place = placeShip(draft.shipKind, current.members, draft.berth, draft.facing);
                 if (!place) {
                     throw new ChannelError('channel-full', 'На рейде не осталось свободного места');
