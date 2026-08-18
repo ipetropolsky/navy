@@ -67,6 +67,12 @@ export interface MessageDraft {
  * поэтому добавить новый вид — например системное уведомление о шторме — можно, ничего
  * не ломая: транспорт и подписка про конкретные типы не знают, а UI разбирает знакомые
  * и молча пропускает незнакомые.
+ *
+ * По проводу идёт только то, что канал у себя оставляет. Печати среди событий нет и не будет:
+ * сообщение доставляется целиком, а по буквам его набирает уже получатель, у себя (см.
+ * `hooks/useReception`). Дело не в экономии — событие на каждую букву значит запись документа
+ * на каждую букву, и в тот день, когда за подпиской окажется Firebase, за печать одной реплики
+ * придётся заплатить полусотней записей.
  */
 interface ChannelEventBase {
     /** Свой у каждого события: по нему отбрасываем повторную доставку. */
@@ -83,17 +89,6 @@ export type ChannelEvent = ChannelEventBase &
         | { type: 'member-updated'; member: Member }
         | { type: 'member-left'; member: MemberRef }
         | { type: 'message-added'; message: Message }
-        /**
-         * Единственное событие, которое никуда не сохраняется: печать живёт ровно столько,
-         * сколько идёт. `chars` — добавленные символы или '\b' при удалении, из них лампа
-         * набирает Морзе.
-         *
-         * И единственное место контракта, которое на Firebase не переносится один в один:
-         * там `query` + `onSnapshot`, то есть запись документа на каждую букву. Заменять
-         * его будем не транспортом, а другой механикой — приём печатается по буквам уже
-         * после доставки, и лампа мигает по нему. Разбор — в задаче №6.
-         */
-        | { type: 'typing'; member: MemberRef; typing: { chars: string } }
     );
 
 export type ChannelEventType = ChannelEvent['type'];
@@ -165,7 +160,6 @@ export interface ChannelBackend {
     kick(request: MemberAddress & { member: MemberRef }): Promise<void>;
 
     sendMessage(request: MemberAddress & { message: MessageDraft }): Promise<{ message: Message }>;
-    setTyping(request: MemberAddress & { typing: { chars: string } }): Promise<void>;
 
     /**
      * Подписка на всё, что происходит в канале. Возвращает функцию отписки.

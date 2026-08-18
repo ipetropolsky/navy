@@ -90,10 +90,10 @@ const good = {
 
 ```ts
 // Плохо: два string подряд, порядок помнить наизусть.
-setTyping(channelId, memberId, chars);
+kick(channelId, memberId, targetId);
 
 // Хорошо.
-setTyping({ channelId, memberId, typing: { chars } });
+kick({ channelId, memberId, member: { memberId: targetId } });
 ```
 
 **Ключевые адресные параметры остаются скалярами.** То, что в настоящем API стояло бы
@@ -124,7 +124,7 @@ setTyping({ channelId, memberId, typing: { chars } });
 - у сущности один идентификатор, и в ссылке он называется так же: `member.memberId`
   и `message.author.memberId` — одно и то же поле;
 - ссылки — объекты: `author: { memberId }`, `thread: { messageId }`,
-  `member-left { member: { memberId } }`, `typing { member, typing: { chars } }`, — и это
+  `member-left { member: { memberId } }`, `kick({ member: { memberId } })`, — и это
   уже пригодилось: у автора сообщения рядом с id дописался снимок его вида (`look`),
   потому что ссылка переживает самого участника, а читатели ссылки не сломались;
 - методы принимают один именованный объект, адресные поля лежат в нём скалярами;
@@ -140,8 +140,8 @@ setTyping({ channelId, memberId, typing: { chars } });
 
 ## Что осталось
 
-Одно место, и оно не про форму, а про транспорт: `setTyping` и событие `typing` шлют
-по символу на нажатие клавиши. Это переживёт эмулятор на `BroadcastChannel`, но не переживёт
-Firebase с его `query` + `onSnapshot`. Заменяется не переименованием, а другой механикой —
-разбор в [задаче №6](https://github.com/ipetropolsky/navy/issues/6), там же и то, что тогда
-уйдёт из контракта.
+Ничего: контракт переносится на настоящий бэкенд один в один. Последним местом, которое
+не переносилось, была печать — она шла по символу на нажатие клавиши, то есть записью
+документа на букву. Её и не стало: по проводу теперь идёт только то, что канал у себя
+оставляет, а печать восстанавливает у себя получатель (см.
+[BACKEND-API.md](./BACKEND-API.md#печать-по-проводу-не-идёт)).

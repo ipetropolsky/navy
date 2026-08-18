@@ -8,7 +8,9 @@ import {
     DEMO,
     SAIL_TIMEOUT,
     TIME_SCALE,
+    VYMPEL,
     berths,
+    bubbles,
     clickShip,
     hasten,
     join,
@@ -20,6 +22,7 @@ import {
     openShipCard,
     openShipForm,
     readState,
+    send,
     ships,
     shipsButton,
     takes,
@@ -1581,42 +1584,66 @@ test('лампа передаёт и то, что набрано поверх в
     await expect.poll(async () => (await flashes(page))[mine], 'набранное поверх выделения не ушло в лампу').toBe(10);
 });
 
-test('набранное уходит на рейд кусками, а не по букве', async ({ page }) => {
+test('во время набора на рейд не уходит ничего', async ({ page }) => {
     takes(5);
-    // Обычное время: срок накопления — треть секунды, а ускоренный вдесятеро он короче,
-    // чем промежуток между нажатиями клавиш в прогоне. Копить тогда нечего, и проверка
-    // мерила бы не накопление, а скорость набора.
-    await unhasten(page);
     await openChannel(page, DEMO, ALBATROS);
+    await watchLamps(page);
 
-    // Слушаем тот же провод, по которому бэкенд разносит события между вкладками: печать
-    // никуда не оседает и увидеть её можно только здесь (см. setTyping в localBackend).
+    // Слушаем тот самый провод, по которому бэкенд разносит события между вкладками. Набор
+    // на нём не должен оставлять следа вовсе: событие на букву — это запись документа на букву
+    // в тот день, когда за подпиской окажется настоящий сервер.
     await page.evaluate(() => {
         const heard: string[] = [];
         (window as unknown as { heard: string[] }).heard = heard;
-        new BroadcastChannel('kilvater').addEventListener(
-            'message',
-            (message: MessageEvent<{ type: string; typing?: { chars: string } }>) => {
-                if (message.data.type === 'typing' && message.data.typing) {
-                    heard.push(message.data.typing.chars);
-                }
-            }
-        );
+        new BroadcastChannel('kilvater').addEventListener('message', (message: MessageEvent<{ type: string }>) => {
+            heard.push(message.data.type);
+        });
     });
 
-    const letters = 'проверкабодрости';
-    await page.getByPlaceholder('Сообщение').pressSequentially(letters);
-    // Ждём хвост: последние буквы уходят по сроку, уже после того, как набор кончился.
-    await expect
-        .poll(async () => page.evaluate(() => (window as unknown as { heard: string[] }).heard.join('')))
-        .toBe(letters);
+    const input = page.getByPlaceholder('Сообщение');
+    await input.pressSequentially('проверка бодрости');
+    // Свою лампу набранное всё-таки зажигает — она живёт в этой же вкладке и по проводу
+    // не ходит. Ждём её: если бы набор куда-то уходил, ушёл бы он к этому мигу.
+    await expect.poll(async () => (await flashes(page))['Корабль «Альбатрос»']).toBeGreaterThan(0);
+    expect(await page.evaluate(() => (window as unknown as { heard: string[] }).heard), 'набор ушёл на рейд').toEqual(
+        []
+    );
 
-    // Каждая буква — это событие на все вкладки, а событие перерисовывает там всё приложение:
-    // лампа Морзе живёт в кадре. Поэтому буквы копятся и уходят куском (см. TYPING_SEND_MS
-    // в Composer), и событий обязано быть заметно меньше, чем букв. Сравниваем с половиной,
-    // а не с точным числом: сколько именно кусков выйдет, зависит от скорости набора.
-    const sent = await page.evaluate(() => (window as unknown as { heard: string[] }).heard.length);
-    expect(sent, 'набранное ушло на рейд по букве, без накопления').toBeLessThanOrEqual(letters.length / 2);
+    // А отправленное уходит — и ровно одним событием на всю реплику.
+    await input.press('Enter');
+    await expect
+        .poll(async () => page.evaluate(() => (window as unknown as { heard: string[] }).heard))
+        .toEqual(['message-added']);
+});
+
+test('пришедшая реплика печатается по буквам, и корабль отправителя мигает лампой', async ({ context }) => {
+    takes(20);
+    const mine = await context.newPage();
+    const theirs = await context.newPage();
+    // Обычное время: печать идёт со скоростью человека за клавиатурой, и на ускоренном ходу
+    // реплика допечатывалась бы раньше, чем проверка успеет застать её недопечатанной.
+    await unhasten(mine);
+    await openChannel(mine, DEMO, ALBATROS);
+    await openChannel(theirs, DEMO, VYMPEL);
+    await watchLamps(mine);
+
+    const text = 'Швартовы отданы, выхожу на рейд к полуночи';
+    await send(theirs, text);
+
+    // Шапка говорит, кто передаёт. Это и есть признак идущего приёма: реплика уже доехала
+    // и лежит в канале целиком, но показывается она так, будто её набирают прямо сейчас.
+    const status = mine.locator('[class*="chatStatus"]');
+    await expect(status, 'приём не начался').toHaveText('«Вымпел» передаёт…');
+    expect(await bubbles(mine).last().innerText(), 'реплика показалась целиком, минуя печать').not.toContain(text);
+
+    // Лампа мигает всё это время — по кускам того же текста (см. `hooks/reception`).
+    await expect
+        .poll(async () => (await flashes(mine))['Корабль «Вымпел»'], 'корабль отправителя не мигал лампой')
+        .toBeGreaterThan(0);
+
+    // Допечаталось — реплика стоит целиком, а шапка вернулась к обычной строчке.
+    await expect(bubbles(mine).last()).toContainText(text);
+    await expect(status).toHaveText('3 на связи');
 });
 
 test('в списке кораблей выбранный стоит под парами и отзывается лампой', async ({ page }) => {
