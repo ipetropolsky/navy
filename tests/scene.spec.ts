@@ -1909,4 +1909,66 @@ test.describe('рейд ложится на телефон трапецией', 
             expect(Math.min(...ship.number), 'у дальнего корабля обрезан бортовой номер').toBeGreaterThan(0);
         }
     });
+
+    /**
+     * Смена ширины окна корабли по воде не возит. Место на рейде у них от окна не зависит вовсе,
+     * меняется только проекция — а она считается в тот же кадр, в который кадр стал другим.
+     * Иначе выходит нелепое: никто никуда не плыл, а четыре корабля разом трогаются с места
+     * и пару секунд подъезжают на новые точки.
+     *
+     * Меряется покадрово и по самой дорожке: её рамка — это и есть спроецированная точка, и,
+     * в отличие от корпуса, она не качается. Ширина рейда снимается теми же кадрами и служит
+     * отметкой момента: кадр, в котором рейд принял новую ширину, обязан быть тем же самым,
+     * в котором корабли встали на свои новые места. Ждём при этом целую длительность подработки
+     * у борта (@ship-aside-seconds, снимается с дорожки): подъезд, если он есть, укладывается
+     * ровно в неё.
+     *
+     * Оба окна телефонные: перестановка внутри одной раскладки, безо всяких разворотов.
+     */
+    test('смена ширины окна переставляет корабли сразу, а не подвозит', async ({ page }) => {
+        takes(12);
+        await page.setViewportSize({ width: 738, height: 844 });
+        await openChannel(page, DEMO);
+        await expect(page.locator('[data-motion]'), 'корабли так и не встали на места').toHaveCount(0, {
+            timeout: SAIL_TIMEOUT,
+        });
+
+        // Замер идёт в самой вкладке: со стороны Playwright между снимками успевает пройти
+        // половина подъезда. Наружу отдаются только перемены.
+        await page.evaluate(() => {
+            const seen: { raid: number; ships: string }[] = [];
+            (window as unknown as { __seen: typeof seen }).__seen = seen;
+            const snap = (): void => {
+                const raid = Math.round(document.querySelector('[class*="raid_"]')!.getBoundingClientRect().width);
+                const ships = [...document.querySelectorAll('[class*="shipLane"]')]
+                    .map((lane) => lane.getBoundingClientRect().left.toFixed(1))
+                    .join(' ');
+                const last = seen[seen.length - 1];
+                if (last?.raid !== raid || last.ships !== ships) {
+                    seen.push({ raid, ships });
+                }
+                requestAnimationFrame(snap);
+            };
+            snap();
+        });
+        const aside = await page
+            .locator('[class*="shipLane"]')
+            .first()
+            .evaluate((lane) => Number.parseFloat(getComputedStyle(lane).transitionDuration) || 0);
+        expect(aside, 'у дорожки нет перехода — ждать нечего и проверять нечего').toBeGreaterThan(0);
+
+        await page.setViewportSize({ width: 317, height: 844 });
+        await page.waitForTimeout(aside * 1000);
+
+        const seen = await page.evaluate(
+            () => (window as unknown as { __seen: { raid: number; ships: string }[] }).__seen
+        );
+        const last = seen[seen.length - 1];
+        expect(seen[0].raid, 'рейд не переменился от смены окна — мерить нечего').not.toBe(last.raid);
+        expect(seen[0].ships, 'проекция не переставила корабли — мерить нечего').not.toBe(last.ships);
+        expect(
+            seen.findIndex((frame) => frame.ships === last.ships),
+            'корабли встали на свои места не в том кадре, в котором рейд принял новую ширину'
+        ).toBe(seen.findIndex((frame) => frame.raid === last.raid));
+    });
 });
