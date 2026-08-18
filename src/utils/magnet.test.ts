@@ -1,12 +1,15 @@
 import { describe, expect, test } from 'vitest';
 
-import { MAGNET_GIVE, MAGNET_THROW_MS, normalizeMagnets, rubberBand, settleMagnet } from '@/utils/magnet';
+import { MAGNET_GIVE, MAGNET_PULL, MAGNET_THROW_MS, normalizeMagnets, rubberBand, settleMagnet } from '@/utils/magnet';
 
 /**
  * Магнитные точки шторки. Проверять их руками — занятие безнадёжное: обе половины механики
  * (какие точки остались и куда шторка приедет) считаются числами, а видно только результат —
  * шторка встала не туда. Поэтому здесь их и держим, отдельно от e2e: та проверяет, что шторка
  * вообще слушается пальца, а эта — что слушается по правилам.
+ *
+ * Строгостей у магнита две (`pointsOnly`), и проверяются они порознь: шторка встаёт только
+ * на точки, боковая панель — куда её поставили, а точки ей только помогают прицелиться.
  */
 
 describe('normalizeMagnets', () => {
@@ -60,26 +63,26 @@ describe('normalizeMagnets', () => {
 /** Точки разговора в вертикальной раскладке при ходе в 900px. */
 const CHAT = [0, 300, 600, 900];
 
-describe('settleMagnet', () => {
+describe('settleMagnet со строгими точками', () => {
     test('без точек шторка остаётся там, где её отпустили', () => {
-        expect(settleMagnet({ from: 900, to: 640, velocity: 0, points: [] })).toBe(640);
+        expect(settleMagnet({ from: 900, to: 640, velocity: 0, points: [], pointsOnly: true })).toBe(640);
     });
 
     test('своя точка держит, пока не пройдена доля пути к соседней', () => {
         // Доля от трёхсот — 105 точек: на сто четыре шторка ещё держится, на сто шесть уходит.
-        expect(settleMagnet({ from: 600, to: 496, velocity: 0, points: CHAT })).toBe(600);
-        expect(settleMagnet({ from: 600, to: 494, velocity: 0, points: CHAT })).toBe(300);
+        expect(settleMagnet({ from: 600, to: 496, velocity: 0, points: CHAT, pointsOnly: true })).toBe(600);
+        expect(settleMagnet({ from: 600, to: 494, velocity: 0, points: CHAT, pointsOnly: true })).toBe(300);
     });
 
     test('дотянутая до соседней точки шторка на ней и останавливается', () => {
-        expect(settleMagnet({ from: 600, to: 300, velocity: 0, points: CHAT })).toBe(300);
-        expect(settleMagnet({ from: 300, to: 600, velocity: 0, points: CHAT })).toBe(600);
+        expect(settleMagnet({ from: 600, to: 300, velocity: 0, points: CHAT, pointsOnly: true })).toBe(300);
+        expect(settleMagnet({ from: 300, to: 600, velocity: 0, points: CHAT, pointsOnly: true })).toBe(600);
     });
 
     test('усилие проносит шторку мимо точек: чем сильнее, тем мимо большего числа', () => {
         // Палец ушёл всего на полсотни точек — своей точки шторке не покинуть, — но быстро,
         // и дальше она летит сама.
-        const short = { from: 900, to: 850, points: CHAT };
+        const short = { from: 900, to: 850, points: CHAT, pointsOnly: true };
         expect(settleMagnet({ ...short, velocity: 0 })).toBe(900);
         expect(settleMagnet({ ...short, velocity: -1 })).toBe(600);
         expect(settleMagnet({ ...short, velocity: -3 })).toBe(300);
@@ -90,30 +93,30 @@ describe('settleMagnet', () => {
         // Отпущенная на 700 со скоростью 1px/мс шторка долетает до 700 + 150, то есть
         // до самой точки 850 — и на ней встаёт.
         const points = [0, 850];
-        expect(settleMagnet({ from: 0, to: 700, velocity: 1, points })).toBe(700 + MAGNET_THROW_MS);
+        expect(settleMagnet({ from: 0, to: 700, velocity: 1, points, pointsOnly: true })).toBe(700 + MAGNET_THROW_MS);
     });
 
     test('инерция не уносит шторку за пределы шкалы', () => {
-        expect(settleMagnet({ from: 300, to: 880, velocity: 5, points: CHAT })).toBe(900);
-        expect(settleMagnet({ from: 300, to: 20, velocity: -5, points: CHAT })).toBe(0);
+        expect(settleMagnet({ from: 300, to: 880, velocity: 5, points: CHAT, pointsOnly: true })).toBe(900);
+        expect(settleMagnet({ from: 300, to: 20, velocity: -5, points: CHAT, pointsOnly: true })).toBe(0);
     });
 
     test('рывок назад отменяет уход: считается место полёта, а не пальца', () => {
         // Палец ушёл вниз за половину пути, но в последний миг дёрнулся обратно — шторка
         // возвращается туда, откуда её взяли.
-        expect(settleMagnet({ from: 600, to: 460, velocity: 1, points: CHAT })).toBe(600);
+        expect(settleMagnet({ from: 600, to: 460, velocity: 1, points: CHAT, pointsOnly: true })).toBe(600);
     });
 
     test('между точками шторка не встаёт никогда', () => {
         // Куда бы палец ни привёл, ответом будет одна из точек: посередине шторке стоять негде.
         for (const to of [320, 450, 470, 610, 880]) {
-            expect(CHAT).toContain(settleMagnet({ from: 900, to, velocity: 0, points: CHAT }));
+            expect(CHAT).toContain(settleMagnet({ from: 900, to, velocity: 0, points: CHAT, pointsOnly: true }));
         }
     });
 
     test('две точки — это обычное «открыта или закрыта»', () => {
         // Ровно то, чем шторка жила до всяких магнитов: утянул больше трети — закрылась.
-        const shade = { from: 400, points: [0, 400] };
+        const shade = { from: 400, points: [0, 400], pointsOnly: true };
         expect(settleMagnet({ ...shade, to: 260, velocity: 0 })).toBe(0);
         expect(settleMagnet({ ...shade, to: 280, velocity: 0 })).toBe(400);
         // А короткий и сильный рывок закрывает её и с полусотни пикселей.
@@ -142,5 +145,46 @@ describe('rubberBand', () => {
 
     test('оттяжка одинакова с обеих сторон', () => {
         expect(rubberBand(300 - 40, 300, 900) - 300).toBeCloseTo(900 - rubberBand(900 + 40, 300, 900), 6);
+    });
+});
+
+/** Точки боковой панели на широком окне: убрать, треть, упор в мерку кадра. */
+const SIDE = [0, 467, 800];
+
+describe('settleMagnet со свободной шкалой', () => {
+    test('поставленная вдали от точек панель там и остаётся', () => {
+        expect(settleMagnet({ from: 467, to: 527, velocity: 0, points: SIDE })).toBe(527);
+        expect(settleMagnet({ from: 467, to: 640, velocity: 0, points: SIDE })).toBe(640);
+    });
+
+    test('подведённая к точке вплотную к ней и дотягивается', () => {
+        // Мерка притяжения — 32 точки, и считается она от места приземления в обе стороны.
+        expect(settleMagnet({ from: 800, to: 467 + MAGNET_PULL, velocity: 0, points: SIDE })).toBe(467);
+        expect(settleMagnet({ from: 800, to: 467 - MAGNET_PULL, velocity: 0, points: SIDE })).toBe(467);
+        expect(settleMagnet({ from: 800, to: 467 + MAGNET_PULL + 1, velocity: 0, points: SIDE })).toBe(
+            467 + MAGNET_PULL + 1
+        );
+    });
+
+    test('место, с которого панель взяли, ни на что не влияет', () => {
+        // Своей точки, которая держала бы, у свободной шкалы нет: с любой стороны один ответ.
+        expect(settleMagnet({ from: 0, to: 600, velocity: 0, points: SIDE })).toBe(600);
+        expect(settleMagnet({ from: 800, to: 600, velocity: 0, points: SIDE })).toBe(600);
+    });
+
+    test('крайние точки остаются пределами: за них панель не выходит', () => {
+        expect(settleMagnet({ from: 467, to: 1200, velocity: 0, points: SIDE })).toBe(800);
+        expect(settleMagnet({ from: 467, to: -200, velocity: 0, points: SIDE })).toBe(0);
+    });
+
+    test('брошенная панель встаёт там, куда долетела', () => {
+        // Полсотни точек пальцем и разгон в 1px/мс: 600 + 150 — и это вдали от всех точек.
+        expect(settleMagnet({ from: 467, to: 600, velocity: 1, points: SIDE })).toBe(600 + MAGNET_THROW_MS);
+        // А брошенная к кромке долетает до предела и уходит с экрана.
+        expect(settleMagnet({ from: 467, to: 300, velocity: -5, points: SIDE })).toBe(0);
+    });
+
+    test('ширина отдаётся целыми пикселями', () => {
+        expect(settleMagnet({ from: 467, to: 600.4, velocity: 0.001, points: SIDE })).toBe(601);
     });
 });

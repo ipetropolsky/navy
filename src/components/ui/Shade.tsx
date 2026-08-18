@@ -98,8 +98,9 @@ export default function Shade({
     const floor = useShadeFloor(mounted, onClose, cover);
     // Потяг — общая механика (см. hooks/useSheetDrag): тянут за ручку, отпущенная шторка
     // приезжает к своей точке. Точки не задаём: у шторки они обычные — закрыта или раскрыта
-    // по содержимому.
-    const { shift, dragging, handlers } = useSheetDrag({ open, onClose });
+    // по содержимому. А вот встать между ними шторке нельзя (`pointsOnly`): показывать её
+    // на четверти незачем — в шторке читают и нажимают, а не подглядывают.
+    const { shift, dragging, handlers } = useSheetDrag({ open, onClose, magnet: { pointsOnly: true } });
 
     if (!mounted) {
         return null;

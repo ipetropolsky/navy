@@ -33,7 +33,7 @@ import { FEED_MIN, SHEET_HANDLE } from '@/config/layout';
 import { paced } from '@/config/time';
 import { HAIL_SIGNAL, morseDuration } from '@/hooks/morse';
 import { useChannel } from '@/hooks/useChannel';
-import { chatMagnets, useLayout } from '@/hooks/useLayout';
+import { Layout, chatMagnets, useLayout } from '@/hooks/useLayout';
 import { useSettled } from '@/hooks/useSettled';
 import { useSlide } from '@/hooks/useSlide';
 import { useSwipe } from '@/hooks/useSwipe';
@@ -64,6 +64,25 @@ const DEFAULT_SHIP_KIND: ShipKind = 'pr12412';
  * в кильватерную колонну.
  */
 const randomCourse = (): Side => (Math.random() < 0.5 ? 'left' : 'right');
+
+/**
+ * Разрешённый размер разговора: приземление на свободной шкале умеет попасть туда, где
+ * разговору стоять нельзя.
+ *
+ * Провал этот один — между полом и наименьшим размером. Сбоку это «убрать панель» и её минимум:
+ * уже трёхсот пикселей панель не бывает, а ноль значит «нет вовсе», и ничего законного между
+ * ними нет. Свободный магнит про это не знает — точек в провале не поставлено, — и кромку,
+ * оставленную посреди него, делит пополам: доведённая ближе к кромке окна панель уходит,
+ * недоведённая встаёт в свой минимум.
+ *
+ * Строгой шкалы это не касается: там приземление всегда точка, а точки законны все.
+ */
+const legalSize = (size: number, { floor, min }: Layout): number => {
+    if (size <= floor || size >= min) {
+        return size;
+    }
+    return size - floor < min - size ? floor : min;
+};
 
 /**
  * Три состояния сервиса, и выбираются они по адресу и по тому, кто эта вкладка:
@@ -900,8 +919,13 @@ export default function App() {
      *
      * Точки в обеих раскладках одни и те же, и считает их раскладка (`chatMagnets`): сбоку
      * они прижаты её пределами, и там, где кадру нельзя отдать меньше шестисот, «две трети»
-     * и «весь ход» сходятся в один упор. Между точками разговор не встаёт: положений у него
-     * ровно столько, сколько точек.
+     * и «весь ход» сходятся в один упор.
+     *
+     * А вот строгость у раскладок разная. Под кадром разговор — шторка, и положений у него
+     * ровно столько, сколько точек. Сбоку он панель, и её ширину подбирают под себя: под длину
+     * строчки, под то, сколько кадра хочется оставить видимым. Точки там притягивают отпущенную
+     * рядом кромку, а поставленную вдали от них оставляют где поставили (см. `settleMagnet`).
+     * Крайние точки пределами остаются в обеих раскладках: это не подсказки, а края хода.
      *
      * Считается приземление не от места, где палец встал, а от того, куда разговор долетел
      * бы по инерции: короткий сильный рывок вниз проскакивает точки насквозь и уводит
@@ -919,15 +943,14 @@ export default function App() {
         }
         dragFrom.current = null;
         setDragging(false);
-        resize(
-            settleMagnet({
-                from: from.size,
-                to: from.open,
-                velocity: from.fling.speed(event.timeStamp),
-                points: chatMagnets(layout, boxHasForm),
-            }),
-            true
-        );
+        const settled = settleMagnet({
+            from: from.size,
+            to: from.open,
+            velocity: from.fling.speed(event.timeStamp),
+            points: chatMagnets(layout, boxHasForm),
+            pointsOnly: !atSide,
+        });
+        resize(legalSize(settled, layout), true);
     };
 
     /**
