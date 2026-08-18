@@ -31,6 +31,7 @@ import {
     ShipKind,
     ShipPlacement,
     Side,
+    hullCenter,
     isSameBerth,
     otherSide,
     shipWidthPercent,
@@ -54,6 +55,7 @@ import {
     sailTrim,
     shiftAcross,
 } from '@/components/SeaScene/shipMotion';
+import { shipAt } from '@/components/SeaScene/shipPick';
 
 import styles from './SeaScene.module.less';
 
@@ -862,7 +864,7 @@ function SeaScene({ members, myId, morseFeeds, ready, berths, onEditShip, onShow
      * попросту нет (у `.berthField` поверх неба `pointer-events: none`, а точка места
      * своё нажатие никуда дальше не пускает).
      *
-     * Отсекать сверх того нельзя, и по той же причине, что и у кораблей (см. `shipNearest`):
+     * Отсекать сверх того нельзя, и по той же причине, что и у кораблей (см. `shipUnder`):
      * `clientY` приходит обрезанным до целого пикселя, и полоска в полпикселя вдоль горизонта
      * попадает на воду с координатой выше её кромки.
      */
@@ -886,28 +888,25 @@ function SeaScene({ members, myId, morseFeeds, ready, berths, onEditShip, onShow
     };
 
     /**
-     * Дорожки кораблей, до которых меряется расстояние от указателя, — по одной на корабль,
-     * с которым есть что делать. Идущие сюда не попадают: пока корабль в пути, распоряжаться
-     * им нечего, и мерить до дорожки, которая как раз едет, тоже не с руки.
+     * Коробки силуэтов, по которым разбираются нажатия, — по одной на корабль, с которым есть
+     * что делать. Идущие сюда не попадают: пока корабль в пути, распоряжаться им нечего, и мерить
+     * по коробке, которая как раз едет, тоже не с руки.
+     *
+     * Держим само место, а не посчитанную заранее коробку: силуэтов в кадре десяток, а нажатие
+     * одно, и сведённый в список набор пришлось бы вести через все переезды кадра и все смены
+     * раскладки. Коробку берём у `.shipSlot`: качка, рыскание и кивок живут на вложенных слоях,
+     * и от кадра к кадру она стоит на месте.
      */
-    const shipLanes = useRef(new Map<string, HTMLElement>());
+    const shipSlots = useRef(new Map<string, { slot: HTMLElement; kind: ShipKind }>());
 
     /**
-     * Корабль, до чьего места ближе всего от этой точки кадра.
+     * Корабль, которому достаётся нажатие в этой точке кадра, или `null`, если нажатие мимо всех.
      *
-     * Считается тем же способом, что и выбор места (см. berthNearest), и по той же причине:
-     * целиться в корпус нельзя. Дорожка корабля — прямоугольник во всю его ширину и высоту,
-     * и ближний корабль накрывает своим прямоугольником дальнего целиком: в кадре видно
-     * оба, а нажимается только один. Расстояние же меряется до точки стоянки, и она у каждого
-     * своя — дальний корабль стоит выше и левее, туда и достаётся нажатие.
+     * Кто именно — решает `shipAt`: область по силуэту с наименьшей меркой и спор по расстоянию
+     * до середины корпуса. Здесь только собирается то, с чем ему работать: у каждого силуэта
+     * своя коробка в координатах окна и своя середина корпуса из справочника.
      *
-     * Меряется только по занятым местам: свободные тут ничего не значат — их выбирают в форме,
-     * а не в разговоре, — и попади они в счёт, нажатие рядом с кораблём доставалось бы пустой
-     * воде и не делало бы ничего.
-     *
-     * Замер идёт по месту, а не по вычисленным заранее точкам: дорожек в кадре десяток,
-     * а нажатие одно, и держать их сведёнными в список пришлось бы через все переезды кадра
-     * и все смены раскладки.
+     * Считается по занятым местам, а свободные не в счёт: их выбирают в форме, а не в разговоре.
      *
      * Небо тут не отсекается, в отличие от выбора места (`berthNearest`): слой, с которого
      * приходят эти события, сам начинается от горизонта (`.shipWater`), и точка выше воды
@@ -919,35 +918,32 @@ function SeaScene({ members, myId, morseFeeds, ready, berths, onEditShip, onShow
      * съедает каждый пятый щелчок по кораблю у дальней кромки рейда — молча, при том что вода
      * под указателем в этот миг подписана «Изменить корабль и место на рейде».
      */
-    const shipNearest = (clientX: number, clientY: number): string | null => {
-        let nearest: string | null = null;
-        let shortest = Infinity;
-        for (const [memberId, lane] of shipLanes.current) {
-            const spot = lane.getBoundingClientRect();
-            const gap = (spot.left - clientX) ** 2 + (spot.bottom - clientY) ** 2;
-            if (gap < shortest) {
-                shortest = gap;
-                nearest = memberId;
-            }
-        }
-        return nearest;
-    };
+    const shipUnder = (clientX: number, clientY: number): string | null =>
+        shipAt(
+            [...shipSlots.current].map(([memberId, { slot, kind }]) => ({
+                memberId,
+                box: slot.getBoundingClientRect(),
+                hull: hullCenter(kind),
+            })),
+            clientX,
+            clientY
+        );
 
     // Корабль под указателем: по нему подписывается вода — «изменить свой» или «корабль такой-то».
     // Подпись эта единственная подсказка о том, что нажатие вообще что-то откроет, и меняться
-    // она обязана вместе с тем, кому нажатие достанется.
+    // она обязана вместе с тем, кому нажатие достанется. Над пустой водой её нет — как нет
+    // и самого нажатия.
     const [nearShip, setNearShip] = useState<string | null>(null);
-    const trackShip = (event: PointerEvent<HTMLElement>): void =>
-        setNearShip(shipNearest(event.clientX, event.clientY));
-    const pickNearestShip = (event: MouseEvent<HTMLElement>): void => {
-        const nearest = shipNearest(event.clientX, event.clientY);
-        if (!nearest) {
+    const trackShip = (event: PointerEvent<HTMLElement>): void => setNearShip(shipUnder(event.clientX, event.clientY));
+    const pickShip = (event: MouseEvent<HTMLElement>): void => {
+        const picked = shipUnder(event.clientX, event.clientY);
+        if (!picked) {
             return;
         }
-        if (nearest === myId) {
+        if (picked === myId) {
             onEditShip?.();
         } else {
-            onShowShip?.(nearest);
+            onShowShip?.(picked);
         }
     };
 
@@ -1122,7 +1118,7 @@ function SeaScene({ members, myId, morseFeeds, ready, berths, onEditShip, onShow
                     // написано на нём же.
                     //
                     // Само нажатие при этом достаётся не корпусу, а воде под ним: щёлкают
-                    // по морю, а отвечает ближайший корабль (см. shipNearest и .shipWater).
+                    // по морю, а вода разбирает, кому нажатие (см. `shipUnder` и `.shipWater`).
                     // На корпусе действие всё же оставлено — тем, чьи мачты поднимаются выше
                     // горизонта, где воды под указателем уже нет.
                     const action =
@@ -1158,17 +1154,6 @@ function SeaScene({ members, myId, morseFeeds, ready, berths, onEditShip, onShow
                             }
                             data-ship={motionKind ? member.memberId : undefined}
                             data-motion={motionKind || undefined}
-                            // Дорожка — это и есть место корабля в кадре: её левая кромка
-                            // стоит на его оси, нижняя — на воде под килем. По ней и меряется,
-                            // до кого от указателя ближе. Записываем только тех, с кем есть
-                            // что делать: до идущего мимо мерить нечего.
-                            ref={(element) => {
-                                if (element && action) {
-                                    shipLanes.current.set(member.memberId, element);
-                                } else {
-                                    shipLanes.current.delete(member.memberId);
-                                }
-                            }}
                             style={
                                 {
                                     ...laneStyle(member.place, width, shown, drift),
@@ -1212,6 +1197,19 @@ function SeaScene({ members, myId, morseFeeds, ready, berths, onEditShip, onShow
                                 data-berth-ship={berthKey(member.place)}
                                 onClick={action?.onClick}
                                 title={action?.title}
+                                // Коробка силуэта: ровно то место в кадре, куда вписан корабль.
+                                // По ней разбираются нажатия по воде (см. `shipUnder`). Записываем
+                                // только тех, с кем есть что делать: идущему мимо нажатие ни к чему.
+                                ref={(element) => {
+                                    if (element && action) {
+                                        shipSlots.current.set(member.memberId, {
+                                            slot: element,
+                                            kind: member.shipKind,
+                                        });
+                                    } else {
+                                        shipSlots.current.delete(member.memberId);
+                                    }
+                                }}
                             >
                                 {/* Кивок живёт своим блоком: он тоже поворот, а поворот на слоте уже занят
                             дифферентом, и на качающемся блоке — тангажом. Свойство одно на элемент,
@@ -1281,20 +1279,21 @@ function SeaScene({ members, myId, morseFeeds, ready, berths, onEditShip, onShow
                 })}
             </div>
             {/* Вода, которой нажимают на корабли. Лежит она поверх всего флота, и это главное:
-                дорожка корабля — прямоугольник во всю его ширину и высоту, ближний накрывает
+                коробка корабля — прямоугольник во всю его ширину и высоту, ближний накрывает
                 им дальнего целиком, и, пока нажатия ловили корпуса, до дальнего корабля было
                 не дотянуться вовсе — в кадре видно оба, а открывается всегда ближний. Теперь
-                щёлкают по морю, а отвечает тот, до чьей стоянки ближе (см. shipNearest).
+                нажатие достаётся воде, а она разбирает, чьё оно (см. `shipUnder` и `shipPick`):
+                область у каждого своя, а спор о наложении решается расстоянием до корпуса.
                 Целиться в корпус больше не нужно нигде, и на телефоне это особенно заметно:
                 дальний корабль там в палец шириной.
                 Слой этот — двойник того, которым выбирают место, и правило у них одно на двоих.
                 Разом их не бывает: пока открыта форма, вода занята выбором места. */}
             {picksShip && (
                 <div
-                    className={styles.shipWater}
+                    className={[styles.shipWater, nearShip ? styles.shipWaterHit : ''].filter(Boolean).join(' ')}
                     onPointerMove={trackShip}
                     onPointerLeave={() => setNearShip(null)}
-                    onClick={pickNearestShip}
+                    onClick={pickShip}
                     title={nearShipTitle || undefined}
                 />
             )}
