@@ -97,36 +97,25 @@ describe('постановка в строй', () => {
     });
 });
 
-describe('панель под слоем', () => {
-    it('при показанном разговоре слой едет сам', () => {
-        const own = after(ships(true));
-        expect(own.brought, 'панель подняли ради слоя, который и так на экране').toBe(false);
-        expect(own.bringing).toBe(false);
+describe('коробка под слоем', () => {
+    it('развёрнутый разговор слой принимает как есть', () => {
+        expect(after(ships(true)).brought, 'коробку подняли ради слоя, который и так на экране').toBe(false);
     });
 
-    it('при убранном — панель выдвигается вместе с готовым слоем внутри', () => {
-        const carried = after(ships(false));
-        expect(carried.brought).toBe(true);
-        expect(carried.bringing, 'слой не стал дожидаться кадра').toBe(true);
+    it('свёрнутый и убранный — поднимаются под слой', () => {
+        expect(after(ships(false)).brought).toBe(true);
     });
 
-    it('дождавшись кадра, панель трогается и ждать больше нечего', () => {
-        const moved = after(ships(false), { type: 'panel-moved' });
-        expect(moved.bringing).toBe(false);
-        expect(moved.brought, 'память о поднятой панели пропала раньше времени').toBe(true);
+    // Коробка уже на экране, и второй слой её не поднимал: задвинуть её за человека не за что.
+    it('слой, открытый в поднятую коробку, её себе не присваивает', () => {
+        expect(after(ships(false), editShip(true)).brought).toBe(false);
     });
 
-    // Панель уже на экране, и второй слой её не поднимал: задвинуть её за человека не за что.
-    it('слой, открытый в поднятую панель, её себе не присваивает', () => {
-        const second = after(ships(false), { type: 'panel-moved' }, editShip(true));
-        expect(second.brought).toBe(false);
-    });
-
-    it('человек сам выбрал размер разговора — панель больше не за слоем', () => {
+    it('человек сам выбрал размер разговора — коробка больше не за слоем', () => {
         expect(after(ships(false), { type: 'chose' }).brought).toBe(false);
     });
 
-    it('уехавший с экрана слой память о панели уносит', () => {
+    it('уехавший с экрана слой память о коробке уносит', () => {
         expect(after(ships(false), { type: 'close-list' }, { type: 'layers-gone' }).brought).toBe(false);
     });
 });
