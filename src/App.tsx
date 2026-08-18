@@ -29,7 +29,7 @@ import Panel from '@/components/ui/Panel';
 import Shade from '@/components/ui/Shade';
 import { useSnackbar } from '@/components/ui/Snackbar';
 import { LeaveIcon } from '@/components/ui/icons';
-import { GATE_PAD, SHEET_HANDLE } from '@/config/layout';
+import { GATE_PAD, SHEET_HANDLE, SHEET_TOP_GAP } from '@/config/layout';
 import { paced } from '@/config/time';
 import { HAIL_SIGNAL, morseDuration } from '@/hooks/morse';
 import { useChannel } from '@/hooks/useChannel';
@@ -181,10 +181,32 @@ export default function App() {
         };
     }, []);
 
+    /**
+     * Высота полосы шапки, px: то, докуда доходят шторки и не дальше (см. GH-58).
+     *
+     * Число это не постоянное: шапка растёт вместе с шириной окна — крупнее кегль, крупнее
+     * кнопки (`.fluid()` в App.module.less), — и записанное значение разошлось бы с ней при
+     * первой же смене ширины. Умолчание — `SHEET_TOP_GAP`, тот же запасной рост, каким открыт
+     * первый кадр до того, как ResizeObserver успеет отмерить настоящую полосу.
+     */
+    const [headerHeight, setHeaderHeight] = useState(SHEET_TOP_GAP);
+    const measureHeader = useCallback((node: HTMLDivElement | null) => {
+        if (!node) {
+            setHeaderHeight(SHEET_TOP_GAP);
+            return undefined;
+        }
+        const observer = new ResizeObserver(() => setHeaderHeight(node.getBoundingClientRect().height));
+        observer.observe(node);
+        return () => {
+            observer.disconnect();
+            setHeaderHeight(SHEET_TOP_GAP);
+        };
+    }, []);
+
     // Раскладка целиком: где стоит разговор и какого он размера. Место выбирает форма окна,
     // размер — человек, и всё это сверено с нынешним окном одним местом на все проверки,
     // см. hooks/useLayout. Здесь остаётся только пользоваться готовым.
-    const { layout, resize, hide, show } = useLayout(floor);
+    const { layout, resize, hide, show } = useLayout(floor, headerHeight);
     const { mode, shown, folded, size } = layout;
     const atSide = mode === 'side';
     // Разговор на экране по-настоящему: не убран и не свёрнут свайпом до пола. Свёрнутый
@@ -1037,6 +1059,10 @@ export default function App() {
             ]
                 .filter(Boolean)
                 .join(' ')}
+            // Настоящая высота шапки — вниз по дереву, а не только тем двум узлам, что уже несут
+            // boxEdge: до неё дотягивается и шторка (Shade.module.less), а она снаружи и своей
+            // коробки не касается, и в boxEdge её звать незачем.
+            style={{ '--header-height': `${headerHeight}px` } as CSSProperties}
         >
             {/* Мерки коробки внизу экрана в вертикальной раскладке и справа в горизонтальной.
                 Высота это или ширина, говорит раскладка, а не число. Коробка одна на всё, что
@@ -1069,7 +1095,7 @@ export default function App() {
                         berths={berths}
                     />
                 </div>
-                <div className={styles.headerBar} style={boxEdge}>
+                <div className={styles.headerBar} style={boxEdge} ref={measureHeader}>
                     <div className={styles.headerInfo}>
                         {/* Название канала — это и кнопка «кто на связи»: по нажатию открывается
                             список кораблей. Значок стоит в конце названия, а не отдельной кнопкой
