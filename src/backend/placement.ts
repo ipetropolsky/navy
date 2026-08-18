@@ -73,9 +73,9 @@ const spotOf = (ship: Standing): Spot => ({
 });
 
 /**
- * Поле по краям кадра, % ширины сцены. Рейд занимает не весь кадр, а воду между полями:
+ * Поле по краям рейда, % его ширины. Рейд занимает не весь кадр, а воду между полями:
  * в них коридоры, в них же разброс внутри полосы, расхождение тесной пары и вместимость линии.
- * Число одно на все четыре счёта нарочно — иначе у кадра оказалось бы четыре разных края.
+ * Число одно на все четыре счёта нарочно — иначе у рейда оказалось бы четыре разных края.
  *
  * Раньше поля не было вовсе: левая полоса начиналась на нуле, правая кончалась на сотне,
  * и корабль на боковом коридоре вставал бортом ровно на обрез. В кадре это читалось не стоянкой
@@ -89,15 +89,44 @@ const spotOf = (ship: Standing): Spot => ({
  * половину кадра; линии с нулевой по седьмую не теряют ни одной пары ни при каком поле
  * до 4%.
  *
- * В пикселях это 42px на десктопе и 14px на телефоне — и в том, что числа разные, вся суть:
- * поле отмерено кадром, как и весь рейд, поэтому сцена на любом экране выглядит одинаково.
- * Раньше на этом месте стояли 30px в стилях, и на телефоне они съедали втрое большую долю
- * кадра, чем на десктопе.
+ * В пикселях это 42px на десктопе и 17px на телефоне — и в том, что числа разные, вся суть:
+ * поле отмерено рейдом, как и всё остальное на нём, поэтому сцена на любом экране выглядит
+ * одинаково. Раньше на этом месте стояли 30px в стилях, и на телефоне они съедали втрое
+ * большую долю кадра, чем на десктопе.
+ *
+ * Поле у носа при этом отмеряется не кромкой рейда, а кромкой окна: на телефоне рейд шире
+ * кадра, и всё, что за кромкой, срезается (см. `edgesFor`).
  */
 export const EDGE_MARGIN = 3.5;
 
-/** Вода между полями, % ширины сцены: всё, что рейду отведено. */
+/** Вода между полями, % ширины рейда: всё, что кораблям отведено. */
 const RAID_WIDTH = 100 - 2 * EDGE_MARGIN;
+
+/** Поля этого корабля по краям рейда, % ширины рейда: у левой кромки и у правой. */
+interface Edges {
+    from: number;
+    to: number;
+}
+
+/**
+ * Поля у носа и у кормы.
+ *
+ * `beyond` — насколько рейд уходит за кромку окна с каждой стороны, % ширины рейда. На узком
+ * экране рейд шире кадра (см. `--raid-overhang`), и всё, что за кромкой, кадром срезается.
+ * Корме это не беда, а скорее натуральнее: корабль виден не целиком, будто кадр его
+ * не вмещает. А нос срезать нельзя совсем — это главная часть силуэта, и на нём же стоит
+ * бортовой номер. Поэтому поле у носа отмеряется от настоящей кромки окна и остаётся тем
+ * же самым полем в `EDGE_MARGIN`, каким было, когда рейд в кадр помещался; поле у кормы
+ * на вылет тратится и, когда вылет его перекрывает, сходит на нет.
+ *
+ * Рейд помещается в кадр целиком (`beyond` = 0) — оба поля снова по `EDGE_MARGIN`,
+ * и расстановка стоит ровно там же, где стояла.
+ */
+const edgesFor = (facing: Side, beyond: number): Edges => {
+    const bow = EDGE_MARGIN + beyond;
+    const stern = Math.max(0, EDGE_MARGIN - beyond);
+    return facing === 'right' ? { from: stern, to: bow } : { from: bow, to: stern };
+};
 
 /**
  * Оси коридоров, долями воды между полями. На них стоят отметки мест — точки на воде и подписи
@@ -240,8 +269,8 @@ const scatterShare = (seed: string): number => {
 /* eslint-enable no-bitwise */
 
 /** Не дать корпусу выйти в поле: середина корабля не ближе полуширины к кромке воды. */
-const inFrame = (at: number, half: number): number =>
-    Math.min(Math.max(at, EDGE_MARGIN + half), 100 - EDGE_MARGIN - half);
+const inFrame = (at: number, half: number, edges: Edges): number =>
+    Math.min(Math.max(at, edges.from + half), 100 - edges.to - half);
 
 /**
  * Где корабль стоит на своём месте, пока ему никто не мешает, % ширины сцены — серединой
@@ -252,13 +281,13 @@ const inFrame = (at: number, half: number): number =>
  * своего коридора, ту самую, на которой горит отметка места. Разброса ему не достаётся вовсе,
  * и это честно: разбрасывать нечего, вода вся под ним.
  */
-const restingAt = (spot: Spot, seed: string): number => {
+const restingAt = (spot: Spot, seed: string, edges: Edges): number => {
     const half = hullHalf(spot.slot, spot.kind);
     const { from, to } = CORRIDOR_BOUNDS[spot.corridor];
     const [nearest, farthest] = [from + half, to - half];
     const at =
         nearest > farthest ? CORRIDOR_CENTERS[spot.corridor] : nearest + scatterShare(seed) * (farthest - nearest);
-    return inFrame(at, half);
+    return inFrame(at, half, edges);
 };
 
 /** Ключ разброса: участник и его место. Больше в нём ничего и нет — см. scatterShare. */
@@ -273,8 +302,8 @@ const scatterSeed = (ship: Standing & Pick<Member, 'memberId'>): string =>
 const needApart = (oneHalf: number, otherHalf: number): number => (oneHalf + otherHalf) * (1 + BOARD_GAP);
 
 /** Сколько кораблю осталось воды в эту сторону: до кромки рейда, и ни шагом дальше. */
-const roomAside = (at: number, half: number, away: number): number =>
-    away > 0 ? 100 - EDGE_MARGIN - half - at : at - half - EDGE_MARGIN;
+const roomAside = (at: number, half: number, away: number, edges: Edges): number =>
+    away > 0 ? 100 - edges.to - half - at : at - half - edges.from;
 
 /**
  * Помещаются ли эти двое борт о борт.
@@ -448,10 +477,13 @@ export const isBerthFree = (berth: Berth, kind: ShipKind, taken: Standing[]): bo
 export type Anchored = Standing & Pick<Member, 'memberId' | 'joinedAt'>;
 
 /**
- * Где корабль стоит сам по себе, % ширины сцены — серединой корпуса. Это его собственная точка
+ * Где корабль стоит сам по себе, % ширины рейда — серединой корпуса. Это его собственная точка
  * на рейде: разброс внутри полосы и ничего больше, соседи тут не в счёт.
+ *
+ * `beyond` — насколько рейд уходит за кромку кадра с каждой стороны (см. `edgesFor`).
  */
-export const restingLeft = (ship: Anchored): number => restingAt(spotOf(ship), scatterSeed(ship));
+export const restingLeft = (ship: Anchored, beyond = 0): number =>
+    restingAt(spotOf(ship), scatterSeed(ship), edgesFor(ship.place.facing, beyond));
 
 /**
  * Разброс со знаком: −1…1. Тот же хеш, что и у разброса поперёк, только развёрнутый вокруг нуля —
@@ -518,9 +550,13 @@ export const restingYaw = (ship: Anchored): number => scatterSpread(`${scatterSe
  * не встают, так что пара — это всё, что бывает. Первым уступает тот, кто мельче: ему и ходу
  * меньше, и в кадре это читается правильно — катер отошёл от корабля, а не корабль от катера.
  * Не хватило его хода — остаток добирает крупный. Уступать можно и в чужую полосу, а вот
- * в поле по краям нельзя: рейд кончается там, где начинается поле (EDGE_MARGIN). Дальше кромки
+ * в поле по краям нельзя: рейд кончается там, где начинается поле (см. edgesFor). Дальше кромки
  * и не понадобится — пару, которой не разойтись в рейде, расстановка на линию не пустит
  * (см. fitsAlongside).
+ *
+ * `beyond` — насколько рейд уходит за кромку кадра с каждой стороны: от него зависят поля,
+ * и только они. Ни разброс, ни расхождение, ни то, кто кому уступает, от ширины окна
+ * не меняются — иначе флот на телефоне стоял бы не так, как на десктопе.
  *
  * Держится всё это, как на резинке: ушёл сосед — и корабль вернулся на свою точку, никуда
  * при этом не переезжая, потому что место у него всё это время было своё.
@@ -533,10 +569,14 @@ export const restingYaw = (ship: Anchored): number => scatterSpread(`${scatterSe
  * сейчас уйдёт. Разводить троих взаправду нечем: воды на линии на троих может и не быть,
  * а правило, которое живёт полминуты в году, не стоит того, чтобы ошибаться в нём молча.
  */
-export const fleetLefts = (fleet: Anchored[], leaving: ReadonlySet<string> = new Set()): Record<string, number> => {
+export const fleetLefts = (
+    fleet: Anchored[],
+    leaving: ReadonlySet<string> = new Set(),
+    beyond = 0
+): Record<string, number> => {
     const left: Record<string, number> = {};
     for (const ship of fleet) {
-        left[ship.memberId] = restingLeft(ship);
+        left[ship.memberId] = restingLeft(ship, beyond);
     }
     for (const slot of new Set(fleet.map((ship) => ship.place.slot))) {
         const line = fleet.filter((ship) => ship.place.slot === slot);
@@ -556,8 +596,14 @@ export const fleetLefts = (fleet: Anchored[], leaving: ReadonlySet<string> = new
                 // Отходит каждый от соседа: кто стоит правее, тот и вправо. Встали ровно друг
                 // на друга — расходятся хоть как-нибудь, лишь бы в разные стороны.
                 const away = Math.sign(left[small.memberId] - left[big.memberId]) || 1;
-                const bySmall = Math.min(short, roomAside(left[small.memberId], smallHalf, away));
-                const byBig = Math.min(short - bySmall, roomAside(left[big.memberId], bigHalf, -away));
+                const bySmall = Math.min(
+                    short,
+                    roomAside(left[small.memberId], smallHalf, away, edgesFor(small.place.facing, beyond))
+                );
+                const byBig = Math.min(
+                    short - bySmall,
+                    roomAside(left[big.memberId], bigHalf, -away, edgesFor(big.place.facing, beyond))
+                );
                 left[small.memberId] += away * bySmall;
                 left[big.memberId] -= away * byBig;
             }

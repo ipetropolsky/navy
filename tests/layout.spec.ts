@@ -1000,16 +1000,28 @@ test('берег острова стоит на горизонте, а не от
  * своей полосы, вода вся под ним, и в кромку он упирается наверняка. На мелком или дальнем
  * корабле поле не проверить — он до кромки попросту не достаёт.
  *
- * Число сверяется на всех трёх ширинах, а не только на телефоне: силуэт отмерен долей кадра
+ * Число сверяется на всех трёх ширинах, а не только на телефоне: силуэт отмерен долей рейда
  * от начала и до конца, и доля эта одна и та же везде. Пиксельного потолка, из-за которого
  * на десктопе корабль рисовался уже отведённого, больше нет — см. «Ширина силуэта в пикселях»
  * в истории шагов.
+ *
+ * Меряется поле у носа и от ближней кромки — рейда или кадра, смотря какая ближе. Кромки эти
+ * не всегда одни и те же: на телефоне рейд шире кадра (RAID_OVERHANG), и поле у носа отмеряет
+ * тогда сам кадр, а не рейд. Корма в такой кадр может и не поместиться — ей это не беда, —
+ * а нос обязан быть виден целиком: на нём бортовой номер (см. `edgesFor` в placement.ts).
  */
 const edgeGap = (page: Page): Promise<number> =>
     page.evaluate(() => {
-        const scene = document.querySelector('[class*="scene"]')!.getBoundingClientRect();
-        const hull = document.querySelector('[class*="shipRock"] img')!.getBoundingClientRect();
-        return (Math.min(hull.left - scene.left, scene.right - hull.right) / scene.width) * 100;
+        const hull = document.querySelector('[class*="shipRock"] img')!;
+        const box = hull.getBoundingClientRect();
+        const raid = document.querySelector('[class*="raid_"]')!;
+        const frame = raid.parentElement!.getBoundingClientRect();
+        const water = raid.getBoundingClientRect();
+        const bow =
+            hull.closest('[data-facing]')!.getAttribute('data-facing') === 'right'
+                ? Math.min(water.right, frame.right) - box.right
+                : box.left - Math.max(water.left, frame.left);
+        return (bow / water.width) * 100;
     });
 
 test('корабль не встаёт бортом на обрез кадра, и поле у него одно на всех экранах', async ({ page }) => {

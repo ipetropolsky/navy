@@ -6,14 +6,17 @@ import {
     Corridor,
     ISLAND_FREE_SLOT,
     ISLAND_SIDE,
+    SHIP_KINDS,
     SLOT_COUNT,
     ShipKind,
+    Side,
     otherSide,
     shipWidthPercent,
 } from '@/types/channel';
 
 import {
     Anchored,
+    EDGE_MARGIN,
     Standing,
     berthAt,
     fleetLefts,
@@ -380,6 +383,102 @@ describe('расхождение тесных соседей', () => {
             fleetLefts([staying, joined])[joined.memberId]
         );
         expect(overlap(line.filter((ship) => ship !== leaving)), 'корпуса налезли друг на друга').toBe(false);
+    });
+});
+
+/**
+ * Вылет рейда за кромку кадра. На узком экране рейд шире кадра, и края его срезаны: корме
+ * это не беда, а носу беда — на нём бортовой номер. Правило это счётное, и проверяется оно
+ * тут; браузеру остаётся показать, что номер и правда виден.
+ */
+
+/** Насколько рейд уходит за кромку с каждой стороны в этих проверках, % ширины рейда. */
+const BEYOND = 8;
+
+/** Тот же корабль, поставленный носом в заданную сторону. */
+const heading = (ship: Anchored, facing: Side): Anchored => ({
+    ...ship,
+    place: { ...ship.place, facing, enterFrom: otherSide(facing) },
+});
+
+/** Где у этого корабля нос, % ширины рейда: та кромка корпуса, в которую он смотрит. */
+const bowAt = (ship: Anchored, left: number): number => {
+    const half = shipWidthPercent(ship.place.slot, ship.shipKind) / 2;
+    return ship.place.facing === 'right' ? left + half : left - half;
+};
+
+/** Насколько нос отстоит от ближней к нему кромки окна, % ширины рейда. */
+const bowInside = (ship: Anchored, beyond: number): number => {
+    // Кромки окна в долях рейда: рейд шире кадра на `beyond` с каждой стороны, поэтому левая
+    // кромка приходится на `beyond`, а правая — на `100 - beyond`.
+    const bow = bowAt(ship, restingLeft(ship, beyond));
+    return ship.place.facing === 'right' ? 100 - beyond - bow : bow - beyond;
+};
+
+/** Весь рейд разом: каждый корабль на каждом месте, носом в обе стороны. */
+const EVERYWHERE: Anchored[] = SHIP_KINDS.flatMap((kind) =>
+    [...new Array<number>(SLOT_COUNT)].flatMap((_, slot) =>
+        CORRIDORS.flatMap((corridor) =>
+            (['left', 'right'] as Side[]).map((facing) =>
+                heading(anchored(`${kind}-${slot}-${corridor}-${facing}`, slot, corridor, kind), facing)
+            )
+        )
+    )
+);
+
+describe('вылет рейда за кромку кадра', () => {
+    test('нос не подходит к кромке окна ближе поля', () => {
+        for (const ship of EVERYWHERE) {
+            expect(bowInside(ship, BEYOND), `${ship.memberId} подошёл носом к кромке`).toBeGreaterThanOrEqual(
+                EDGE_MARGIN - 1e-9
+            );
+        }
+    });
+
+    test('корма за кромку уходит', () => {
+        // Иначе поле у кормы не отдавалось бы вылету вовсе, и рейд, раздавшись, встал бы
+        // теми же кораблями в той же тесноте — только пошире.
+        const cut = EVERYWHERE.filter((ship) => {
+            const left = restingLeft(ship, BEYOND);
+            const half = shipWidthPercent(ship.place.slot, ship.shipKind) / 2;
+            const stern = ship.place.facing === 'right' ? left - half : left + half;
+            return ship.place.facing === 'right' ? stern < BEYOND : stern > 100 - BEYOND;
+        });
+        expect(cut.length, 'ни одна корма не вышла за кадр').toBeGreaterThan(0);
+    });
+
+    test('без вылета расстановка стоит там же, где стояла', () => {
+        // Десктоп рейд в кадр вмещает, и там всё должно остаться ровно как было: поля по краям
+        // снова одинаковые, курс на них не влияет.
+        for (const ship of EVERYWHERE) {
+            expect(restingLeft(ship, 0), `${ship.memberId} сдвинулся на пустом вылете`).toBe(restingLeft(ship));
+        }
+    });
+
+    test('вылет двигает только тех, кто у кромки', () => {
+        // В середине кадра поля ни при чём: корабль стоит в своей полосе, до кромок ему далеко,
+        // и от ширины окна его место не зависит.
+        for (const ship of EVERYWHERE.filter((one) => one.place.corridor === 'center')) {
+            expect(restingLeft(ship, BEYOND), `${ship.memberId} поехал от чужого вылета`).toBeCloseTo(
+                restingLeft(ship),
+                9
+            );
+        }
+    });
+
+    test('расхождение тесной пары тоже не выносит нос за кромку', () => {
+        // Расходятся двое до самых кромок рейда, и кромки эти у них теперь разные: у носа своя,
+        // у кормы своя. Считает расхождение те же поля (см. edgesFor), значит и здесь нос
+        // обязан остаться в окне.
+        const small = heading(anchored('malysh', NEAR, 'left', SMALL), 'right');
+        const big = heading(anchored('grom', NEAR, 'center', BIG), 'left');
+        const lefts = fleetLefts([small, big], new Set(), BEYOND);
+        for (const ship of [small, big]) {
+            const bow = bowAt(ship, lefts[ship.memberId]);
+            const inside = ship.place.facing === 'right' ? 100 - BEYOND - bow : bow - BEYOND;
+            expect(inside, `${ship.memberId} разошёлся носом за кромку`).toBeGreaterThanOrEqual(EDGE_MARGIN - 1e-9);
+        }
+        expect(fleetLefts([small, big], new Set(), 0), 'пустой вылет что-то сдвинул').toEqual(fleetLefts([small, big]));
     });
 });
 
