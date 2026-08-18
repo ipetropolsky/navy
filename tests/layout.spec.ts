@@ -2709,6 +2709,12 @@ test('список и форма корабля приезжают поверх 
 // см. SKY_ORION_PLACE в tools/scene-assets/prepare-backgrounds.py.
 const ORION_IN_TILE = { x: 0.4333, y: 0.3966 };
 
+// Насколько созвездие расходится от этой точки вверх и вниз — тоже долями высоты снимка.
+// Меряно по самому снимку (src/assets/scene/sky.png, 1800×559): верхняя звезда стоит на 155 px
+// выше опорной точки, нижняя — на 135 px ниже. Взято с запасом в обе стороны: лишний запас
+// делает проверку строже, а не слабее.
+const ORION_SPREAD = { up: 0.28, down: 0.25 };
+
 test('Орион стоит в кадре на своём месте и ровно один', async ({ page }) => {
     takes(5);
     await openChannel(page, DEMO, ALBATROS);
@@ -2793,6 +2799,72 @@ test('Орион стоит в кадре на своём месте и ровн
     expect(spots['стоячее с разговором'], 'под кадром небо сжалось вместе с полосой').toBeLessThan(
         spots['стоячее, кадру отдано всё']
     );
+});
+
+/**
+ * Проверка выше меряет одну точку — середину созвездия, — и на неё созвездие целиком не ловится:
+ * середина может стоять в кадре, а верхние звёзды уже выйти за кромку. В распахнутом кадре Орион
+ * обязан помещаться весь: он там единственный узнаваемый узор, и обрезанный читается как огрех.
+ *
+ * Держится это высотой плитки. Плитка опущена на десятую долю своей высоты и потому берётся выше
+ * неба — а всё, что взято сверх, уезжает за верхнюю кромку вместе с созвездием. Лишний запас
+ * в этой высоте Ориона из кадра и выталкивает, причём тем вернее, чем ниже окно: доля запаса
+ * в невысоком небе больше.
+ *
+ * Оттого и кадры тут — распахнутые и разной высоты, от короткого телефона до десктопа.
+ */
+test('в распахнутом кадре Орион помещается целиком', async ({ page }) => {
+    takes(5);
+    await openChannel(page, DEMO, ALBATROS);
+
+    // Отступы созвездия от кромок неба, px. Плюс — стоит внутри, минус — вышло за кромку.
+    const orionMargins = () =>
+        page.evaluate(
+            ([orion, spread]) => {
+                const sky = document.querySelector('[class*="sky_"]')!.getBoundingClientRect();
+                const tile = document.querySelector('[class*="skyTile"]')!.getBoundingClientRect();
+                const middle = tile.top + orion.y * tile.height;
+                return {
+                    above: Math.round(middle - spread.up * tile.height - sky.top),
+                    below: Math.round(sky.bottom - (middle + spread.down * tile.height)),
+                };
+            },
+            [ORION_IN_TILE, ORION_SPREAD] as const
+        );
+
+    const measure = async (frame: { width: number; height: number }) => {
+        await page.setViewportSize(frame);
+        await freeFrame(page);
+        // Небо доезжает до своей высоты не мгновенно, и первый замер застаёт прежний кадр.
+        await expect
+            .poll(
+                async () => {
+                    const { above, below } = await orionMargins();
+                    if (above < 0) {
+                        return `верх созвездия за кромкой кадра: ${above} px`;
+                    }
+                    if (below < 0) {
+                        return `низ созвездия ушёл под воду: ${below} px`;
+                    }
+                    return 'помещается';
+                },
+                { message: `${frame.width}×${frame.height}: Орион` }
+            )
+            .toBe('помещается');
+        await fillFrame(page);
+        await page.waitForTimeout(700);
+    };
+
+    // Цепочкой, а не циклом: кадры меряются строго по очереди, но await внутри цикла тут
+    // не наш приём — см. правила линтера.
+    await [
+        { width: 390, height: 640 },
+        { width: 390, height: 844 },
+        { width: 1200, height: 900 },
+    ].reduce(async (before, frame) => {
+        await before;
+        return measure(frame);
+    }, Promise.resolve());
 });
 
 /**
