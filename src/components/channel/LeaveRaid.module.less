@@ -1,11 +1,13 @@
+// Колонка с полосой кнопок внизу — см. actions.less.
+@import '@/actions.less';
 // Прокрутка с местом под полосу — см. scroll.less.
 @import '@/scroll.less';
 
 // Прощание с рейдом в шторке: колонка из тела со своей прокруткой и полосы кнопок под ним.
 // Поле приходит от шторки (--sheet-pad, см. ui/Shade): содержимое у неё разное, а поля одни.
 .card {
-    display: flex;
-    flex-direction: column;
+    .actions-column();
+
     flex: 1 1 auto;
     min-height: 0;
 }
