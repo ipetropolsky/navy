@@ -27,13 +27,16 @@
 // Отклик на нажатие — у всей дорожки: сама по себе пилюля отвечает переездом, но нажатие
 // по тому положению, в котором уже стоят, не двигает ничего, и без утопления оно осталось бы
 // вовсе без ответа.
+//
+// Скругление — кнопочное: переключатель стоит с кнопкой в одном ряду, одного с ней роста
+// и набран той же строкой, и углом другого сорта он читался бы плашкой другого сорта.
 .track {
     position: relative;
     display: inline-grid;
     grid-auto-flow: column;
     grid-auto-columns: 1fr;
     padding: @track-inset;
-    border-radius: var(--radius-pill);
+    border-radius: var(--radius-control);
     background: var(--color-control);
     transition: transform 0.08s ease;
 
@@ -49,13 +52,19 @@
 // Светлая заливка — цветом текста: белого в палитре нет вовсе, тема одна и та же ночь,
 // и самое светлое в ней — то, чем набран текст. Подпись на пилюле тогда набирается тем,
 // чем набирают текст на светлой заливке (см. .labelOn).
+//
+// Скругление считается от дорожки, а не задаётся своё: угол пилюли лежит внутри угла дорожки
+// на поле `@track-inset`, и меньше он ровно на это поле. Так две дуги идут вложенно, и просвет
+// между ними на углу тот же, что и на прямой стороне. Возьми пилюле то же скругление, что
+// у дорожки, — на углу просвет раздался бы, и переключатель выглядел бы собранным из двух
+// не подходящих друг другу деталей.
 .pill {
     position: absolute;
     top: @track-inset;
     bottom: @track-inset;
     left: @track-inset;
     width: ~'calc((100% - @{track-inset} * 2) / var(--switch-count))';
-    border-radius: var(--radius-pill);
+    border-radius: ~'calc(var(--radius-control) - @{track-inset})';
     background: var(--color-text);
     transform: translateX(~'calc(var(--switch-at) * 100%)');
     transition: transform @travel @slide-easing;
