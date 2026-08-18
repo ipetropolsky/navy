@@ -286,7 +286,16 @@ export const shipsButton = (page: Page) => page.locator('button[title="Кора�
  */
 const SLIDE_MS = 280 / TIME_SCALE + 60;
 
+/**
+ * Открыть список кораблей — именно открыть, а не переключить. Кнопка-то переключатель, и вызов
+ * подряд закрывал бы уже открытое: проверка, которая сперва посмотрела список, а потом позвала
+ * помощника снова, оставалась без него и падала на первом же нажатии внутри. Спрашиваем поэтому
+ * у самой кнопки, в каком она положении (`aria-expanded`), и жмём только когда есть что открывать.
+ */
 export const openSheet = async (page: Page): Promise<void> => {
+    if ((await shipsButton(page).getAttribute('aria-expanded')) === 'true') {
+        return;
+    }
     await shipsButton(page).click();
     await page.waitForTimeout(SLIDE_MS);
 };
