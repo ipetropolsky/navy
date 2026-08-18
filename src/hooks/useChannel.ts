@@ -3,7 +3,8 @@ import { flushSync } from 'react-dom';
 
 import { ChannelEvent, ChannelSnapshot, MemberDraft, MessageDraft, backend } from '@/backend';
 import { forgetMemberId, readMemberId, rememberMemberId } from '@/backend/identity';
-import { MorseFeed } from '@/types/channel';
+
+import useReception, { Reception } from '@/hooks/useReception';
 
 /**
  * Всё общение фронтенда с бэкендом собрано здесь. Наружу отдаются состояние канала
@@ -15,21 +16,14 @@ import { MorseFeed } from '@/types/channel';
  * одинаково, откуда бы оно ни пришло.
  */
 
-/** Сколько печать держится на экране без новых символов. */
-const TYPING_IDLE_MS = 2600;
-
-interface TypingState {
-    memberId: string;
-    feed: MorseFeed;
-}
-
 export interface ChannelController {
     /** Пока не загрузились, показывать нечего: канал может быть, а может и не быть. */
     loading: boolean;
     channel: ChannelSnapshot | null;
     /** Кто эта вкладка. null — канал открыт, но корабль ещё не встал в строй. */
     myId: string | null;
-    typing: TypingState | null;
+    /** Что печатается прямо сейчас: пришедшая чужая реплика (см. `useReception`). */
+    reception: Reception | null;
     join: (draft: MemberDraft) => Promise<void>;
     updateMe: (draft: MemberDraft) => Promise<void>;
     /** Сняться с рейда, сказав новый курс: с ним уход и встаёт строчкой в ленте. */
@@ -37,15 +31,20 @@ export interface ChannelController {
     /** Высадить чужой корабль. Доступно только старшему на рейде — это проверяет бэкенд. */
     kick: (memberId: string) => Promise<void>;
     sendMessage: (draft: MessageDraft) => Promise<void>;
-    reportTyping: (chars: string) => void;
 }
 
 export function useChannel(slug: string | null, memberIdFromUrl: string | null): ChannelController {
     const [loading, setLoading] = useState(true);
     const [channel, setChannel] = useState<ChannelSnapshot | null>(null);
     const [myId, setMyId] = useState<string | null>(null);
-    const [typing, setTyping] = useState<TypingState | null>(null);
-    const typingTimerRef = useRef<number | undefined>(undefined);
+    const { reception, receive } = useReception();
+    /**
+     * Кто мы — для подписки. Подписка заведена на канал и переживает постановку в строй,
+     * а знать, своё ли пришло сообщение, ей надо на каждом событии. Ссылкой, а не зависимостью:
+     * иначе подписка пересобиралась бы всякий раз, как корабль встал или ушёл.
+     */
+    const myIdRef = useRef(myId);
+    myIdRef.current = myId;
 
     // Открыли канал: разбираем адрес из ссылки, спрашиваем состояние и решаем, кто мы в нём.
     // Ответ может прийти, когда вкладка уже ушла на другой канал, — тогда его надо выбросить,
@@ -132,14 +131,22 @@ export function useChannel(slug: string | null, memberIdFromUrl: string | null):
         return backend.subscribe({
             channelId,
             onEvent: (event: ChannelEvent) => {
-                if (event.type === 'typing') {
-                    setTyping({
-                        memberId: event.member.memberId,
-                        feed: { seq: event.at, text: event.typing.chars },
+                // Чужая реплика доехала — разыгрываем её приём: она печатается по буквам,
+                // а корабль отправителя мигает лампой (см. `useReception`). Своё не разыгрываем:
+                // мы этот текст и набирали, и печатать его нам заново незачем — да и лампа
+                // своего корабля отмигала его прямо во время набора.
+                //
+                // Служебные записи тоже мимо: их не набирал никто, они складываются на месте.
+                if (
+                    event.type === 'message-added' &&
+                    event.message.kind !== 'system' &&
+                    event.message.author.memberId !== myIdRef.current
+                ) {
+                    receive({
+                        messageId: event.message.messageId,
+                        memberId: event.message.author.memberId,
+                        text: event.message.text,
                     });
-                    window.clearTimeout(typingTimerRef.current);
-                    typingTimerRef.current = window.setTimeout(() => setTyping(null), TYPING_IDLE_MS);
-                    return;
                 }
                 // В фоне применяем в том же такте, в котором пришло событие, а не когда
                 // до отрисовки дойдёт очередь: доставку самого события браузер не придерживает,
@@ -157,7 +164,7 @@ export function useChannel(slug: string | null, memberIdFromUrl: string | null):
                 }
             },
         });
-    }, [channelId]);
+    }, [channelId, receive]);
 
     // Корабль вышел (например, из другой вкладки) — эта вкладка возвращается к постановке в строй.
     useEffect(() => {
@@ -166,8 +173,6 @@ export function useChannel(slug: string | null, memberIdFromUrl: string | null):
             setMyId(null);
         }
     }, [channel, myId]);
-
-    useEffect(() => () => window.clearTimeout(typingTimerRef.current), []);
 
     const join = useCallback(
         async (draft: MemberDraft) => {
@@ -219,14 +224,5 @@ export function useChannel(slug: string | null, memberIdFromUrl: string | null):
         [channelId, myId]
     );
 
-    const reportTyping = useCallback(
-        (chars: string) => {
-            if (channelId && myId) {
-                void backend.setTyping({ channelId, memberId: myId, typing: { chars } });
-            }
-        },
-        [channelId, myId]
-    );
-
-    return { loading, channel, myId, typing, join, updateMe, leave, kick, sendMessage, reportTyping };
+    return { loading, channel, myId, reception, join, updateMe, leave, kick, sendMessage };
 }

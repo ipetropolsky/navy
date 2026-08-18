@@ -77,7 +77,7 @@ export default function Ship({
 
     useEffect(() => {
         if (morseFeed?.text) {
-            transmit(morseFeed.text);
+            transmit(morseFeed.text, morseFeed.restart);
         }
     }, [morseFeed, transmit]);
 

@@ -27,6 +27,7 @@ import Shade from '@/components/ui/Shade';
 import { useSnackbar } from '@/components/ui/Snackbar';
 import { LeaveIcon } from '@/components/ui/icons';
 import { FEED_MIN, SHEET_HANDLE } from '@/config/layout';
+import { paced } from '@/config/time';
 import { HAIL_SIGNAL, morseDuration } from '@/hooks/morse';
 import { useChannel } from '@/hooks/useChannel';
 import { chatMagnets, useLayout } from '@/hooks/useLayout';
@@ -85,7 +86,7 @@ const randomCourse = (): Side => (Math.random() < 0.5 ? 'left' : 'right');
 export default function App() {
     const route = useRoute();
     const channelState = useChannel(route.channel, route.memberId);
-    const { channel, myId, typing, loading } = channelState;
+    const { channel, myId, reception, loading } = channelState;
     const [replyTo, setReplyTo] = useState<Message | null>(null);
     // Открыт ли список кораблей. Он выезжает вторым слоем поверх разговора, а не подменяет
     // собой содержимое: подмена уносила вместе с разговором и место прокрутки, и набранное
@@ -416,8 +417,9 @@ export default function App() {
         }
     };
 
-    const typingMember =
-        typing && typing.memberId !== myId ? members.find((member) => member.memberId === typing.memberId) : null;
+    // Чью реплику сейчас принимают. Корабль мог за это время сняться с рейда — тогда сказать
+    // о нём в шапке нечего, и строчка возвращается к обычной.
+    const sendingMember = reception ? members.find((member) => member.memberId === reception.memberId) : null;
     // Отвечать можно и тому, кто уже снялся с рейда: тогда позывной с цветом берутся
     // из снимка при сообщении, а не из состава (см. `authorLook`).
     const replyToAuthor = replyTo
@@ -454,25 +456,70 @@ export default function App() {
         return () => window.clearTimeout(timer);
     }, [hail]);
 
-    // Лампа мигает у того, кто печатает, — и у своего корабля тоже: событие о печати
-    // приходит от бэкенда одинаково, своё оно или чужое.
+    // Свой набор: пока человек печатает, его корабль мигает лампой по набранному. Дальше этой
+    // вкладки набор не идёт вовсе — соседним он покажется тогда же, когда придёт сообщение,
+    // и уже приёмом (см. `useReception`).
+    //
+    // Кусками, а не по буквам: приходят они из плашки ввода уже собранными за треть секунды,
+    // и вставленное разом сообщение приходит одним куском — посимвольного потока в этом случае
+    // нет вовсе. Лампе это всё равно: она дописывает кусок в свою очередь и проигрывает подряд,
+    // ни на какие части его не деля — делить есть смысл там, где надо поспевать за чужой
+    // печатью, а здесь печатают прямо тут.
+    const [typed, setTyped] = useState<{ memberId: string; feed: MorseFeed } | null>(null);
+    const handleTyped = useCallback(
+        (chars: string) => {
+            if (myId) {
+                setTyped((prev) => ({ memberId: myId, feed: { seq: (prev?.feed.seq ?? 0) + 1, text: chars } }));
+            }
+        },
+        [myId]
+    );
+    // Снимается набор, отмигав своё, — по той же причине, что и оклик: висящий в состоянии
+    // повод передавать достался бы кораблю, собранному заново, и тот мигнул бы сам по себе.
+    useEffect(() => {
+        if (!typed) {
+            return undefined;
+        }
+        const timer = window.setTimeout(() => setTyped(null), paced(morseDuration(typed.feed.text)));
+        return () => window.clearTimeout(timer);
+    }, [typed]);
+
+    // Лампа мигает у того, чью реплику принимают, и у своего корабля — пока по нему печатают.
     //
     // Собирается запоминанием: это входное свойство кадра, и новый объект на каждую отрисовку
     // означал бы, что кадр перерисовывается вместе со всем приложением — в том числе на каждом
     // шаге пальца по кромке разговора, где до ламп никому нет дела.
     const morseFeeds = useMemo(() => {
         const feeds: Partial<Record<string, MorseFeed>> = {};
-        if (typing) {
-            feeds[typing.memberId] = typing.feed;
+        if (reception) {
+            feeds[reception.memberId] = reception.feed;
         }
-        // Оклик поверх печати: окликнули печатающего — лампа передаст и то и другое, очередь
-        // у неё общая. А вот запись о печати затёрла бы оклик молча, поэтому он и ставится
-        // последним.
+        if (typed) {
+            feeds[typed.memberId] = typed.feed;
+        }
+        // Оклик поверх остального: окликнули того, чью реплику как раз принимают, — лампа
+        // передаст и то и другое, очередь у неё общая. А вот приём затёр бы оклик молча,
+        // поэтому оклик и ставится последним.
         if (hail) {
             feeds[hail.memberId] = hail.feed;
         }
         return feeds;
-    }, [typing, hail]);
+    }, [reception, typed, hail]);
+
+    // Лента с подменённым текстом принимаемой реплики: в ней стоит ровно столько, сколько
+    // успело напечататься. Подменяем, а не храним отдельно, — сообщение в канале уже лежит
+    // целиком, и вторая его копия разошлась бы с первой на ответах, цитатах и порядке.
+    const shownMessages = useMemo(() => {
+        const messages = channel?.messages ?? [];
+        if (!reception) {
+            return messages;
+        }
+        return messages.map((message) =>
+            message.messageId === reception.messageId && message.kind !== 'system'
+                ? { ...message, text: reception.shown }
+                : message
+        );
+    }, [channel, reception]);
 
     const handleSend = (text: string) => {
         // Отказ показываем снекбаром: у бэкенда для него уже есть человеческий текст,
@@ -639,8 +686,8 @@ export default function App() {
             // подзаголовком сервиса.
             return route.channel ? 'канал не найден' : 'Ночной морской чат';
         }
-        if (typingMember) {
-            return `«${typingMember.name}» передаёт…`;
+        if (sendingMember) {
+            return `«${sendingMember.name}» передаёт…`;
         }
         // Строчка нарочно короткая: на телефоне месяц стоит на её высоте, и длинный
         // подзаголовок наезжал бы на него.
@@ -697,7 +744,7 @@ export default function App() {
             {channel && me && (
                 <>
                     <MessageList
-                        messages={channel.messages}
+                        messages={shownMessages}
                         members={members}
                         myId={me.memberId}
                         onReply={setReplyTo}
@@ -714,7 +761,7 @@ export default function App() {
                         // Фразу об отказе складывает само поле по общей мерке длины
                         // (`@/utils/limit`), нам остаётся её показать.
                         onTooLong={notify}
-                        onTyped={channelState.reportTyping}
+                        onTyped={handleTyped}
                     />
                 </>
             )}

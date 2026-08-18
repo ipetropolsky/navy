@@ -486,12 +486,6 @@ export function createLocalBackend(): ChannelBackend {
             return delay({ message });
         },
 
-        setTyping: ({ channelId, memberId, typing }) => {
-            // Мимо хранилища: печать нигде не оседает.
-            emit(channelId, { type: 'typing', member: { memberId }, typing });
-            return Promise.resolve();
-        },
-
         subscribe: ({ channelId, onEvent: listener }): Unsubscribe => {
             const forChannel = listeners.get(channelId) ?? new Set();
             forChannel.add(listener);
