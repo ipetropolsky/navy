@@ -1817,3 +1817,59 @@ test('корабль качается сам и не замирает', async ({
     // И идёт она плавно: рывком тут был бы шаг в добрую долю размаха за один кадр.
     expect(swing.biggest, 'качка дёрнулась вместо плавного хода').toBeLessThan(swing.heave / 4);
 });
+
+/**
+ * Вылет рейда за кромки кадра. На телефоне кадр почти квадратный, и рейду в нём тесно: коридоры
+ * сходятся к середине, перспективе негде разбежаться. Поэтому рейд там шире окна (RAID_OVERHANG),
+ * а окно его обрезает — и обрезать оно должно только воду да корму крайнего корабля.
+ *
+ * Числа расстановки проверены юнитом (см. placement.test.ts), браузеру остаётся то, чего в них
+ * не увидеть: что в кадре и правда виден весь нос с бортовым номером, что рейд стоит по середине
+ * окна, а не прижат к одной кромке, и что от лишней ширины не завелась прокрутка страницы.
+ *
+ * Замер на окне 390px: рейд 484px против 390px окна — на 94px шире, — и оси боковых коридоров
+ * отходят от кромки на 60px вместо прежних 86px, то есть почти на треть ближе к краю.
+ */
+test.describe('рейд шире окна на телефоне', () => {
+    test.use({ viewport: { width: 390, height: 844 } });
+
+    test('нос с номером остаётся в окне, а рейд — по середине кадра', async ({ page }) => {
+        takes(6);
+        await openChannel(page, DEMO);
+        await expect(page.locator('[data-motion]'), 'корабли так и не встали на места').toHaveCount(0, {
+            timeout: SAIL_TIMEOUT,
+        });
+
+        const seen = await page.evaluate(() => {
+            const raid = document.querySelector('[class*="raid_"]')!.getBoundingClientRect();
+            return {
+                window: window.innerWidth,
+                // Прокрутка страницы: рейд лежит внутри кадра, а кадр обрезает всё за краями.
+                page: document.documentElement.scrollWidth,
+                raid: raid.width,
+                // Насколько рейд выступает за левую и за правую кромку окна.
+                past: [-raid.left, raid.right - window.innerWidth],
+                ships: [...document.querySelectorAll<HTMLElement>('[data-facing]')].map((hull) => {
+                    const box = hull.getBoundingClientRect();
+                    const number = hull.querySelector('[class*="hullNumber"]')!.getBoundingClientRect();
+                    // Отступ носа и номера от той кромки, в которую корабль смотрит.
+                    const toEdge = (edge: { left: number; right: number }): number =>
+                        hull.dataset.facing === 'right' ? window.innerWidth - edge.right : edge.left;
+                    return { bow: toEdge(box), number: toEdge(number) };
+                }),
+            };
+        });
+
+        expect(seen.raid, 'рейд не вышел за кромки окна — мерить нечего').toBeGreaterThan(seen.window);
+        expect(seen.page, 'от вылета завелась горизонтальная прокрутка страницы').toBe(seen.window);
+        expect(seen.past[0], 'рейд встал не по середине кадра').toBeCloseTo(seen.past[1], 0);
+        expect(seen.ships.length, 'в кадре нет кораблей').toBeGreaterThan(0);
+        for (const ship of seen.ships) {
+            // Поле у носа отмерено настоящей кромкой окна (см. edgesFor в placement.ts).
+            // Оно в долях рейда, а рейд шире окна, — значит в пикселях его не меньше,
+            // чем EDGE_MARGIN от ширины окна.
+            expect(ship.bow, 'нос подошёл к кромке окна ближе поля').toBeGreaterThan((EDGE_MARGIN / 100) * seen.window);
+            expect(ship.number, 'бортовой номер обрезан кромкой окна').toBeGreaterThan(0);
+        }
+    });
+});
