@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 
-import { MAGNET_THROW_MS, normalizeMagnets, settleMagnet } from '@/utils/magnet';
+import { MAGNET_GIVE, MAGNET_THROW_MS, normalizeMagnets, rubberBand, settleMagnet } from '@/utils/magnet';
 
 /**
  * Магнитные точки шторки. Проверять их руками — занятие безнадёжное: обе половины механики
@@ -118,5 +118,29 @@ describe('settleMagnet', () => {
         expect(settleMagnet({ ...shade, to: 280, velocity: 0 })).toBe(400);
         // А короткий и сильный рывок закрывает её и с полусотни пикселей.
         expect(settleMagnet({ ...shade, to: 350, velocity: -2 })).toBe(0);
+    });
+});
+
+describe('rubberBand', () => {
+    test('в своих пределах ничего не меняет', () => {
+        expect(rubberBand(300, 300, 900)).toBe(300);
+        expect(rubberBand(600, 300, 900)).toBe(600);
+        expect(rubberBand(900, 300, 900)).toBe(900);
+    });
+
+    test('за пределом ход вязнет, но не обрывается', () => {
+        // Ушли на оттяжку — подались на половину: упор чувствуется с первых же пикселей.
+        expect(rubberBand(300 - MAGNET_GIVE, 300, 900)).toBeCloseTo(300 - MAGNET_GIVE / 2, 6);
+        // Дальше всё туже, и порядок не меняется: палец ведёт, шторка идёт следом.
+        expect(rubberBand(200, 300, 900)).toBeGreaterThan(rubberBand(100, 300, 900));
+    });
+
+    test('за оттяжку не выходит, сколько ни тяни', () => {
+        expect(rubberBand(-10000, 300, 900)).toBeGreaterThan(300 - MAGNET_GIVE);
+        expect(rubberBand(10000, 300, 900)).toBeLessThan(900 + MAGNET_GIVE);
+    });
+
+    test('оттяжка одинакова с обеих сторон', () => {
+        expect(rubberBand(300 - 40, 300, 900) - 300).toBeCloseTo(900 - rubberBand(900 + 40, 300, 900), 6);
     });
 });

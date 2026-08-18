@@ -18,7 +18,7 @@ import {
     SIDE_MIN_WIDTH,
 } from '@/config/layout';
 import { MAX_MESSAGE_LENGTH, SLOT_COUNT, slotDepth, slotShare } from '@/types/channel';
-import { FLING_MS } from '@/utils/magnet';
+import { FLING_MS, MAGNET_GIVE } from '@/utils/magnet';
 
 import {
     ALBATROS,
@@ -5014,6 +5014,43 @@ test('коробку с формой тянут за ручку в обе сто
     await expect(page.getByRole('heading', { name: 'Настроить корабль' }), 'форма не закрылась').toHaveCount(0);
     await expect(page.locator('section[aria-label="Корабли на связи"]'), 'список не остался под формой').toBeVisible();
     expect(await chatHeight(page), 'коробка сдвинулась вслед за ушедшей формой').toBe(third);
+});
+
+/**
+ * Упор под пальцем: ниже своей нижней точки коробка со слоем не идёт, но и не заедает.
+ *
+ * Проверка выше меряет, куда коробка приехала, когда её отпустили, — а эта то, что видно, пока
+ * палец ведёт. Прежде на упор не смотрели вовсе: коробка шла за пальцем до самого пола, слой
+ * сминался в полоску ручки с обрезком полосы кнопок, и только отпускание возвращало его к трети.
+ * То есть ровно то, ради чего упор и заводился, происходило уже после того, как человек всё
+ * увидел.
+ *
+ * Упор при этом не глухой: коробка подаётся за него на оттяжку (`MAGNET_GIVE`) с затуханием.
+ * Глухой упор читается заеданием — палец идёт, коробка стоит, и непонятно, упёрлась она
+ * или сломалась.
+ */
+test('коробку со слоем не утапливают ниже её точки, а упор виден оттяжкой', async ({ page }) => {
+    takes(6);
+    await page.setViewportSize(PHONE);
+    await openChannel(page, DEMO, ALBATROS);
+    await openSheet(page);
+
+    const third = chatSize(PHONE);
+    expect(await chatHeight(page), 'список открылся не в свою треть').toBe(third);
+
+    // Ведём далеко за упор и меряем, не отпуская: сотни точек хватает, чтобы прежняя коробка
+    // легла на пол.
+    const { x, y } = await boxGrip(page, 'main');
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x, y + 400, { steps: 12 });
+    const held = await chatHeight(page);
+    await page.mouse.up();
+
+    expect(third - held, 'коробку со слоем утянули за упор').toBeLessThanOrEqual(MAGNET_GIVE);
+    expect(held, 'упор оказался глухим: коробка не подалась вовсе').toBeLessThan(third);
+    // Отпущенная — возвращается на свою точку: оттяжка на то и оттяжка.
+    await expect.poll(() => chatHeight(page), { message: 'коробка не вернулась с оттяжки' }).toBe(third);
 });
 
 /**
