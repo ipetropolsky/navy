@@ -3556,18 +3556,30 @@ test('повёрнутое окно само уводит разговор по�
     ).toBeVisible();
 });
 
+/** Один кадр снимка переезда: коробка разговора и кадр сцены за ней. */
+interface TurnFrame {
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+    /** Кромка кадра со стороны разговора: снизу под кадром, справа сбоку. */
+    edge: number;
+    sceneWidth: number;
+    sceneHeight: number;
+}
+
 /**
  * Покадровый снимок переезда: меняем форму окна и следим за коробкой разговора и за кадром.
  *
  * Ждём мы тут не «доехало», а «как ехало», поэтому кадры собираем сами, а не смотрим на
  * готовое: промежуточные размеры на то и промежуточные, что в покое их уже нет.
  */
-const boxWhileTurning = async (page: Page, to: { width: number; height: number }) => {
+const boxWhileTurning = async (page: Page, to: { width: number; height: number }): Promise<TurnFrame[]> => {
     await page.evaluate(() => {
         const main = document.querySelector('main')!;
         const head = document.querySelector('header')!;
-        const taken: { left: number; top: number; width: number; height: number; edge: number }[] = [];
-        (window as unknown as { turn: typeof taken }).turn = taken;
+        const taken: TurnFrame[] = [];
+        (window as unknown as { turn: TurnFrame[] }).turn = taken;
         const tick = (): void => {
             const box = main.getBoundingClientRect();
             const frame = head.getBoundingClientRect();
@@ -3576,8 +3588,9 @@ const boxWhileTurning = async (page: Page, to: { width: number; height: number }
                 top: Math.round(box.top),
                 width: Math.round(box.width),
                 height: Math.round(box.height),
-                // Кромка кадра со стороны разговора: снизу под кадром, справа сбоку.
                 edge: Math.round(box.width < box.height ? frame.right : frame.bottom),
+                sceneWidth: Math.round(frame.width),
+                sceneHeight: Math.round(frame.height),
             });
             if (taken.length < 40) {
                 requestAnimationFrame(tick);
@@ -3587,15 +3600,14 @@ const boxWhileTurning = async (page: Page, to: { width: number; height: number }
     });
     await page.setViewportSize(to);
     await page.waitForTimeout(900);
-    return page.evaluate(
-        () =>
-            (
-                window as unknown as {
-                    turn: { left: number; top: number; width: number; height: number; edge: number }[];
-                }
-            ).turn
-    );
+    return page.evaluate(() => (window as unknown as { turn: TurnFrame[] }).turn);
 };
+
+/**
+ * Первые кадры снимка могут застать ещё старую раскладку: окно уже другой формы, а разметка
+ * о ней пока не знает. Переезд начинается там, где кончается старое, — с них и считаем.
+ */
+const since = <T>(frames: T[], started: (frame: T) => boolean): T[] => frames.slice(frames.findIndex(started));
 
 /**
  * Смена раскладки: разговор приезжает из-за новой кромки уже в своём размере.
@@ -3612,10 +3624,6 @@ const boxWhileTurning = async (page: Page, to: { width: number; height: number }
  */
 test('повёрнутое окно не поджимает разговор, а привозит его из-за кромки', async ({ page }) => {
     await openSide(page);
-
-    // Первые кадры снимка могут застать ещё старую раскладку: окно уже другой формы, а разметка
-    // о ней пока не знает. Переезд начинается там, где кончается старое, — с них и считаем.
-    const since = <T>(frames: T[], started: (frame: T) => boolean): T[] => frames.slice(frames.findIndex(started));
 
     // Сбоку → под кадр. Едет верх, стоит высота.
     const down = since(await boxWhileTurning(page, TURNED), (frame) => frame.height === chatSize(TURNED));
@@ -3642,6 +3650,86 @@ test('повёрнутое окно не поджимает разговор, а
     aside.forEach((frame) => {
         expect(frame.edge, 'между кадром и приезжающей панелью открылась щель').toBeGreaterThanOrEqual(frame.left);
     });
+});
+
+/** Окно на пиксель шире своей высоты: раскладка ещё боковая. */
+const SEAM_SIDE = { width: 801, height: 800 };
+
+/** То же окно на пиксель уже: раскладка уже нижняя. */
+const SEAM_UNDER = { width: 800, height: 800 };
+
+/**
+ * Ехала мерка или прыгнула: от того, чем она была до переезда, к тому, чем стала, — в одну
+ * сторону и ни одним шагом больше половины всего пути.
+ *
+ * Половина — с запасом: на своём ходу самый крупный шаг переезда выходит около пятой доли пути,
+ * а прыжок — это весь путь одним кадром. Между ними места хватает и на выпавшие кадры, которых
+ * под проверками бывает вдоволь.
+ *
+ * Первым в ряду идёт именно доотъездное значение, и берётся оно не из снимка: первый кадр
+ * снимка застаёт то окно, до которого очередь rAF успела дойти, — иногда старое, а иногда уже
+ * новое. Прыжок, случившийся до первого кадра, из одного снимка не виден вовсе, потому что
+ * прыгать после него уже нечему.
+ *
+ * Пара пикселей назад откатом не считается: само окно на этом переезде меняется на пиксель,
+ * и мерки, отсчитанные от его кромки, идут за ним.
+ */
+const rode = (values: number[], what: string): void => {
+    const path = values[values.length - 1] - values[0];
+    expect(Math.abs(path), `${what}: мерка не изменилась вовсе`).toBeGreaterThan(0);
+    const steps = values.slice(1).map((value, at) => value - values[at]);
+    expect(
+        steps.filter((step) => Math.sign(step) === -Math.sign(path) && Math.abs(step) > 2),
+        `${what}: мерка ехала назад`
+    ).toEqual([]);
+    expect(Math.max(...steps.map((step) => Math.abs(step))), `${what}: мерка прыгнула`).toBeLessThan(
+        Math.abs(path) / 2
+    );
+};
+
+/**
+ * Смена раскладки — единственное переключение на всю ширину экрана, и выглядеть скачком оно
+ * не должно: сцена в обеих раскладках во всю ширину окна, и меняется только то, откуда её
+ * поджимает разговор.
+ *
+ * Меряется это одним пикселем ширины: 801×800 — окно лежачее, 800×800 — стоячее, и вся разница
+ * между ними в стороне, с которой кадр поджат. Прежде тут был скачок — замер на переезде
+ * 801 → 800px: сцена 521×800 разом делалась 800×575, то есть успевала распахнуться во всё окно
+ * и в нём же присесть. Причин было две: мерки кадра держал класс раскладки, и правило, которым
+ * кадр был отмерен, уходило из-под него вместе с переходом; а отметка «двигается окно» снимала
+ * переходы и на этом кадре тоже.
+ *
+ * Проверяется поэтому не покой по обе стороны точки, а сама дорога через неё: кадр меняет обе
+ * свои мерки постепенно, и разговор одним движением уходит от одной кромки к другой.
+ */
+test('на смене раскладки кадр не прыгает ни высотой, ни шириной', async ({ page }) => {
+    // Смотрим на промежуточные кадры, а не на итог: на общем ускорении переезд укладывается
+    // в три кадра экрана, и «поехало или прыгнуло» на таком не различить.
+    await unhasten(page);
+    await page.setViewportSize(SEAM_SIDE);
+    await openChannel(page, DEMO, ALBATROS);
+
+    // Сужаем: панель сбоку уходит, разговор выезжает снизу, кадр отдаёт высоту и берёт ширину.
+    const wasSide = await boxOf(page, 'header');
+    const narrow = await boxWhileTurning(page, SEAM_UNDER);
+    rode([wasSide.width, ...narrow.map((frame) => frame.sceneWidth)], 'сужение, ширина кадра');
+    rode([wasSide.height, ...narrow.map((frame) => frame.sceneHeight)], 'сужение, высота кадра');
+    // Разговор считаем от нижней кромки окна: он приезжает из-за неё, и первое его место — там.
+    rode(
+        [SEAM_UNDER.height, ...since(narrow, (frame) => frame.height === chatSize(SEAM_UNDER)).map((f) => f.top)],
+        'сужение, разговор'
+    );
+
+    // Растягиваем обратно: разговор уезжает вниз, сбоку выезжает панель и поджимает ширину.
+    const wasUnder = await boxOf(page, 'header');
+    const widen = await boxWhileTurning(page, SEAM_SIDE);
+    rode([wasUnder.width, ...widen.map((frame) => frame.sceneWidth)], 'растяжение, ширина кадра');
+    rode([wasUnder.height, ...widen.map((frame) => frame.sceneHeight)], 'растяжение, высота кадра');
+    // Панель — от правой кромки окна: она выезжает из-за неё.
+    rode(
+        [SEAM_SIDE.width, ...since(widen, (frame) => frame.height === SEAM_SIDE.height).map((f) => f.left)],
+        'растяжение, разговор'
+    );
 });
 
 /** Ширина бокового разговора: справа он всегда упирается в кромку окна. */
