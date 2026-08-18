@@ -42,7 +42,7 @@ import { channelLink, useRoute } from '@/routing';
 import { NOTHING_OPEN, reduce } from '@/state/layers';
 import { Berth, Message, MorseFeed, ShipKind, Side, authorLook, isSameBerth, otherSide } from '@/types/channel';
 import { copyText } from '@/utils/clipboard';
-import { Fling, settleMagnet, stepMagnet, trackFling } from '@/utils/magnet';
+import { Fling, rubberBand, settleMagnet, stepMagnet, trackFling } from '@/utils/magnet';
 import { plural } from '@/utils/plural';
 
 import styles from './App.module.less';
@@ -883,8 +883,16 @@ export default function App() {
             return;
         }
         from.open = from.size + (from.at - gripAxis(event));
+        // Отмечаем то, куда палец увёл коробку, а не то, куда её пустили: скорость меряется
+        // намерением. Брошенная за нижнюю точку коробка обязана долететь до неё с разгона,
+        // а не потерять его на упоре, о который палец тёрся последние полсекунды.
         from.fling.mark(from.open, event.timeStamp);
-        resize(from.open);
+        // Ниже нижней своей точки коробка не идёт: со слоем это не пол, а наименьшая настоящая
+        // доля — сминать список или форму в полоску ручки с полем ввода некуда (см. `chatMagnets`).
+        // Упор при этом не глухой: коробка подаётся за него на дюжину точек с затуханием,
+        // и отпущенная возвращается — видно, что она упёрлась, а не заела.
+        const points = chatMagnets(layout, boxHasForm);
+        resize(rubberBand(from.open, points[0], points[points.length - 1]));
     };
 
     /**
