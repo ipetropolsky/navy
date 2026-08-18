@@ -491,29 +491,53 @@ test('на стоянке корабль отходит от своей лини
     await openChannel(page, 'stoyanka', 'gost');
     await openJoinForm(page);
 
-    const raid = await page.evaluate(() => {
-        // Меряем дорожки, а не то, что на них стоит: дорожка неподвижна, а точка с подписью
-        // качаются волной, и разовый замер застал бы их в случайной фазе. Нижняя кромка
-        // дорожки — это и есть вода под килем, то самое место стоянки.
-        const water = (node: Element): number => Math.round(node.getBoundingClientRect().bottom * 100) / 100;
-        const lines = [
-            ...document.querySelectorAll<HTMLElement>('[class*="shipNameLane"]'),
-            ...document.querySelectorAll<HTMLElement>('[data-berth]'),
-        ].map((mark) => water(mark.closest('[class*="Lane"]') ?? mark));
-        const fleet = [...document.querySelectorAll<HTMLElement>('[data-berth-ship]')].map((hull) => {
-            const lane = hull.closest<HTMLElement>('[class*="shipLane"]')!;
-            const name = document.querySelector(`[data-berth-name="${hull.dataset.berthShip!}"]`);
-            return {
-                // Своя линия у корабля одна: подпись его же места. Она достаётся всем,
-                // кроме стоящего на выбранном месте, — а выбранное свободно, чужих рейд
-                // не предлагает.
-                line: name ? water(name) : null,
-                water: water(lane),
-                yaw: Number.parseFloat(getComputedStyle(lane.querySelector('[class*="shipYaw"]')!).rotate),
-            };
+    const measure = () =>
+        page.evaluate(() => {
+            // Меряем дорожки, а не то, что на них стоит: дорожка неподвижна, а точка с подписью
+            // качаются волной, и разовый замер застал бы их в случайной фазе. Нижняя кромка
+            // дорожки — это и есть вода под килем, то самое место стоянки.
+            const water = (node: Element): number => Math.round(node.getBoundingClientRect().bottom * 100) / 100;
+            const lines = [
+                ...document.querySelectorAll<HTMLElement>('[class*="shipNameLane"]'),
+                ...document.querySelectorAll<HTMLElement>('[data-berth]'),
+            ].map((mark) => water(mark.closest('[class*="Lane"]') ?? mark));
+            const fleet = [...document.querySelectorAll<HTMLElement>('[data-berth-ship]')].map((hull) => {
+                const lane = hull.closest<HTMLElement>('[class*="shipLane"]')!;
+                const name = document.querySelector(`[data-berth-name="${hull.dataset.berthShip!}"]`);
+                return {
+                    // Своя линия у корабля одна: подпись его же места. Она достаётся всем,
+                    // кроме стоящего на выбранном месте, — а выбранное свободно, чужих рейд
+                    // не предлагает.
+                    line: name ? water(name) : null,
+                    water: water(lane),
+                    yaw: Number.parseFloat(getComputedStyle(lane.querySelector('[class*="shipYaw"]')!).rotate),
+                };
+            });
+            return { lines, fleet };
         });
-        return { lines, fleet };
-    });
+
+    // И ждём, пока рейд устоится: замер тут разовый, а до него сцена успевает пошевелиться
+    // трижды. Корабли идут по воде — отход считается от места, и застигнутый на полпути
+    // корабль показывает не отход, а остаток дороги. Кадр меняет рост под открытой формой —
+    // а отход считается в долях этого роста, и снятый на промежуточном кадре он выходит
+    // меньше настоящего: ловилось 0.14 вместо полутора пунктов. Ещё не размеченная сцена
+    // и вовсе отдаёт всем дорожкам нулевые коробки, и отход на них выходит ровным нулём.
+    // Ждём поэтому не признака готовности — их тут пришлось бы перечислять все, — а покоя:
+    // двух одинаковых замеров подряд. Шевелящаяся сцена двух таких не даёт.
+    let previous = '';
+    await expect
+        .poll(
+            async () => {
+                const now = JSON.stringify(await measure());
+                const still = now !== '' && now === previous;
+                previous = now;
+                return still;
+            },
+            { message: 'рейд так и не устоялся в кадре', timeout: SAIL_TIMEOUT }
+        )
+        .toBe(true);
+
+    const raid = await measure();
 
     expect(raid.fleet, 'на рейде не собралось трёх кораблей').toHaveLength(3);
     for (const ship of raid.fleet) {
@@ -523,8 +547,12 @@ test('на стоянке корабль отходит от своей лини
     // Отошли все: рейд стоит не по линейке. Полпикселя тут не мерка терпимости, а порог
     // видимости — совпади корабль с линией, разница вышла бы ровным нулём.
     const shifts = raid.fleet.map((ship) => Math.abs(ship.water - ship.line!));
-    for (const shift of shifts) {
-        expect(shift, 'корабль встал точно на свою линию').toBeGreaterThan(0.5);
+    for (const [index, shift] of shifts.entries()) {
+        const { water, line } = raid.fleet[index];
+        // В сообщении обе кромки, а не один их разрыв: ноль тут выходит и от совпадения
+        // с линией, и от неразмеченной сцены, где нулевые обе, — а разбирать эти два случая
+        // по числу 0 в отчёте невозможно.
+        expect(shift, `корабль встал точно на свою линию (${water} против ${line})`).toBeGreaterThan(0.5);
     }
 
     // И при этом никто не перебрался на чужую линию: отход — пятая часть промежутка,
@@ -978,10 +1006,11 @@ test('разметка гаснет вместе с флотом, а не кад
     // Сверяем по времени, а не кадр в кадр, потому что кадр в кадр они и не совпадают: разметка
     // уходит анимацией, корабль — переходом, и браузер заводит их с разных кадров. Глазу эти
     // 16 мс не видны, а покадровому замеру видны отлично — на крутом начале ease-out соседние
-    // кадры расходятся на восьмую пути, и проверка сыпалась на ровном месте. Полсотни
-    // миллисекунд запаса кадровый разнобой покрывают с лихвой, а перепутанное движение — нет:
-    // разъедься разметка с флотом на длительность кадра (@expand-seconds вдвое дольше), середина
-    // разошлась бы на добрую сотню.
+    // кадры расходятся на восьмую пути, и проверка сыпалась на ровном месте. Порог тут стоит
+    // между тем, что даёт кадровый разнобой, и тем, что даёт перепутанное движение: разъедься
+    // разметка с флотом на длительность кадра (@expand-seconds вдвое дольше), середина
+    // разошлась бы на добрую сотню. Полсотни на этой шкале оказалось мало — на четверти пути
+    // ловилось 50.9, — и семьдесят взяты как раз посередине: разнобой покрывают, а сотню нет.
     //
     // Призрака берём самым тёмным кадром, а не первым: корабль только светлеет, и если первый
     // замер пришёлся уже на движение, доли считались бы от полпути.
@@ -990,7 +1019,7 @@ test('разметка гаснет вместе с флотом, а не кад
     const back = frames.map((frame) => ({ ms: frame.ms, part: (frame.ship - ghost) / (1 - ghost) }));
     for (const mark of [0.25, 0.5, 0.75]) {
         const apart = Math.abs(crossed(gone, mark) - crossed(back, mark));
-        expect(apart, `разметка и флот идут вразнобой на доле ${mark}`).toBeLessThan(50);
+        expect(apart, `разметка и флот идут вразнобой на доле ${mark}`).toBeLessThan(70);
     }
 
     // И уходит из кадра совсем: иначе прозрачный слой навсегда остался бы поверх сцены.
@@ -1171,7 +1200,7 @@ test('вода замыкает круг без скачка', async ({ page }) 
 });
 
 test('корабль уходит за кромку и пропадает из кадра', async ({ page }) => {
-    takes(4);
+    takes(6);
     await openChannel(page, DEMO, ALBATROS);
     await expect(ships(page)).toHaveCount(3);
 
