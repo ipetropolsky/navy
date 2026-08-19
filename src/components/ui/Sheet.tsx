@@ -35,6 +35,8 @@ interface SheetProps {
      * никто (см. ui/Actions). Знает об этом содержимое: оно эту полосу и наполняет.
      */
     ownWidth?: boolean;
+    /** Развести содержимое полосы по разным краям вместо кучи слева (см. ui/Actions). */
+    spread?: boolean;
     /**
      * Лист не впритык к кромкам хозяина: нужно там, где внутри картинка во всю ширину —
      * портрет корабля иначе упирался бы в края шторки.
@@ -44,14 +46,26 @@ interface SheetProps {
     children: ReactNode;
 }
 
-export default function Sheet({ title, actions, ownWidth = false, inset = false, onSubmit, children }: SheetProps) {
+export default function Sheet({
+    title,
+    actions,
+    ownWidth = false,
+    spread = false,
+    inset = false,
+    onSubmit,
+    children,
+}: SheetProps) {
     const content = (
         <>
             <div className={styles.body}>
                 {title && <div className={styles.title}>{title}</div>}
                 {children}
             </div>
-            {actions && <Actions ownWidth={ownWidth}>{actions}</Actions>}
+            {actions && (
+                <Actions ownWidth={ownWidth} spread={spread}>
+                    {actions}
+                </Actions>
+            )}
         </>
     );
     const look = [styles.sheet, inset ? styles.sheetInset : ''].filter(Boolean).join(' ');

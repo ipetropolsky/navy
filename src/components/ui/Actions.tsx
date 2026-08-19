@@ -11,6 +11,13 @@ interface ActionsProps {
      * никто: все стоят по содержимому и прижаты влево.
      */
     ownWidth?: boolean;
+    /**
+     * Разводит содержимое ряда по разным краям, а не жмёт его к одному. Нужен там, где кнопки
+     * в ряду — не пара, читающаяся вместе, а два разных дела на разных концах (см. ShipCard).
+     * Работает только вместе с `ownWidth`: делить ширину растяжкой и разводить по краям сразу
+     * незачем, гуляла бы посередине только одна граница.
+     */
+    spread?: boolean;
 }
 
 /**
@@ -23,8 +30,13 @@ interface ActionsProps {
  * `--actions-side`: поле по бокам, то же самое, каким отступает от краёв текст над кнопками.
  * Подробности — в стилях.
  */
-export default function Actions({ children, aboveFooter = false, ownWidth = false }: ActionsProps) {
-    const look = [styles.actions, aboveFooter && styles.actionsAboveFooter, ownWidth && styles.actionsOwnWidth]
+export default function Actions({ children, aboveFooter = false, ownWidth = false, spread = false }: ActionsProps) {
+    const look = [
+        styles.actions,
+        aboveFooter && styles.actionsAboveFooter,
+        ownWidth && styles.actionsOwnWidth,
+        spread && styles.actionsSpread,
+    ]
         .filter(Boolean)
         .join(' ');
     return <div className={look}>{children}</div>;
