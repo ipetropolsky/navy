@@ -89,8 +89,9 @@ export default function ShipCard({ member, senior }: ShipCardProps) {
                     )}
                 </div>
             }
-            /* Ряд тот же, что внизу форм, но по содержимому и влево: переключатель рядом
-               тянуть нельзя (см. ui/Actions и ui/Switch). */
+            /* Ряд тот же, что внизу форм, но по содержимому и разведён по краям: переключатель
+               тянуть нельзя (см. ui/Actions и ui/Switch), а сигнал и огни — два разных дела,
+               а не пара, которая должна читаться вместе. */
             actions={
                 <>
                     <Button variant="secondary" onClick={handleSignal}>
@@ -113,6 +114,7 @@ export default function ShipCard({ member, senior }: ShipCardProps) {
                 </>
             }
             ownWidth
+            spread
             inset
         >
             <div className={styles.hullNumber}>Бортовой номер {member.hullNumber}</div>

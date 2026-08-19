@@ -36,6 +36,7 @@ import {
     isSameBerth,
     otherSide,
     projectLeft,
+    shipSizeShare,
     shipWidthPercent,
     slotDepth,
     slotScale,
@@ -1000,9 +1001,21 @@ function SeaScene({ members, myId, morseFeeds, ready, berths, onEditShip, onShow
                 SVG-фильтр с primitiveUnits="objectBoundingBox" — как раз это: stdDeviation ниже
                 читается не в пикселях, а в долях собственного бокса того элемента, что фильтр
                 на себя навесил (см. .shipShadow в SeaScene.module.less), и работает так уже
-                двадцать лет. Сам блок пустой и невидимый — тут только определение фильтра. */}
+                двадцать лет. Сам блок пустой и невидимый — тут только определение фильтра.
+
+                Область фильтра расширена явно (x/y/width/height): дефолтные -10%/120% размытию
+                впритык, и у широких кораблей его подрезает по бокам, — видно в GH-61. Запас взят
+                с той же головой, что и stdDeviation, — долей бокса, а не пикселями, — иначе
+                дальний корабль получил бы пиксельный запас в размер себя самого. */}
             <svg width="0" height="0" style={{ position: 'absolute' }} aria-hidden="true">
-                <filter id="ship-shadow-blur" primitiveUnits="objectBoundingBox">
+                <filter
+                    id="ship-shadow-blur"
+                    primitiveUnits="objectBoundingBox"
+                    x="-25%"
+                    y="-25%"
+                    width="150%"
+                    height="150%"
+                >
                     <feGaussianBlur stdDeviation="0.025" />
                 </filter>
             </svg>
@@ -1275,10 +1288,21 @@ function SeaScene({ members, myId, morseFeeds, ready, berths, onEditShip, onShow
                                     >
                                         {/* Тень идёт перед кораблём в разметке, поэтому корпус её перекрывает.
                                     Наклон свой, зеркальный корпусу (см. @keyframes shadow-pitch), — общий
-                                    предок с наклоном корпуса тут был бы лишним. */}
+                                    предок с наклоном корпуса тут был бы лишним.
+
+                                    --ship-size — та же доля места, что и в расстановке (shipSizeShare):
+                                    у крупного корабля отражение просто крупнее в пикселях, и без поправки
+                                    на размер густота у него читалась сплошным пятном там, где у катера —
+                                    тающим силуэтом (GH-61). Доля от 0.5 до 1 — и по ней же .shipShadow
+                                    поджимает густоту для крупных, оставляя мелким прежний, уже верный вид. */}
                                         <div
                                             className={styles.shipShadow}
-                                            style={{ '--pitch-angle': pitchAngle } as CSSProperties}
+                                            style={
+                                                {
+                                                    '--pitch-angle': pitchAngle,
+                                                    '--ship-size': shipSizeShare(member.shipKind),
+                                                } as CSSProperties
+                                            }
                                         >
                                             <ShipShadow kind={member.shipKind} facing={member.place.facing} />
                                         </div>
