@@ -917,8 +917,11 @@ test('пока выбирают место, призраками становя�
     // в светлое пятно под кораблём. Свой фильтр (brightness+blur) у тени есть всегда, поэтому
     // сравниваем не с «none», а с отсутствием именно призрачного фильтра — GHOST добавляет
     // contrast и saturate, которых больше нигде в проекте нет.
+    // Подчёркивание в селекторе не для красоты: внутри .shipShadow лежит .shipShadowShape
+    // (маска густоты, см. SeaScene.module.less), и без него сюда попадал бы и внутренний
+    // короб — а фильтр стоит на внешнем.
     const shadows = await page
-        .locator('[class*="shipShadow"]')
+        .locator('[class*="shipShadow_"]')
         .evaluateAll((marks) => marks.map((mark) => getComputedStyle(mark).filter));
     expect(shadows.length, 'теней в кадре не нашлось, проверять нечего').toBeGreaterThan(0);
     expect(

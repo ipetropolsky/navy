@@ -1350,7 +1350,17 @@ function SeaScene({ members, myId, morseFeeds, ready, berths, onEditShip, onShow
                                                 } as CSSProperties
                                             }
                                         >
-                                            <ShipShadow kind={member.shipKind} facing={member.place.facing} />
+                                            {/* Короб под маску густоты — отдельный, и не для порядка:
+                                        маску и размытие нельзя вешать на один элемент. Фильтр
+                                        отрабатывает раньше маски, а маска красит только в своём
+                                        коробе (mask-clip по умолчанию border-box) — и срезает
+                                        всё, что размытие вынесло наружу, ровным прямоугольником.
+                                        Здесь маска режет неразмытый спрайт, а размывает уже
+                                        обрезанное внешний блок. Подробности — у .shipShadowShape
+                                        в SeaScene.module.less. */}
+                                            <div className={styles.shipShadowShape}>
+                                                <ShipShadow kind={member.shipKind} facing={member.place.facing} />
+                                            </div>
                                         </div>
                                         {/* Тангаж — свой блок на своё свойство, тем же приёмом, что и кивок:
                                     rotate на элементе один, а поворотов у корабля несколько разом. */}
