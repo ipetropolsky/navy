@@ -9,6 +9,7 @@
 - [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) — слои, состояния сервиса, поток данных.
 - [docs/BACKEND-API.md](./docs/BACKEND-API.md) — контракт `ChannelBackend`.
 - [docs/API-PRINCIPLES.md](./docs/API-PRINCIPLES.md) — как проектируем контракты.
+- [docs/FIREBASE.md](./docs/FIREBASE.md) — план переезда бэкенда на Firestore.
 - [docs/STYLEGUIDE.md](./docs/STYLEGUIDE.md) — кегли, цвета, принципы оформления.
 - [docs/PROJECT.md](./docs/PROJECT.md) — задание, продуктовые решения, устройство сцены,
   план по шагам (что уже сделано — там).
