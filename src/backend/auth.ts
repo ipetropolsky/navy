@@ -3,6 +3,7 @@ import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 
 import { firebaseAuth, firestore } from '@/config/firebase';
 import { paths } from '@/config/model';
+import { sessionStore } from '@/utils/storage';
 
 import { ChannelError, Unsubscribe } from '@/backend/types';
 
@@ -120,16 +121,31 @@ export function createFirebaseEntrance(): Entrance {
 const LOCAL_ACCOUNT: Account = { userId: 'local', name: 'Местный' };
 
 /**
+ * Вышел ли человек из входа понарошку. В памяти вкладки, а не в переменной модуля: настоящий
+ * вход перезагрузку переживает, и этот обязан вести себя так же — иначе до гостевых экранов
+ * канала не добраться вовсе. Гостю не показывают ни создания канала, ни демо, а перезагрузка
+ * возвращала бы его вошедшим, и открыть ссылку на канал гостем было бы нечем.
+ */
+const LOCAL_GUEST_KEY = 'kilvater.entrance.guest';
+
+/**
  * Вход понарошку — для локального бэкенда, где никакого сервера нет и спрашивать не у кого.
  * Начинает вошедшим: локальный бэкенд ведёт себя ровно так, как вёл до появления входа,
  * и браузерные проверки этого не замечают. Выход при этом настоящий — им и смотрят
  * на гостевые экраны, не поднимая Firebase.
  */
 export function createLocalEntrance(): Entrance {
-    let state: AuthState = { status: 'signed', account: LOCAL_ACCOUNT };
+    let state: AuthState = sessionStore.read(LOCAL_GUEST_KEY)
+        ? { status: 'guest' }
+        : { status: 'signed', account: LOCAL_ACCOUNT };
     const listeners = new Set<(state: AuthState) => void>();
     const settle = (next: AuthState): void => {
         state = next;
+        if (next.status === 'guest') {
+            sessionStore.write(LOCAL_GUEST_KEY, '1');
+        } else {
+            sessionStore.remove(LOCAL_GUEST_KEY);
+        }
         listeners.forEach((listener) => listener(state));
     };
 
