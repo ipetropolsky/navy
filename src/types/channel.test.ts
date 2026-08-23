@@ -2,8 +2,10 @@ import { readFileSync } from 'fs';
 import { describe, expect, it } from 'vitest';
 
 import {
+    HULL_NUMBER_LENGTH,
     MAX_MESSAGE_LENGTH,
     Member,
+    NAME_MAX_LENGTH,
     SLOT_COUNT,
     TITLE_MAX_LENGTH,
     authorLook,
@@ -117,7 +119,7 @@ describe('authorLook', () => {
 const RULES = readFileSync(new URL('../../firestore.rules', import.meta.url), 'utf8');
 
 const limitInRules = (name: string): number | undefined => {
-    const found = RULES.match(new RegExp(`function ${name}\\(\\)\\s*\\{\\s*return\\s+(\\d+);`));
+    const found = new RegExp(`function ${name}\\(\\)\\s*\\{\\s*return\\s+(\\d+);`).exec(RULES);
     return found ? Number(found[1]) : undefined;
 };
 
@@ -126,6 +128,8 @@ describe('пределы длины', () => {
         ['maxTitle', TITLE_MAX_LENGTH],
         ['maxSlug', SLUG_MAX_LENGTH],
         ['maxText', MAX_MESSAGE_LENGTH],
+        ['maxName', NAME_MAX_LENGTH],
+        ['maxHull', HULL_NUMBER_LENGTH],
     ])('%s в firestore.rules — то же число, что и в коде', (name, limit) => {
         expect(limitInRules(name)).toBe(limit);
     });

@@ -21,6 +21,8 @@ service cloud.firestore {
         function maxTitle() { return 40; }
         function maxSlug() { return 40; }
         function maxText() { return 500; }
+        function maxName() { return 20; }
+        function maxHull() { return 3; }
 
         function signedIn() { return request.auth != null; }
         function me() { return request.auth.uid; }
@@ -47,6 +49,28 @@ service cloud.firestore {
             return request.resource.data.diff(resource.data).affectedKeys().hasOnly(fields);
         }
 
+        // Снимок вида при сообщении: как корабль выглядел, когда говорил. `hasOnly` видит
+        // только верхний ярус ключей, поэтому вложенное приходится оговаривать отдельно —
+        // иначе мимо предела в 500 символов проезжает документ почти в мегабайт, публичный
+        // и неудаляемый.
+        function lookSane(author) {
+            return !('look' in author) || (
+                author.look.keys().hasOnly(['name', 'hullNumber', 'color'])
+                && author.look.get('name', '').size() <= maxName()
+                && author.look.get('hullNumber', '').size() <= maxHull()
+                // Цвет — «#8ecae6», семь символов; шестнадцати хватит с запасом.
+                && author.look.get('color', '').size() <= 16
+            );
+        }
+
+        // Ответ на реплику — ссылка, а не место для груза.
+        function threadSane(message) {
+            return !('thread' in message) || (
+                message.thread.keys().hasOnly(['messageId'])
+                && message.thread.messageId is string
+            );
+        }
+
         // Серверное время ставит сервер. Без этого `serverAt` — обычное поле, и стоять в нём
         // может что угодно, а по нему разбирают случаи и будут сортировать ленту.
         function stamped() {
@@ -59,7 +83,10 @@ service cloud.firestore {
             allow get: if isMe(userId);
             allow list: if false;
             allow create, update: if isMe(userId)
-                && request.resource.data.keys().hasOnly(['createdAt', 'account', 'look', 'serverAt']);
+                && request.resource.data.keys().hasOnly(['createdAt', 'account', 'look', 'serverAt'])
+                && request.resource.data.createdAt is number
+                && request.resource.data.account.keys().hasOnly(['name', 'email'])
+                && stamped();
             // Личность не стирается: за ней тянутся корабли в каналах, и убрать их правилом нечем.
             allow delete: if false;
 
@@ -78,7 +105,12 @@ service cloud.firestore {
             allow list: if false;
             allow create: if signedIn()
                 && request.resource.data.keys().hasOnly(['channelId', 'createdAt'])
-                && request.resource.data.channelId is string;
+                && request.resource.data.channelId is string
+                // Канал должен существовать после этой же записи — то есть бронь пишется
+                // в одной транзакции с ним. Иначе адрес занимается под несуществующий канал,
+                // и освободить его потом нельзя ничем: у канала, которого нет, нет и старшего,
+                // а значит, некому и удалить бронь. Один такой заход выжигает адрес навсегда.
+                && existsAfter(/databases/$(database)/documents/channels/$(request.resource.data.channelId));
             // Занятый адрес не переезжает на другой канал: это и есть уникальность.
             allow update: if false;
             allow delete: if isOwner(resource.data.channelId);
@@ -105,7 +137,9 @@ service cloud.firestore {
             // сервер, мимо правил.
             allow update: if isOwner(channelId)
                 && onlyChanges(['slug', 'title', 'serverAt'])
+                && request.resource.data.title is string
                 && request.resource.data.title.size() <= maxTitle()
+                && request.resource.data.slug is string
                 && request.resource.data.slug.size() <= maxSlug()
                 && stamped();
 
@@ -118,7 +152,10 @@ service cloud.firestore {
                 allow read: if true;
                 allow create, delete: if false;
                 // Своё у человека здесь одно — докуда он дочитал.
-                allow update: if isMe(memberId) && onlyChanges(['lastSeen']);
+                allow update: if isMe(memberId)
+                    && onlyChanges(['lastSeen'])
+                    && request.resource.data.lastSeen.messageId is string
+                    && request.resource.data.lastSeen.at is number;
             }
 
             // Бронь места. Читать не вредно — те же места видны по кораблям, — а писать
@@ -138,7 +175,10 @@ service cloud.firestore {
                 allow create: if isMember(channelId)
                     && request.resource.data.keys().hasOnly(['author', 'sentAt', 'serverAt', 'text', 'thread'])
                     && request.resource.data.keys().hasAll(['author', 'sentAt', 'serverAt', 'text'])
+                    && request.resource.data.author.keys().hasOnly(['memberId', 'look'])
                     && request.resource.data.author.memberId == me()
+                    && lookSane(request.resource.data.author)
+                    && threadSane(request.resource.data)
                     && request.resource.data.text is string
                     && request.resource.data.text.size() <= maxText()
                     && request.resource.data.sentAt is number
