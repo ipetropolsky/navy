@@ -25,13 +25,14 @@
     "lint-staged": "lint-staged",
     "postinstall": "cp tools/githooks/* .git/hooks || true",
     "firebase": "firebase",
-    "functions:dev": "firebase emulators:start --only firestore,functions",
+    "functions:dev": "firebase emulators:start --only auth,firestore,functions",
     "functions:deploy": "firebase deploy --only functions"
   },
   "engines": {
     "node": ">22.0.0"
   },
   "dependencies": {
+    "firebase": "12.18.0",
     "modern-normalize": "3.0.1",
     "react": "19.2.4",
     "react-dom": "19.2.4"

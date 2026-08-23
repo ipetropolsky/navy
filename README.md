@@ -35,6 +35,24 @@ npm i
 npm run dev
 ```
 
+Без настроек Firebase приложение работает на эмуляторе бэкенда (localStorage) и входит
+«местным» — так и идут проверки и разработка без сети. Чтобы поднять его на настоящем
+Firestore, нужен `.env.local`:
+
+```bash
+VITE_BACKEND=firebase
+# Либо настоящий проект — настройки из консоли Firebase (Project settings → Your apps),
+VITE_FIREBASE_API_KEY=…
+VITE_FIREBASE_AUTH_DOMAIN=…
+VITE_FIREBASE_PROJECT_ID=navy-chat
+VITE_FIREBASE_APP_ID=…
+# либо локальные эмуляторы, которым ключи не нужны вовсе:
+VITE_FIREBASE_EMULATOR=1
+```
+
+Эмуляторы поднимает `npm run functions:dev` (Auth, Firestore и функции). Что за коллекции
+и правила за этим стоят — в [docs/FIREBASE.md](docs/FIREBASE.md).
+
 ## Проверка кода
 
 ```bash
