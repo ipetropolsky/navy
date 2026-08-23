@@ -1,6 +1,18 @@
+import { readFileSync } from 'fs';
 import { describe, expect, it } from 'vitest';
 
-import { Member, SLOT_COUNT, authorLook, memberLook, memberRef, projectLeft, slotShare } from '@/types/channel';
+import {
+    MAX_MESSAGE_LENGTH,
+    Member,
+    SLOT_COUNT,
+    TITLE_MAX_LENGTH,
+    authorLook,
+    memberLook,
+    memberRef,
+    projectLeft,
+    slotShare,
+} from '@/types/channel';
+import { SLUG_MAX_LENGTH } from '@/utils/slug';
 
 /**
  * Как в ленте находят автора. Правило простое, но у него две стороны, и обе видны только
@@ -92,5 +104,29 @@ describe('authorLook', () => {
 
     it('молчит, когда нет ни того ни другого: выдумывать позывной не из чего', () => {
         expect(authorLook({ memberId: 'm-albatros' }, undefined)).toBeUndefined();
+    });
+});
+
+/**
+ * Пределы длины, продублированные в правилах безопасности. Импортов в языке правил нет:
+ * предел стоит там числом, а здесь константой, — и такие пары разъезжаются молча. Причём
+ * в худшую сторону: форма пускает, сервер отказывает, и поломкой это выглядит со стороны
+ * приложения. Поэтому проверка читает настоящий `firestore.rules`, а не копию рядом.
+ */
+
+const RULES = readFileSync(new URL('../../firestore.rules', import.meta.url), 'utf8');
+
+const limitInRules = (name: string): number | undefined => {
+    const found = RULES.match(new RegExp(`function ${name}\\(\\)\\s*\\{\\s*return\\s+(\\d+);`));
+    return found ? Number(found[1]) : undefined;
+};
+
+describe('пределы длины', () => {
+    it.each([
+        ['maxTitle', TITLE_MAX_LENGTH],
+        ['maxSlug', SLUG_MAX_LENGTH],
+        ['maxText', MAX_MESSAGE_LENGTH],
+    ])('%s в firestore.rules — то же число, что и в коде', (name, limit) => {
+        expect(limitInRules(name)).toBe(limit);
     });
 });

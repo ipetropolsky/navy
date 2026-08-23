@@ -14,6 +14,7 @@ import {
     MEMBER_COLORS,
     Member,
     MorseFeed,
+    NAME_MAX_LENGTH,
     SHIP_KINDS,
     SHIP_KIND_LABELS,
     ShipKind,
@@ -25,13 +26,6 @@ import { Press, isTap, startPress } from '@/utils/tap';
 import { isTouch } from '@/utils/viewport';
 
 import styles from './MemberForm.module.less';
-
-/**
- * Предел длины позывного. Он стоит над репликой в ленте и подписью у корабля в кадре,
- * и длинный расползся бы на всю строку. Мягкий, как и все пределы: набранное сверх него
- * не обрезается, а поле краснеет и отвечает снекбаром (см. `@/utils/limit`).
- */
-const NAME_MAX_LENGTH = 20;
 
 interface MemberFormProps {
     /** Вход в канал или переоснащение уже стоящего в строю корабля. */

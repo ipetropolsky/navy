@@ -9,19 +9,13 @@ import Panel from '@/components/ui/Panel';
 import { useSnackbar } from '@/components/ui/Snackbar';
 import { LinkIcon } from '@/components/ui/icons';
 import { channelLink } from '@/routing';
+import { TITLE_MAX_LENGTH } from '@/types/channel';
 import { copyText } from '@/utils/clipboard';
 import { limitMessage, overLimit } from '@/utils/limit';
 import { SLUG_MAX_LENGTH, isValidSlug, slugify, slugifyInput } from '@/utils/slug';
 import { isTouch } from '@/utils/viewport';
 
 import styles from './CreateChannel.module.less';
-
-/**
- * Предел длины названия канала. Оно стоит в шапке одной строкой, и длинное там всё равно
- * не помещается. Мягкий, как и все пределы: набранное сверх него не обрезается, а поле
- * краснеет и отвечает снекбаром (см. `@/utils/limit`).
- */
-const TITLE_MAX_LENGTH = 40;
 
 interface CreateChannelProps {
     onCreate: (draft: ChannelDraft) => Promise<void>;
