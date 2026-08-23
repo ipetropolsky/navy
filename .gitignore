@@ -14,4 +14,7 @@ test-results
 playwright-report
 __pycache__/
 
+# Следы эмуляторов: пишутся в корень при каждом запуске, у каждого свои.
 firebase-debug.log
+firestore-debug.log
+ui-debug.log
