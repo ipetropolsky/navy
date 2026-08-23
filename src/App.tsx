@@ -14,6 +14,7 @@ import {
 import { ChannelDraft, ChannelError, MemberDraft, backend, freeBerths, suggestBerth } from '@/backend';
 import { DEMO_CHANNEL_SLUG } from '@/backend/seed';
 import SeaScene, { BerthChoice } from '@/components/SeaScene/SeaScene';
+import SignIn from '@/components/auth/SignIn';
 import CreateChannel from '@/components/channel/CreateChannel';
 import LeaveRaid from '@/components/channel/LeaveRaid';
 import MemberForm from '@/components/channel/MemberForm';
@@ -32,6 +33,7 @@ import { LeaveIcon } from '@/components/ui/icons';
 import { GATE_PAD, SHEET_HANDLE, SHEET_TOP_GAP } from '@/config/layout';
 import { paced } from '@/config/time';
 import { HAIL_SIGNAL, morseDuration } from '@/hooks/morse';
+import { useAuth } from '@/hooks/useAuth';
 import { useChannel } from '@/hooks/useChannel';
 import { Layout, chatMagnets, useLayout } from '@/hooks/useLayout';
 import { useSlide } from '@/hooks/useSlide';
@@ -109,8 +111,19 @@ const legalSize = (size: number, { floor, min }: Layout): number => {
  */
 export default function App() {
     const route = useRoute();
+    const auth = useAuth();
     const channelState = useChannel(route.channel, route.memberId);
     const { channel, myId, reception, lastLook, loading } = channelState;
+    /**
+     * Вошёл ли человек. Вход спрашивают не ради приличия: корабль принадлежит человеку,
+     * а не вкладке, и завести канал или встать на рейд, никем не назвавшись, теперь нельзя.
+     */
+    const signedIn = Boolean(auth.account);
+    /**
+     * Ждём ли ещё ответа — от канала или от входа. Второе не менее важно: вход отвечает
+     * не мгновенно, и без этого ожидания вошедший на миг видел бы приглашение войти.
+     */
+    const waiting = loading || !auth.known;
     const [replyTo, setReplyTo] = useState<Message | null>(null);
     /**
      * Что открыто поверх рейда: список кораблей, форма своего корабля, карточка чужого, прощание
@@ -337,10 +350,10 @@ export default function App() {
      * нет, и корабли в кадре не нажимаются. Пока человек не встал в строй, канал о нём не знает
      * ничего — и он о канале ровно столько же.
      */
-    const atGate = !loading && Boolean(channel) && !me && !joining;
+    const atGate = !waiting && Boolean(channel) && signedIn && !me && !joining;
     // Она же открытая: форма постановки в строй во весь рост. Второе состояние того же самого —
     // третьего у входа нет.
-    const joinOpen = !loading && Boolean(channel) && !me && joining;
+    const joinOpen = !waiting && Boolean(channel) && signedIn && !me && joining;
     // Форма своего корабля: выезжает снизу поверх разговора и уходит туда же. Пока едет —
     // остаётся на экране, см. useSlide.
     const formOpen = editing && inChat;
@@ -365,7 +378,7 @@ export default function App() {
     // на воду. На главной канала ещё нет, вставать некуда и не в чем — там рейд пустой
     // и ничего не предлагает. Закрытая форма мест тоже не показывает: выбирать их незачем,
     // пока не решено вставать.
-    const picking = joinOpen || (!loading && Boolean(channel) && editing);
+    const picking = joinOpen || (!waiting && Boolean(channel) && editing);
 
     // Какой корабль выбран в форме. Держим здесь, а не в самой форме: от размера зависит,
     // куда этот корабль вообще влезет, и точки свободных мест на воде обязаны это знать.
@@ -458,6 +471,12 @@ export default function App() {
     // поверх него (см. cover у Shade), и закрыв её, человек возвращается туда, откуда открыл.
     // Открытая из кадра, она ложится поверх пустого места — там закрывать и нечего.
     const handleShowShip = useCallback((memberId: string) => act({ type: 'show-ship', memberId }), []);
+
+    // Выход. Отказ здесь редкость, но молчать о нём нельзя: человек нажал и ждёт, что
+    // строчка с его именем пропадёт, — а она осталась.
+    const handleSignOut = () => {
+        void auth.signOut().catch(() => notify('Не вышло выйти. Попробуйте ещё раз'));
+    };
 
     const handleCreate = async (draft: ChannelDraft) => {
         const { channel: created } = await backend.createChannel({ channel: draft });
@@ -749,23 +768,35 @@ export default function App() {
     // не с кем. Форма своего корабля выезжает поверх и этот слой не разбирает.
     const baseContent = (
         <>
-            {loading && <div className={styles.waiting}>Выходим на связь…</div>}
+            {waiting && <div className={styles.waiting}>Выходим на связь…</div>}
             {/* Адрес в ссылке есть, а канала по нему нет: ссылка устарела или в ней опечатка.
                 Показывать здесь форму создания нельзя — человек шёл не создавать, а войти. */}
-            {!loading && route.channel && !channel && (
+            {!waiting && route.channel && !channel && (
                 <Panel
                     title="Канала нет"
                     hint={`Канала по адресу «${route.channel}» нет: ссылка устарела или в ней опечатка.`}
                     actions={<Button onClick={route.openHome}>Создать свой канал</Button>}
                 />
             )}
-            {!loading && !route.channel && (
-                <CreateChannel
-                    onCreate={handleCreate}
-                    demoHref={`?channel=${DEMO_CHANNEL_SLUG}`}
-                    onOpenDemo={() => route.openChannel(DEMO_CHANNEL_SLUG)}
-                />
-            )}
+            {/* Главная. Гостю здесь показывать нечего, кроме входа: и свой канал, и демо —
+                действия, а действовать в чате может только тот, за кем стоит человек,
+                а не вкладка. */}
+            {!waiting &&
+                !route.channel &&
+                (signedIn ? (
+                    <CreateChannel
+                        onCreate={handleCreate}
+                        demoHref={`?channel=${DEMO_CHANNEL_SLUG}`}
+                        onOpenDemo={() => route.openChannel(DEMO_CHANNEL_SLUG)}
+                        account={auth.account}
+                        onSignOut={handleSignOut}
+                    />
+                ) : (
+                    <SignIn
+                        hint="Здесь заводят каналы связи и выходят в море под своим позывным. Войдите — и можно ставить корабль на рейд."
+                        onSignIn={auth.signIn}
+                    />
+                ))}
             {/* Форма постановки в строй — это и есть содержимое блока: разговора у того, кто
                 ещё не в строю, нет, и накрывать ей нечего. Переоснащение, наоборот, выезжает
                 поверх разговора — см. ниже.
@@ -775,7 +806,16 @@ export default function App() {
                 в двух видах, и набранное в ней закрытие переживает. Закрывается она «Отменой»
                 рядом с «Встать на рейд»: коробку тянут за ручку, и потяг этот про её размер,
                 а не про то, что в ней стоит. */}
-            {!loading && channel && !me && (
+            {/* Гость по ссылке: рейд ему виден как обычно — за ним по ссылке и идут, — а на
+                месте разговора стоит вход. Встать на рейд, не назвавшись, нельзя: корабль
+                остаётся за человеком, и завтра он вернётся к нему с другого устройства. */}
+            {!waiting && channel && !signedIn && (
+                <SignIn
+                    hint={`Рейд «${channel.channel.title}» перед вами. Войдите, чтобы поставить на него свой корабль.`}
+                    onSignIn={auth.signIn}
+                />
+            )}
+            {!waiting && channel && signedIn && !me && (
                 <MemberForm
                     mode="join"
                     crew={members}

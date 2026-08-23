@@ -1,11 +1,27 @@
+import { isFirebaseConfigured } from '@/config/firebase';
+
+import { Entrance, createFirebaseEntrance, createLocalEntrance } from '@/backend/auth';
 import { createLocalBackend } from '@/backend/localBackend';
 import { ChannelBackend } from '@/backend/types';
 
 /**
- * Единственная точка, где приложение выбирает реализацию бэкенда. Всё остальное
- * работает с типом ChannelBackend, поэтому подмена на FirebaseBackend — правка этой строки.
+ * Единственная точка, где приложение выбирает, с чем разговаривать. Всё остальное работает
+ * с типами `ChannelBackend` и `Entrance`, поэтому подмена — правка этих строк.
+ *
+ * Выбор — переменная сборки `VITE_BACKEND`, и он не слепой: настроек Firebase может
+ * не оказаться (свежая копия репозитория, чужая ветка, забытый `.env.local`), и тогда
+ * приложение работает на эмуляторе, а не встречает человека пустым экраном.
  */
+const wanted = import.meta.env.VITE_BACKEND ?? 'local';
+const onFirebase = wanted === 'firebase' && isFirebaseConfigured();
+
+/** Данные канала. Firestore встаёт сюда следующими шагами (см. docs/FIREBASE.md). */
 export const backend: ChannelBackend = createLocalBackend();
+
+/** Вход. Настоящий — через аккаунт; понарошку — когда за данными стоит эмулятор. */
+export const entrance: Entrance = onFirebase ? createFirebaseEntrance() : createLocalEntrance();
+
+export type { Account, AuthState, Entrance } from '@/backend/auth';
 
 export * from '@/backend/types';
 

@@ -104,7 +104,13 @@ export type ChannelErrorCode =
     | 'member-not-found'
     | 'not-senior'
     | 'message-too-long'
-    | 'course-too-long';
+    | 'course-too-long'
+    // Сеть и вход. Тем же перечислением и той же ошибкой: у приложения один способ отказать,
+    // и читателю не приходится гадать, какой из двух он поймал.
+    | 'offline'
+    | 'sign-in-cancelled'
+    | 'sign-in-blocked'
+    | 'unknown';
 
 export class ChannelError extends Error {
     constructor(

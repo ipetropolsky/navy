@@ -1,6 +1,6 @@
 import { useState } from 'react';
 
-import { ChannelDraft, ChannelError } from '@/backend';
+import { Account, ChannelDraft, ChannelError } from '@/backend';
 import Button from '@/components/ui/Button';
 import Field from '@/components/ui/Field';
 import IconButton from '@/components/ui/IconButton';
@@ -29,13 +29,16 @@ interface CreateChannelProps {
     demoHref: string;
     /** Переход в демо без перезагрузки страницы. */
     onOpenDemo: () => void;
+    /** Кто вошёл. Показывается мелко и только ему самому — в канале за человека говорит корабль. */
+    account: Account | null;
+    onSignOut: () => void;
 }
 
 /**
  * Главная сервиса: канал ещё не выбран, поэтому в море пусто — кораблей нет.
  * Отсюда два хода: завести свой канал связи или заглянуть в демо.
  */
-export default function CreateChannel({ onCreate, demoHref, onOpenDemo }: CreateChannelProps) {
+export default function CreateChannel({ onCreate, demoHref, onOpenDemo, account, onSignOut }: CreateChannelProps) {
     const [title, setTitle] = useState('');
     // Адрес предлагаем из названия, но как только его правят руками, перестаём перебивать:
     // человек знает, чего хочет, а название он может ещё десять раз поменять.
@@ -119,6 +122,16 @@ export default function CreateChannel({ onCreate, demoHref, onOpenDemo }: Create
                     >
                         демо-канал
                     </a>
+                    {/* Кто вошёл — приписка, а не заголовок: имя и почта нужны здесь только
+                        для того, чтобы человек убедился, что он это он, и мог выйти. */}
+                    {account && (
+                        <span className={styles.account}>
+                            {`Вы вошли как ${account.name ?? account.email ?? 'моряк'}. `}
+                            <button type="button" className={styles.signOut} onClick={onSignOut}>
+                                Выйти
+                            </button>
+                        </span>
+                    )}
                 </>
             }
         >
