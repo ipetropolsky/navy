@@ -32,8 +32,20 @@ jobs:
             - name: Check
               run: npm run check
 
+            # Настройки Firebase приезжают из переменных репозитория (Settings → Secrets and
+            # variables → Actions → Variables). Секретами они не назначены нарочно: эти значения
+            # всё равно уезжают в бандл к каждому, кто откроет страницу, и прятать их в CI —
+            # только делать вид. Переменных нет — сборка выходит на локальном бэкенде, как сейчас.
             - name: Build
               run: npm run build
+              env:
+                  VITE_BACKEND: ${{ vars.VITE_BACKEND }}
+                  VITE_FIREBASE_API_KEY: ${{ vars.VITE_FIREBASE_API_KEY }}
+                  VITE_FIREBASE_AUTH_DOMAIN: ${{ vars.VITE_FIREBASE_AUTH_DOMAIN }}
+                  VITE_FIREBASE_PROJECT_ID: ${{ vars.VITE_FIREBASE_PROJECT_ID }}
+                  VITE_FIREBASE_STORAGE_BUCKET: ${{ vars.VITE_FIREBASE_STORAGE_BUCKET }}
+                  VITE_FIREBASE_MESSAGING_SENDER_ID: ${{ vars.VITE_FIREBASE_MESSAGING_SENDER_ID }}
+                  VITE_FIREBASE_APP_ID: ${{ vars.VITE_FIREBASE_APP_ID }}
 
             - name: Upload Pages artifact
               uses: actions/upload-pages-artifact@v4
