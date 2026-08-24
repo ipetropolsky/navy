@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 
-import { ChannelEvent, ChannelSnapshot, MemberDraft, MessageDraft, backend } from '@/backend';
+import { ChannelError, ChannelEvent, ChannelSnapshot, MemberDraft, MessageDraft, backend } from '@/backend';
 import {
     Look,
     forgetMemberId,
@@ -27,6 +27,14 @@ import useReception, { Reception } from '@/hooks/useReception';
 export interface ChannelController {
     /** Пока не загрузились, показывать нечего: канал может быть, а может и не быть. */
     loading: boolean;
+    /**
+     * Открыть канал не вышло — не «канала нет» (это snapshot === null у channel, законный
+     * ответ), а сеть или сервер подвели. Текст уже человеческий, годится прямо в Panel.hint.
+     * null, если последняя попытка открылась, ещё грузится или канал и не спрашивали (!slug).
+     */
+    loadError: string | null;
+    /** Попробовать открыть канал заново после loadError — тем же адресом, что и был. */
+    retryLoad: () => void;
     channel: ChannelSnapshot | null;
     /** Кто эта вкладка. null — канал открыт, но корабль ещё не встал в строй. */
     myId: string | null;
@@ -57,6 +65,10 @@ export function useChannel(
     userId: string | null
 ): ChannelController {
     const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState<string | null>(null);
+    // Дёргает первый эффект заново тем же адресом — свой повод меняет зависимость эффекта,
+    // не трогая ни slug, ни адресную строку.
+    const [retryCount, setRetryCount] = useState(0);
     const [channel, setChannel] = useState<ChannelSnapshot | null>(null);
     const [myId, setMyId] = useState<string | null>(null);
     // Внешность держим состоянием, а не перечитыванием на каждом проходе: хранилище отвечает
@@ -70,6 +82,13 @@ export function useChannel(
      */
     const myIdRef = useRef(myId);
     myIdRef.current = myId;
+    /**
+     * Что сейчас показано — для первого эффекта. Ссылкой по той же причине, что и myId выше:
+     * эффекту надо знать, тот ли это канал, но пересобираться на каждую перемену снимка
+     * ему незачем.
+     */
+    const shownRef = useRef(channel);
+    shownRef.current = channel;
 
     // Открыли канал: разбираем адрес из ссылки, спрашиваем состояние и решаем, кто мы в нём.
     // Ответ может прийти, когда вкладка уже ушла на другой канал, — тогда его надо выбросить,
@@ -80,8 +99,19 @@ export function useChannel(
             setChannel(null);
             setMyId(null);
             setLoading(false);
+            setLoadError(null);
         } else {
             setLoading(true);
+            setLoadError(null);
+            // Спрашиваем другой канал — прежний снимок убираем сразу, не дожидаясь ответа:
+            // в адресе один рейд, и показывать вместо него другой нельзя, а при отказе
+            // за оставшимся снимком спрятался бы и сам отказ — «Канал не открылся»
+            // показывается, только когда показывать больше нечего. Повтор того же канала
+            // (retryLoad) снимок сохраняет: там на экране ровно то, что и должно быть.
+            if (shownRef.current && shownRef.current.channel.slug !== slug) {
+                setChannel(null);
+                setMyId(null);
+            }
             void backend
                 .getChannelBySlug({ slug })
                 .then((snapshot) => {
@@ -108,6 +138,14 @@ export function useChannel(
                     // Корабль мог выйти из другой вкладки, пока эта была закрыта.
                     setMyId(aboard ? candidate : null);
                 })
+                .catch((failure: unknown) => {
+                    // Не «канала нет» (тот ответ — snapshot === null, и это ветка .then выше),
+                    // а сеть или сервер подвели: channel не трогаем, тут ещё есть что показать
+                    // при следующей удачной попытке — прежний снимок вместо пустого экрана.
+                    if (alive) {
+                        setLoadError(failure instanceof ChannelError ? failure.message : 'Канал не открылся');
+                    }
+                })
                 .finally(() => {
                     if (alive) {
                         setLoading(false);
@@ -117,7 +155,9 @@ export function useChannel(
         return () => {
             alive = false;
         };
-    }, [slug, memberIdFromUrl, userId]);
+    }, [slug, memberIdFromUrl, userId, retryCount]);
+
+    const retryLoad = useCallback(() => setRetryCount((count) => count + 1), []);
 
     // Дальше всё адресуется основным идентификатором канала, а не адресом из ссылки.
     const channelId = channel?.channel.channelId ?? null;
@@ -270,5 +310,18 @@ export function useChannel(
         [channelId, myId]
     );
 
-    return { loading, channel, myId, reception, lastLook, join, updateMe, leave, kick, sendMessage };
+    return {
+        loading,
+        loadError,
+        retryLoad,
+        channel,
+        myId,
+        reception,
+        lastLook,
+        join,
+        updateMe,
+        leave,
+        kick,
+        sendMessage,
+    };
 }

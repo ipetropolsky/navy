@@ -91,6 +91,15 @@ export type { ChannelErrorCode } from '@shared/errors';
 
 export type Unsubscribe = () => void;
 
+/** Есть ли связь с бэкендом прямо сейчас — и с какого момента она в этом состоянии. */
+export type ConnectionStatus = 'online' | 'offline';
+
+export interface Connection {
+    status: ConnectionStatus;
+    /** `Date.now()` того момента, с которого действует текущий статус. */
+    since: number;
+}
+
 /**
  * Адрес канала — во всех методах, кроме создания и разбора ссылки. Скаляром, а не объектом:
  * это адрес запроса, то, что в настоящем API стояло бы в пути, а не его содержимое.
@@ -146,4 +155,11 @@ export interface ChannelBackend {
      * UI не должен угадывать, кто сделал изменение, чтобы применить его.
      */
     subscribe(request: ChannelAddress & { onEvent: (event: ChannelEvent) => void }): Unsubscribe;
+
+    /**
+     * Состояние связи с бэкендом — не с каналом, а с сервером вообще. Отдельно от подписки:
+     * подписки может не быть (канал ещё не открыт), а знать, есть ли связь, надо и тогда.
+     * Первый вызов `onChange` — сразу с текущим состоянием, дальше — по перемене.
+     */
+    watchConnection(request: { onChange: (connection: Connection) => void }): Unsubscribe;
 }

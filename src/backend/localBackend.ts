@@ -1,3 +1,4 @@
+import { watchOnlineStatus } from '@/utils/connection';
 import { isValidSlug } from '@/utils/slug';
 import { localStore } from '@/utils/storage';
 import { refitNotices, shipTitle } from '@shared/notice';
@@ -492,5 +493,10 @@ export function createLocalBackend(): ChannelBackend {
                 }
             };
         },
+
+        // Настоящему серверу тут неоткуда взяться — соседняя вкладка не роняет связь, — и всё
+        // же слушаем navigator.onLine, а не отвечаем «на связи» всегда: иначе полоску «нет связи»
+        // (см. App.tsx) нечем было бы проверить браузерным прогоном (context.setOffline).
+        watchConnection: ({ onChange }) => watchOnlineStatus(onChange),
     };
 }

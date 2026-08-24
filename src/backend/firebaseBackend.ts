@@ -15,7 +15,8 @@ import {
 } from 'firebase/firestore';
 import { Functions, FunctionsError, httpsCallable } from 'firebase/functions';
 
-import { MESSAGE_PAGE } from '@/config/network';
+import { MESSAGE_PAGE, READ_TIMEOUT, WRITE_TIMEOUT } from '@/config/network';
+import { isOnline, watchOnlineStatus } from '@/utils/connection';
 import { isValidSlug } from '@/utils/slug';
 import { paths } from '@shared/config/model';
 import { CHANNEL_ERROR_CODES, ChannelErrorCode } from '@shared/errors';
@@ -41,7 +42,7 @@ import {
 } from '@shared/types/channel';
 import { limitMessage, overLimit } from '@shared/utils/limit';
 
-import { ChannelBackend, ChannelError, ChannelSnapshot } from '@/backend/types';
+import { ChannelBackend, ChannelError, ChannelSnapshot, Connection, ConnectionStatus } from '@/backend/types';
 
 /**
  * Настоящий бэкенд (issue #66). Канал, участники и лента читаются из Firestore одним
@@ -59,12 +60,10 @@ import { ChannelBackend, ChannelError, ChannelSnapshot } from '@/backend/types';
  * ChannelError с тем же кодом и текстом, что и у локального бэкенда, — читатели уже умеют
  * их разбирать. Отказ вызова функции несёт точный код в details.code (см. httpsCodeFor
  * и callable в functions/src/index.ts) — тот же код и тот же текст извлекаются в свою же
- * ChannelError, см. toChannelError. Всё остальное чужое (правило не пустило, оборвалась сеть)
- * заворачивается в ChannelError с кодом unknown, а не пробрасывается как есть: весь остальной
- * код (см. components/**) ловит именно ChannelError и показывает .message, а на что-то другое
- * отвечает одной и той же общей фразой — отдать чужую форму ошибки значило бы каждый раз
- * попадать в этот безымянный запасной путь. Разбор по кодам (offline, permission-denied
- * и так далее) — это #67, здесь достаточно одного кода на всё, что не наше.
+ * ChannelError, см. toChannelError. Всё остальное чужое — отказ самого Firestore, обрыв вызова
+ * функции без details.code — разбирается по его code: offline, timeout, unavailable,
+ * permission-denied, а что не опознано — под unknown. Весь остальной код (см. components/**)
+ * ловит именно ChannelError и показывает .message, не заглядывая в чужую форму ошибки.
  */
 
 /**
@@ -106,14 +105,6 @@ interface MessageDoc {
     thread?: MessageRef;
     notice?: ShipNotice;
 }
-
-/**
- * Сколько последних сообщений читаем при открытии канала — та же страница, что и в мерках
- * разговора с сервером (`config/network.ts`), а не своё число рядом: страница у ленты одна,
- * и второй такой же константе разъехаться с первой ничего не мешает. Догрузка вверх
- * при прокрутке (loadOlderMessages, «упёрся в край — попроси ещё») — это #68; здесь пока
- * просто хвост разговора: без предела getChannel читал бы годовую переписку одним запросом.
- */
 
 /** Документ → сущность контракта. serverAt наружу не отдаётся — это внутренняя метка. */
 const toChannel = (channelId: string, data: ChannelDoc): Channel => ({
@@ -164,10 +155,18 @@ const isChannelErrorCode = (value: string): value is ChannelErrorCode =>
     (CHANNEL_ERROR_CODES as readonly string[]).includes(value);
 
 /**
- * Не наша ошибка — в ChannelError с кодом из details.code, если он там есть и знаком,
- * иначе с unknown; своя — возвращается как есть (см. комментарий над файлом).
+ * Не наша ошибка — в ChannelError с кодом из details.code, если он там есть и знаком (свой
+ * код нашей функции точнее любого разбора по статусу), иначе — по статус-коду самого отказа;
+ * своя — возвращается как есть (см. комментарий над файлом).
+ *
+ * У FirestoreError code голый ('unavailable'), у FunctionsError — с префиксом
+ * ('functions/unavailable'): вызов функции идёт через отдельный клиент со своими кодами,
+ * и оба конца по отдельности не заботятся о чужом префиксе. instanceof здесь не поможет
+ * различить один отказ от другого — у FirestoreError приватный конструктор, что заодно
+ * исключает и юнит-проверку через него, — поэтому код читаем по форме объекта, тем же
+ * способом, что и в auth.ts (toSignInError).
  */
-const toChannelError = (failure: unknown): ChannelError => {
+export const toChannelError = (failure: unknown): ChannelError => {
     if (failure instanceof ChannelError) {
         return failure;
     }
@@ -177,7 +176,41 @@ const toChannelError = (failure: unknown): ChannelError => {
             return new ChannelError(code, failure.message);
         }
     }
-    return new ChannelError('unknown', 'Сервер не ответил. Попробуйте ещё раз');
+    const status =
+        failure instanceof Error && 'code' in failure ? String(failure.code).replace(/^functions\//, '') : '';
+    switch (status) {
+        case 'unavailable':
+            return new ChannelError('unavailable', 'Сервер сейчас недоступен. Попробуйте ещё раз');
+        case 'deadline-exceeded':
+            return new ChannelError('timeout', 'Сервер долго не отвечает. Попробуйте ещё раз');
+        case 'permission-denied':
+        case 'unauthenticated':
+            return new ChannelError('permission-denied', 'Доступ к каналу изменился. Попробуйте ещё раз');
+        default:
+            return new ChannelError('unknown', 'Сервер не ответил. Попробуйте ещё раз');
+    }
+};
+
+/**
+ * Ждать ответ не дольше срока — а если офлайн, не ждать вовсе: сети нет, и ответа не будет,
+ * пока она не появится. Таймаут не отменяет сам запрос: очередь записи у Firestore живёт
+ * своей жизнью и может доставить отправленное позже (см. WRITE_TIMEOUT в config/network.ts) —
+ * он решает только, когда сказать человеку, что дело плохо, а не что делать с запросом.
+ */
+export const withTimeout = <T>(run: () => Promise<T>, ms: number): Promise<T> => {
+    if (!isOnline()) {
+        return Promise.reject(new ChannelError('offline', 'Нет связи. Попробуйте, когда она появится'));
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(
+            () => reject(new ChannelError('timeout', 'Сервер долго не отвечает. Попробуйте ещё раз')),
+            ms
+        );
+    });
+    // race, а не ручной reject: run() бросает свою причину как есть, не проходя через unknown, —
+    // и обрыву сети не приходится притворяться Error, чтобы устроить линтер.
+    return Promise.race([run(), timeout]).finally(() => clearTimeout(timer));
 };
 
 /**
@@ -209,7 +242,10 @@ export function createFirebaseBackend({ db, functions }: { db: Firestore; functi
         query(collection(db, paths.members({ channelId })), orderBy('joinedAt'));
     // limitToLast с order by sentAt по возрастанию — это последние MESSAGE_PAGE документов,
     // но в естественном порядке чтения (старые сверху): то же самое нужно и getChannel,
-    // и подписке ниже.
+    // и подписке ниже. Число берётся из общих мерок разговора с сервером (config/network.ts),
+    // а не заводится своё рядом: страница у ленты одна. Догрузка вверх при прокрутке
+    // (loadOlderMessages, «упёрся в край — попроси ещё») — это #68; пока здесь просто хвост
+    // разговора: без предела getChannel читал бы годовую переписку одним запросом.
     const feedQuery = (channelId: string) =>
         query(collection(db, paths.messages({ channelId })), orderBy('sentAt'), limitToLast(MESSAGE_PAGE));
 
@@ -217,6 +253,42 @@ export function createFirebaseBackend({ db, functions }: { db: Firestore; functi
     const updateMemberCall = httpsCallable<UpdateMemberRequest, MemberResponse>(functions, 'updateMember');
     const leaveChannelCall = httpsCallable<LeaveChannelRequest, Record<string, never>>(functions, 'leaveChannel');
     const kickMemberCall = httpsCallable<KickMemberRequest, Record<string, never>>(functions, 'kickMember');
+
+    /**
+     * Состояние связи — одно на весь бэкенд, а не на каждую подписку: три подписки одного
+     * канала (subscribe ниже) делят одно соединение, и обрыв одной значит обрыв у всех разом.
+     * Источников два. `navigator.onLine` — быстрый и грубый: знает про сам браузер, но не про
+     * то, отвечает ли сервер. Отказ или успех onSnapshot — медленный, зато точный: заметен,
+     * только когда открыт канал, и требует различить один отказ от разъединения, — но снимает
+     * ложные «на связи», которые остались бы, отвечай мы только за браузер. Ни то ни другое
+     * не смотрит в snapshot.metadata.fromCache: подсказка ненадёжна (см. docs/FIREBASE.md,
+     * «Состояние связи»), и «снимок дошёл» здесь значит только это, а не откуда он дошёл.
+     */
+    let browserOffline = false;
+    let snapshotOffline = false;
+    let connection: Connection = { status: 'online', since: Date.now() };
+    const connectionListeners = new Set<(connection: Connection) => void>();
+
+    const applyConnection = (): void => {
+        const status: ConnectionStatus = browserOffline || snapshotOffline ? 'offline' : 'online';
+        if (status === connection.status) {
+            return;
+        }
+        connection = { status, since: Date.now() };
+        connectionListeners.forEach((listener) => listener(connection));
+    };
+    watchOnlineStatus(({ status }) => {
+        browserOffline = status === 'offline';
+        applyConnection();
+    });
+    const reportSnapshotAlive = (): void => {
+        snapshotOffline = false;
+        applyConnection();
+    };
+    const reportSnapshotFailure = (): void => {
+        snapshotOffline = true;
+        applyConnection();
+    };
 
     /** Канал + участники + хвост ленты. Этим отвечают оба метода чтения. */
     const readChannel = async (channelId: string): Promise<ChannelSnapshot | null> => {
@@ -238,7 +310,7 @@ export function createFirebaseBackend({ db, functions }: { db: Firestore; functi
     return {
         getChannel: async ({ channelId }) => {
             try {
-                return await readChannel(channelId);
+                return await withTimeout(() => readChannel(channelId), READ_TIMEOUT);
             } catch (failure) {
                 throw toChannelError(failure);
             }
@@ -246,12 +318,14 @@ export function createFirebaseBackend({ db, functions }: { db: Firestore; functi
 
         getChannelBySlug: async ({ slug }) => {
             try {
-                const reserved = await getDoc(slugRef(slug));
-                if (!reserved.exists()) {
-                    return null;
-                }
-                const { channelId } = reserved.data() as { channelId: string };
-                return await readChannel(channelId);
+                return await withTimeout(async () => {
+                    const reserved = await getDoc(slugRef(slug));
+                    if (!reserved.exists()) {
+                        return null;
+                    }
+                    const { channelId } = reserved.data() as { channelId: string };
+                    return readChannel(channelId);
+                }, READ_TIMEOUT);
             } catch (failure) {
                 throw toChannelError(failure);
             }
@@ -271,22 +345,26 @@ export function createFirebaseBackend({ db, functions }: { db: Firestore; functi
             const created: Channel = { channelId, slug, title: title.trim(), createdAt: Date.now() };
 
             try {
-                await runTransaction(db, async (transaction) => {
-                    const reserved = await transaction.get(slugRef(slug));
-                    if (reserved.exists()) {
-                        throw new ChannelError('slug-taken', 'Канал с таким адресом уже есть');
-                    }
-                    // Бронь пройдёт правило, только если канал существует после этой же
-                    // записи (`existsAfter` в firestore.rules) — поэтому оба документа пишутся
-                    // здесь, в одной транзакции, а не по очереди двумя разными вызовами.
-                    transaction.set(channelRef(channelId), {
-                        slug: created.slug,
-                        title: created.title,
-                        createdAt: created.createdAt,
-                        serverAt: serverTimestamp(),
-                    });
-                    transaction.set(slugRef(slug), { channelId, createdAt: Date.now() });
-                });
+                await withTimeout(
+                    () =>
+                        runTransaction(db, async (transaction) => {
+                            const reserved = await transaction.get(slugRef(slug));
+                            if (reserved.exists()) {
+                                throw new ChannelError('slug-taken', 'Канал с таким адресом уже есть');
+                            }
+                            // Бронь пройдёт правило, только если канал существует после этой же
+                            // записи (`existsAfter` в firestore.rules) — поэтому оба документа
+                            // пишутся здесь, в одной транзакции, а не по очереди двумя вызовами.
+                            transaction.set(channelRef(channelId), {
+                                slug: created.slug,
+                                title: created.title,
+                                createdAt: created.createdAt,
+                                serverAt: serverTimestamp(),
+                            });
+                            transaction.set(slugRef(slug), { channelId, createdAt: Date.now() });
+                        }),
+                    WRITE_TIMEOUT
+                );
             } catch (failure) {
                 throw toChannelError(failure);
             }
@@ -303,34 +381,41 @@ export function createFirebaseBackend({ db, functions }: { db: Firestore; functi
             let before: ChannelDoc;
             try {
                 // Все чтения — до всех записей, это требование Firestore к транзакциям.
-                before = await runTransaction(db, async (transaction) => {
-                    const channelSnap = await transaction.get(channelRef(channelId));
-                    const newSlugSnap = await transaction.get(slugRef(slug));
+                before = await withTimeout(
+                    () =>
+                        runTransaction(db, async (transaction) => {
+                            const channelSnap = await transaction.get(channelRef(channelId));
+                            const newSlugSnap = await transaction.get(slugRef(slug));
 
-                    if (!channelSnap.exists()) {
-                        throw new ChannelError('channel-not-found', 'Канал не найден');
-                    }
-                    const current = channelSnap.data() as ChannelDoc;
-                    // Бронь занята другим каналом — отказ; своя же бронь (переименование
-                    // с тем же адресом) помехой не считается.
-                    if (newSlugSnap.exists() && (newSlugSnap.data() as { channelId: string }).channelId !== channelId) {
-                        throw new ChannelError('slug-taken', 'Канал с таким адресом уже есть');
-                    }
+                            if (!channelSnap.exists()) {
+                                throw new ChannelError('channel-not-found', 'Канал не найден');
+                            }
+                            const current = channelSnap.data() as ChannelDoc;
+                            // Бронь занята другим каналом — отказ; своя же бронь (переименование
+                            // с тем же адресом) помехой не считается.
+                            if (
+                                newSlugSnap.exists() &&
+                                (newSlugSnap.data() as { channelId: string }).channelId !== channelId
+                            ) {
+                                throw new ChannelError('slug-taken', 'Канал с таким адресом уже есть');
+                            }
 
-                    if (current.slug !== slug) {
-                        // Новая бронь и снятие старой — в той же транзакции: освободившийся
-                        // адрес честно свободен, а не повисает ничьим до следующей записи.
-                        transaction.set(slugRef(slug), { channelId, createdAt: Date.now() });
-                        transaction.delete(slugRef(current.slug));
-                    }
-                    transaction.update(channelRef(channelId), {
-                        slug,
-                        title: trimmedTitle,
-                        serverAt: serverTimestamp(),
-                    });
+                            if (current.slug !== slug) {
+                                // Новая бронь и снятие старой — в той же транзакции: освободившийся
+                                // адрес честно свободен, а не повисает ничьим до следующей записи.
+                                transaction.set(slugRef(slug), { channelId, createdAt: Date.now() });
+                                transaction.delete(slugRef(current.slug));
+                            }
+                            transaction.update(channelRef(channelId), {
+                                slug,
+                                title: trimmedTitle,
+                                serverAt: serverTimestamp(),
+                            });
 
-                    return current;
-                });
+                            return current;
+                        }),
+                    WRITE_TIMEOUT
+                );
             } catch (failure) {
                 throw toChannelError(failure);
             }
@@ -343,7 +428,10 @@ export function createFirebaseBackend({ db, functions }: { db: Firestore; functi
 
         join: async ({ channelId, member }) => {
             try {
-                const result = await joinChannelCall({ channelId, member: draftToCall(member) });
+                const result = await withTimeout(
+                    () => joinChannelCall({ channelId, member: draftToCall(member) }),
+                    WRITE_TIMEOUT
+                );
                 return result.data;
             } catch (failure) {
                 throw toChannelError(failure);
@@ -359,7 +447,10 @@ export function createFirebaseBackend({ db, functions }: { db: Firestore; functi
          */
         updateMember: async ({ channelId, member }) => {
             try {
-                const result = await updateMemberCall({ channelId, member: draftToCall(member) });
+                const result = await withTimeout(
+                    () => updateMemberCall({ channelId, member: draftToCall(member) }),
+                    WRITE_TIMEOUT
+                );
                 return result.data;
             } catch (failure) {
                 throw toChannelError(failure);
@@ -375,11 +466,15 @@ export function createFirebaseBackend({ db, functions }: { db: Firestore; functi
                 // разбор (parseLeaveChannelRequest) ждёт от «не указано» отсутствия поля
                 // вовсе, а не null. Поэтому добавляем поля, только когда они действительно
                 // заданы.
-                await leaveChannelCall({
-                    channelId,
-                    ...(course !== undefined ? { course } : {}),
-                    ...(nextOwnerId !== undefined ? { nextOwnerId } : {}),
-                });
+                await withTimeout(
+                    () =>
+                        leaveChannelCall({
+                            channelId,
+                            ...(course !== undefined ? { course } : {}),
+                            ...(nextOwnerId !== undefined ? { nextOwnerId } : {}),
+                        }),
+                    WRITE_TIMEOUT
+                );
             } catch (failure) {
                 throw toChannelError(failure);
             }
@@ -394,7 +489,10 @@ export function createFirebaseBackend({ db, functions }: { db: Firestore; functi
          */
         kick: async ({ channelId, member }) => {
             try {
-                await kickMemberCall({ channelId, member: { memberId: member.memberId } });
+                await withTimeout(
+                    () => kickMemberCall({ channelId, member: { memberId: member.memberId } }),
+                    WRITE_TIMEOUT
+                );
             } catch (failure) {
                 throw toChannelError(failure);
             }
@@ -407,38 +505,40 @@ export function createFirebaseBackend({ db, functions }: { db: Firestore; functi
                 throw new ChannelError('message-too-long', limitMessage(draft.text, MAX_MESSAGE_LENGTH));
             }
             try {
-                // Снимок автора берём из документа участника, а не из того, что помнит
-                // вкладка о себе, — вкладка могла устареть, а этот документ и есть момент
-                // истины прямо сейчас.
-                const memberSnap = await getDoc(memberDocRef(channelId, memberId));
-                if (!memberSnap.exists()) {
-                    throw new ChannelError('member-not-found', 'Корабль не найден');
-                }
-                const author = memberRef(toMember(memberId, memberSnap.data() as MemberDoc));
+                return await withTimeout(async () => {
+                    // Снимок автора берём из документа участника, а не из того, что помнит
+                    // вкладка о себе, — вкладка могла устареть, а этот документ и есть момент
+                    // истины прямо сейчас.
+                    const memberSnap = await getDoc(memberDocRef(channelId, memberId));
+                    if (!memberSnap.exists()) {
+                        throw new ChannelError('member-not-found', 'Корабль не найден');
+                    }
+                    const author = memberRef(toMember(memberId, memberSnap.data() as MemberDoc));
 
-                // Идентификатор назначает отправитель, до записи и один раз: повтор с тем же
-                // id попадёт в тот же документ, а не заведёт второй (см. docs/FIREBASE.md,
-                // «Повтор без двойников»).
-                const messageId = doc(collection(db, paths.messages({ channelId }))).id;
-                const sentAt = Date.now();
+                    // Идентификатор назначает отправитель, до записи и один раз: повтор с тем
+                    // же id попадёт в тот же документ, а не заведёт второй (см. docs/FIREBASE.md,
+                    // «Повтор без двойников»).
+                    const messageId = doc(collection(db, paths.messages({ channelId }))).id;
+                    const sentAt = Date.now();
 
-                // Ровно те поля, что разрешает правило (firestore.rules, match
-                // /messages/{messageId}): author, sentAt, serverAt, text и, если есть,
-                // thread — ничего сверх. thread добавляется полем, только когда есть:
-                // Firestore не пишет undefined как значение поля, оно там попросту
-                // не проходит валидацию записи.
-                await setDoc(doc(db, paths.message({ channelId, messageId })), {
-                    author,
-                    sentAt,
-                    serverAt: serverTimestamp(),
-                    text: draft.text,
-                    ...(draft.thread ? { thread: draft.thread } : {}),
-                });
+                    // Ровно те поля, что разрешает правило (firestore.rules, match
+                    // /messages/{messageId}): author, sentAt, serverAt, text и, если есть,
+                    // thread — ничего сверх. thread добавляется полем, только когда есть:
+                    // Firestore не пишет undefined как значение поля, оно там попросту
+                    // не проходит валидацию записи.
+                    await setDoc(doc(db, paths.message({ channelId, messageId })), {
+                        author,
+                        sentAt,
+                        serverAt: serverTimestamp(),
+                        text: draft.text,
+                        ...(draft.thread ? { thread: draft.thread } : {}),
+                    });
 
-                // До этой строчки промис не резолвится: пока сервер не подтвердил запись,
-                // мы её ждём. Что показать в это время и что делать без сети — статус
-                // доставки, это #69, здесь его ещё нет.
-                return { message: { messageId, author, sentAt, text: draft.text, thread: draft.thread } };
+                    // До этой строчки промис не резолвится: пока сервер не подтвердил запись,
+                    // мы её ждём. Что показать в это время и что делать без сети — статус
+                    // доставки, это #69, здесь его ещё нет.
+                    return { message: { messageId, author, sentAt, text: draft.text, thread: draft.thread } };
+                }, WRITE_TIMEOUT);
             } catch (failure) {
                 throw toChannelError(failure);
             }
@@ -454,6 +554,9 @@ export function createFirebaseBackend({ db, functions }: { db: Firestore; functi
             const unsubscribeChannel = onSnapshot(
                 channelRef(channelId),
                 (snap) => {
+                    // Снимок дошёл — подписка жива, и неважно, что в ней: даже проглоченный
+                    // первый снимок это уже доказывает.
+                    reportSnapshotAlive();
                     if (firstChannel) {
                         firstChannel = false;
                         return;
@@ -473,9 +576,11 @@ export function createFirebaseBackend({ db, functions }: { db: Firestore; functi
                     });
                 },
                 () => {
-                    // Подписка оборвалась (правило не пустило, сети нет) — молчим, а не
-                    // роняем вкладку. Разбор по кодам (offline, permission-denied и так
-                    // далее) — это #67.
+                    // Подписка оборвалась (правило не пустило, сети нет) — событие не рождаем,
+                    // а не роняем вкладку: точного кода у обрыва подписки нет и не будет
+                    // (см. docs/FIREBASE.md, «Состояние связи»), только сам факт обрыва —
+                    // он и уходит в состояние связи, которое слушает watchConnection.
+                    reportSnapshotFailure();
                 }
             );
 
@@ -483,6 +588,7 @@ export function createFirebaseBackend({ db, functions }: { db: Firestore; functi
             const unsubscribeMembers = onSnapshot(
                 membersQuery(channelId),
                 (snap) => {
+                    reportSnapshotAlive();
                     if (firstMembers) {
                         firstMembers = false;
                         return;
@@ -518,7 +624,8 @@ export function createFirebaseBackend({ db, functions }: { db: Firestore; functi
                 },
                 () => {
                     // См. комментарий у подписки на канал выше — тот же класс отказов,
-                    // то же молчание.
+                    // тот же выход в состояние связи.
+                    reportSnapshotFailure();
                 }
             );
 
@@ -526,6 +633,7 @@ export function createFirebaseBackend({ db, functions }: { db: Firestore; functi
             const unsubscribeFeed = onSnapshot(
                 feedQuery(channelId),
                 (snap) => {
+                    reportSnapshotAlive();
                     if (firstFeed) {
                         firstFeed = false;
                         return;
@@ -552,6 +660,7 @@ export function createFirebaseBackend({ db, functions }: { db: Firestore; functi
                 },
                 () => {
                     // См. комментарий у подписки на канал выше.
+                    reportSnapshotFailure();
                 }
             );
 
@@ -559,6 +668,14 @@ export function createFirebaseBackend({ db, functions }: { db: Firestore; functi
                 unsubscribeChannel();
                 unsubscribeMembers();
                 unsubscribeFeed();
+            };
+        },
+
+        watchConnection: ({ onChange }) => {
+            onChange(connection);
+            connectionListeners.add(onChange);
+            return () => {
+                connectionListeners.delete(onChange);
             };
         },
     };

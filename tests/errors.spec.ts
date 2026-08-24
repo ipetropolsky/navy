@@ -11,6 +11,7 @@ import {
     openSheet,
     send,
     ships,
+    systemLines,
     test,
 } from '@tests/helpers';
 
@@ -87,4 +88,52 @@ test('слишком длинный курс не уводит с рейда, и
     await expect(course).toHaveValue('я'.repeat(101));
     await expect(ships(page)).toHaveCount(3);
     await expectWayOut(page);
+});
+
+/**
+ * Полоска «нет связи» — общая на всё приложение, не снекбар на каждое действие
+ * (см. docs/FIREBASE.md, «Состояние связи»). Местный бэкенд отвечает на настоящий
+ * navigator.onLine ровно затем, чтобы это можно было проверить здесь: context.setOffline
+ * роняет сеть браузеру взаправду, события online/offline доходят до страницы как в жизни.
+ */
+test('нет связи — сказано одной строкой в шапке, и она уходит, когда связь вернулась', async ({ page, context }) => {
+    await page.goto('/');
+    await expect(page.getByPlaceholder('Эскадра «Полночь»')).toBeVisible();
+
+    const strip = page.locator('[class*="connectionStrip"]');
+    await expect(strip).not.toBeVisible();
+
+    await context.setOffline(true);
+    await expect(strip).toBeVisible();
+    await expect(strip).toHaveText('Связи нет. Ждём, когда вернётся');
+
+    await context.setOffline(false);
+    await expect(strip).not.toBeVisible();
+});
+
+/**
+ * Высадка молчала об отказе (issue #67): промис без .catch просто гас в консоли. Настоящий
+ * отказ в один клик не устроить — кнопку высадки видит только старший, и только на чужой
+ * корабль, — поэтому по одной и той же кнопке жмём дважды сразу, в обход актёрства мыши
+ * (`button.click()` из evaluate — синхронно, оба вызова уходят раньше, чем первый успеет
+ * отработать и убрать кнопку из разметки). Первый высаживает, второй застаёт Вымпела уже
+ * высаженным (member-not-found): очередь у местного бэкенда общая (Web Locks, см.
+ * localBackend.ts), и порядок между двумя вызовами гарантирован.
+ */
+test('высадка одним и тем же нажатием дважды: вторая попытка не пропадает молча', async ({ page }) => {
+    await openChannel(page, DEMO, ALBATROS);
+    await openSheet(page);
+
+    const kickButton = page.getByLabel('Высадить «Вымпел»');
+    await expect(kickButton).toBeVisible();
+    await kickButton.evaluate((button: HTMLElement) => {
+        button.click();
+        button.click();
+    });
+
+    // Высадили ровно один раз: записи в ленте от второй попытки нет, ей нечего было писать.
+    await expect(systemLines(page).filter({ hasText: 'выдворен' })).toHaveCount(1);
+
+    // И вторая попытка не пропала молча — снекбар про неё виден.
+    await expect(page.getByText('Такого корабля в канале нет')).toBeVisible();
 });

@@ -37,6 +37,7 @@ import { paced } from '@/config/time';
 import { HAIL_SIGNAL, morseDuration } from '@/hooks/morse';
 import { useAuth } from '@/hooks/useAuth';
 import { useChannel } from '@/hooks/useChannel';
+import { useConnection } from '@/hooks/useConnection';
 import { Layout, chatMagnets, useLayout } from '@/hooks/useLayout';
 import { useSlide } from '@/hooks/useSlide';
 import { useSwipe } from '@/hooks/useSwipe';
@@ -114,7 +115,8 @@ export default function App() {
     const route = useRoute();
     const auth = useAuth();
     const channelState = useChannel(route.channel, route.memberId, auth.account?.userId ?? null);
-    const { channel, myId, reception, lastLook, loading } = channelState;
+    const { channel, myId, reception, lastLook, loading, loadError, retryLoad } = channelState;
+    const connection = useConnection();
     /**
      * Вошёл ли человек. Вход спрашивают не ради приличия: корабль принадлежит человеку,
      * а не вкладке, и завести канал или встать на рейд, никем не назвавшись, теперь нельзя.
@@ -611,6 +613,18 @@ export default function App() {
             );
     };
 
+    // Отказ снекбаром, а не молча: без него «высадить может только старший» видит один бэкенд,
+    // а старший на экране решает, что нажатие потерялось, и жмёт снова. Причина у ChannelError
+    // уже человеческая и своя на каждый код — «не старший» и «нет связи» читаются по-разному,
+    // это разбирает toChannelError, здесь остаётся её только показать.
+    const handleKick = (memberId: string) => {
+        void channelState
+            .kick(memberId)
+            .catch((failure: unknown) =>
+                notify(failure instanceof ChannelError ? failure.message : 'Не вышло высадить корабль')
+            );
+    };
+
     // Координаты рейда — ссылка на канал. Показывать её негде, она длинная, поэтому уходит
     // прямо в буфер, а ответом служит снекбар. Живёт это в списке кораблей: позвать ещё
     // кого-то — то же самое действие, что и посмотреть, кто уже пришёл.
@@ -737,6 +751,11 @@ export default function App() {
 
     const status = (): string => {
         if (!channel) {
+            if (loadError) {
+                // Не «канала нет» — открыть не вышло из-за сети или сервера, и это другая
+                // причина: полоска связи (см. ниже) говорит то же самое, а здесь — коротко.
+                return 'нет связи';
+            }
             // На главной канала нет и статусу неоткуда взяться — там строчка работает
             // подзаголовком сервиса.
             return route.channel ? 'канал не найден' : 'Ночной морской чат';
@@ -770,9 +789,20 @@ export default function App() {
     const baseContent = (
         <>
             {waiting && <div className={styles.waiting}>Выходим на связь…</div>}
+            {/* Открыть канал не вышло из-за сети или сервера — не то же самое, что «канала нет»
+                (та ветка ниже — законный ответ «такого адреса не существует»). Показываем
+                кнопку «Ещё раз», а не отправляем создавать канал заново: адрес мог быть верным,
+                просто спросить по нему не вышло. */}
+            {!waiting && route.channel && !channel && loadError && (
+                <Panel
+                    title="Канал не открылся"
+                    hint={loadError}
+                    actions={<Button onClick={retryLoad}>Ещё раз</Button>}
+                />
+            )}
             {/* Адрес в ссылке есть, а канала по нему нет: ссылка устарела или в ней опечатка.
                 Показывать здесь форму создания нельзя — человек шёл не создавать, а войти. */}
-            {!waiting && route.channel && !channel && (
+            {!waiting && route.channel && !channel && !loadError && (
                 <Panel
                     title="Канала нет"
                     hint={`Канала по адресу «${route.channel}» нет: ссылка устарела или в ней опечатка.`}
@@ -1140,6 +1170,15 @@ export default function App() {
                 </div>
                 <div className={styles.headerBar} style={boxEdge} ref={measureHeader}>
                     <div className={styles.headerInfo}>
+                        {/* Нет связи — говорим один раз здесь, а не снекбаром на каждое действие
+                            (см. docs/FIREBASE.md, «Что видит человек»): повторённый пять раз
+                            подряд снекбар про отсутствие сети — шум, а не сообщение. Строчка
+                            видна и на главной, до открытия канала: связь нужна раньше, чем канал. */}
+                        {connection.status === 'offline' && (
+                            <div className={styles.connectionStrip} role="status">
+                                Связи нет. Ждём, когда вернётся
+                            </div>
+                        )}
                         {/* Название канала — это и кнопка «кто на связи»: по нажатию открывается
                             список кораблей. Значок стоит в конце названия, а не отдельной кнопкой
                             справа: список — это и есть «кто в этом канале», и спрашивают о нём,
@@ -1365,7 +1404,7 @@ export default function App() {
                         onEditMe={handleEditShip}
                         // Список остаётся открытым: высадив один корабль, старший чаще всего смотрит
                         // на список дальше, а не уходит из него.
-                        onKick={(memberId) => void channelState.kick(memberId)}
+                        onKick={handleKick}
                         onHail={handleHail}
                         // Карточка чужого корабля — та же, что и по щелчку по нему в кадре. Здесь
                         // она ложится поверх списка и закрывается обратно в него.

@@ -23,6 +23,9 @@ export const CHANNEL_ERROR_CODES = [
     // Сеть и вход. Тем же перечислением и той же ошибкой: у приложения один способ отказать,
     // и читателю не приходится гадать, какой из двух он поймал.
     'offline',
+    'timeout',
+    'unavailable',
+    'permission-denied',
     'sign-in-cancelled',
     'sign-in-blocked',
     'unknown',
