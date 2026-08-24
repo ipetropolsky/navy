@@ -8,6 +8,16 @@ import { generateEslintConfig, PROJECT_TYPES } from '@hh.ru/eslint-config';
 
 export default [
     ...generateEslintConfig(PROJECT_TYPES.SERVICE),
+    {
+        // Собранные функции: lib/ вне корня общий игнор пакета не ловит — только вложенный путь.
+        ignores: ['functions/lib'],
+    },
+    {
+        // shared/ собирает и functions — обычным tsc, без бандлера, — а алиасы из tsconfig
+        // paths в собранный JS не попадают, поэтому импорты внутри каталога только относительные.
+        files: ['shared/**/*.ts'],
+        rules: { 'no-restricted-imports': 'off' },
+    },
     { rules: { 'prettier/prettier': 'off' } },
     eslintConfigPrettier,
 ];

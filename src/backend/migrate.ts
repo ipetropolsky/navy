@@ -1,4 +1,4 @@
-import { Channel, Member, Message, ShipField } from '@/types/channel';
+import { Channel, Member, Message, ShipField } from '@shared/types/channel';
 
 import { ChannelSnapshot } from '@/backend/types';
 

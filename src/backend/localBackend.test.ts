@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 
-import { MAX_COURSE_LENGTH, MAX_MESSAGE_LENGTH, Member, Message, ShipNoticeMessage } from '@/types/channel';
+import { MAX_COURSE_LENGTH, MAX_MESSAGE_LENGTH, Member, Message, ShipNoticeMessage } from '@shared/types/channel';
 
 import { createLocalBackend } from '@/backend/localBackend';
 import { ChannelBackend, ChannelError, ChannelEvent, MemberDraft } from '@/backend/types';

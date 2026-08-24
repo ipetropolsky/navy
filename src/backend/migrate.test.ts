@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { Channel, ShipNoticeMessage } from '@/types/channel';
+import { Channel, ShipNoticeMessage } from '@shared/types/channel';
 
 import { OLDEST_VERSION, archiveKey, restoreState } from '@/backend/migrate';
 

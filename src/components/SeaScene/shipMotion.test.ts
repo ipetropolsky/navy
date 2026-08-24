@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 
-import { ISLAND_FREE_SLOT, SHIP_SPECS, ShipKind, ShipPlacement, Side, shipWidthPercent } from '@/types/channel';
+import { ISLAND_FREE_SLOT, SHIP_SPECS, ShipKind, ShipPlacement, Side, shipWidthPercent } from '@shared/types/channel';
 
 import {
     LEAVE_GUARD,

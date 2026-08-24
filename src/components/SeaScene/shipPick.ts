@@ -1,5 +1,5 @@
 import { SHIP_TAP_MIN } from '@/config/layout';
-import { HullCenter } from '@/types/channel';
+import { HullCenter } from '@shared/types/channel';
 
 /**
  * Кому достаётся нажатие по воде.

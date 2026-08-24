@@ -8,8 +8,8 @@ import IconButton from '@/components/ui/IconButton';
 import Sheet from '@/components/ui/Sheet';
 import { useSnackbar } from '@/components/ui/Snackbar';
 import { LeaveIcon, LinkIcon } from '@/components/ui/icons';
-import { Member, SHIP_KIND_LABELS } from '@/types/channel';
 import { Press, isTap, startPress } from '@/utils/tap';
+import { Member, SHIP_KIND_LABELS } from '@shared/types/channel';
 
 import styles from './MembersList.module.less';
 

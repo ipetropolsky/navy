@@ -23,7 +23,7 @@ chromium`. Если Chromium уже стоит и качать его незач
 корабль, которому места не выбрали; какое место освобождается за ушедшим; кому переходит
 старшинство; что попадает в служебную запись о переоснащении. Всё это — арифметика над данными,
 и браузер к ней не добавляет ничего, кроме собственного веса. Живут такие проверки в
-[`placement.test.ts`](../src/backend/placement.test.ts),
+[`placement.test.ts`](../shared/placement.test.ts),
 [`localBackend.test.ts`](../src/backend/localBackend.test.ts),
 [`shipMotion.test.ts`](../src/components/SeaScene/shipMotion.test.ts) и соседних.
 

@@ -26,10 +26,11 @@
     /* Path mapping */
     "paths": {
       "@/*": ["./src/*"],
+      "@shared/*": ["./shared/*"],
       "@tests/*": ["./tests/*"],
       "~/*": ["./node_modules/*"]
     }
   },
-  "include": ["src", "tests", "firestore"],
+  "include": ["src", "shared", "tests", "firestore"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

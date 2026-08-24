@@ -9,9 +9,9 @@ import {
     serverTimestamp,
 } from 'firebase/firestore';
 
-import { paths } from '@/config/model';
-import { Channel } from '@/types/channel';
 import { isValidSlug } from '@/utils/slug';
+import { paths } from '@shared/config/model';
+import { Channel } from '@shared/types/channel';
 
 import { createLocalBackend, mirrorChannel } from '@/backend/localBackend';
 import { ChannelBackend, ChannelError, ChannelSnapshot } from '@/backend/types';

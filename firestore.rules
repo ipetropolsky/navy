@@ -17,7 +17,7 @@ rules_version = '2';
 service cloud.firestore {
     match /databases/{database}/documents {
         // Пределы длины продублированы числами: импортов в языке правил нет. Разъехаться
-        // с `src/types/channel.ts` им не даёт юнит — он читает этот файл и сверяет числа.
+        // с `shared/types/channel.ts` им не даёт юнит — он читает этот файл и сверяет числа.
         function maxTitle() { return 40; }
         function maxSlug() { return 40; }
         function maxText() { return 500; }

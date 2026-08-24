@@ -12,7 +12,7 @@ import {
     Side,
     otherSide,
     shipWidthPercent,
-} from '@/types/channel';
+} from './types/channel';
 
 import {
     Anchored,
@@ -29,7 +29,7 @@ import {
     restingLeft,
     restingYaw,
     suggestBerth,
-} from '@/backend/placement';
+} from './placement';
 
 /**
  * Заход на рейд: с какой стороны корабль приходит и куда встаёт носом. Правило счётное,

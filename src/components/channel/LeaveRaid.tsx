@@ -8,10 +8,10 @@ import Input from '@/components/ui/Input';
 import Sheet from '@/components/ui/Sheet';
 import { useSnackbar } from '@/components/ui/Snackbar';
 import { LeaveIcon } from '@/components/ui/icons';
-import { MAX_COURSE_LENGTH, Member } from '@/types/channel';
 import { limitMessage, overLimit } from '@/utils/limit';
 import { Press, isTap, startPress } from '@/utils/tap';
 import { isTouch } from '@/utils/viewport';
+import { MAX_COURSE_LENGTH, Member } from '@shared/types/channel';
 
 import styles from './LeaveRaid.module.less';
 

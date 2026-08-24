@@ -9,7 +9,7 @@ import { useSnackbar } from '@/components/ui/Snackbar';
 import Switch from '@/components/ui/Switch';
 import { BeaconIcon } from '@/components/ui/icons';
 import { HAIL_SIGNAL } from '@/hooks/morse';
-import { Member, MorseFeed, SHIP_KIND_LABELS } from '@/types/channel';
+import { Member, MorseFeed, SHIP_KIND_LABELS } from '@shared/types/channel';
 
 import styles from './ShipCard.module.less';
 

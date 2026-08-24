@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { Message, MessageRef } from '@/types/channel';
+import { Message, MessageRef } from '@shared/types/channel';
 
 import { createDemoChannel } from '@/backend/seed';
 

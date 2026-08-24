@@ -1,4 +1,4 @@
-import { Member, ShipField, ShipNotice, ShipTitle } from '@/types/channel';
+import { Member, ShipField, ShipNotice, ShipTitle } from './types/channel';
 
 /**
  * Что канал пишет в ленту о корабле — данными, а не фразой.

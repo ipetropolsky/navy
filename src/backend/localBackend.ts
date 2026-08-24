@@ -1,3 +1,8 @@
+import { limitMessage, overLimit } from '@/utils/limit';
+import { isValidSlug } from '@/utils/slug';
+import { localStore } from '@/utils/storage';
+import { refitNotices, shipTitle } from '@shared/notice';
+import { isBerthFree, placeShip } from '@shared/placement';
 import {
     Channel,
     MAX_COURSE_LENGTH,
@@ -8,14 +13,9 @@ import {
     ShipNotice,
     isSameBerth,
     memberRef,
-} from '@/types/channel';
-import { limitMessage, overLimit } from '@/utils/limit';
-import { isValidSlug } from '@/utils/slug';
-import { localStore } from '@/utils/storage';
+} from '@shared/types/channel';
 
 import { ServerState, archiveKey, restoreState } from '@/backend/migrate';
-import { refitNotices, shipTitle } from '@/backend/notice';
-import { isBerthFree, placeShip } from '@/backend/placement';
 import { DEMO_CHANNEL_ID, createDemoChannel } from '@/backend/seed';
 import { ChannelBackend, ChannelError, ChannelEvent, ChannelSnapshot, MemberDraft, Unsubscribe } from '@/backend/types';
 

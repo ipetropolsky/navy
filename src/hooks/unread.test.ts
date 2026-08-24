@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { unreadAfter } from '@/hooks/unread';
 
-import { Message } from '@/types/channel';
+import { Message } from '@shared/types/channel';
 
 /**
  * Счёт непрочитанного. Проверяем само правило: что попадает в счётчик, а что нет, и от какого

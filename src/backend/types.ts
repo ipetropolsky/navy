@@ -1,4 +1,4 @@
-import { Berth, Channel, Member, MemberRef, Message, MessageRef, ShipKind, Side } from '@/types/channel';
+import { Berth, Channel, Member, MemberRef, Message, MessageRef, ShipKind, Side } from '@shared/types/channel';
 
 /**
  * Контракт бэкенда. Фронтенд знает только его и ничего — про то, где лежат данные:

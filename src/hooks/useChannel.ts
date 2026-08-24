@@ -10,7 +10,7 @@ import {
     rememberLastLook,
     rememberMemberId,
 } from '@/backend/identity';
-import { Member } from '@/types/channel';
+import { Member } from '@shared/types/channel';
 
 import useReception, { Reception } from '@/hooks/useReception';
 

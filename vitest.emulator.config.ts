@@ -12,14 +12,15 @@ import { defineConfig } from 'vitest/config';
  * тем же правилам (firestore/channels.test.ts) — оба живут в одном каталоге и требуют одного
  * и того же поднятого эмулятора.
  *
- * Алиас '@' — тот же, что в resolve.alias у vite.config.ts: без него файлы из firestore/
- * пришлось бы заново называть коллекции строками, а имена коллекций и пути к документам
- * собирают только функции из src/config/model.ts.
+ * Алиасы '@' и '@shared' — те же, что в resolve.alias у vite.config.ts: без них файлы
+ * из firestore/ пришлось бы заново называть коллекции строками, а имена коллекций и пути
+ * к документам собирают только функции из shared/config/model.ts.
  */
 export default defineConfig({
     resolve: {
         alias: {
             '@': path.resolve(__dirname, './src'),
+            '@shared': path.resolve(__dirname, './shared'),
         },
     },
     test: {

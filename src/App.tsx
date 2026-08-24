@@ -11,6 +11,8 @@ import {
     useState,
 } from 'react';
 
+import { Berth, Message, MorseFeed, ShipKind, Side, authorLook, isSameBerth, otherSide } from '@shared/types/channel';
+
 import { ChannelDraft, ChannelError, MemberDraft, backend, freeBerths, suggestBerth } from '@/backend';
 import { DEMO_CHANNEL_SLUG } from '@/backend/seed';
 import SeaScene, { BerthChoice } from '@/components/SeaScene/SeaScene';
@@ -41,7 +43,6 @@ import { useSwipe } from '@/hooks/useSwipe';
 import { useUnread } from '@/hooks/useUnread';
 import { channelLink, useRoute } from '@/routing';
 import { NOTHING_OPEN, reduce } from '@/state/layers';
-import { Berth, Message, MorseFeed, ShipKind, Side, authorLook, isSameBerth, otherSide } from '@/types/channel';
 import { copyText } from '@/utils/clipboard';
 import { Fling, rubberBand, settleMagnet, stepMagnet, trackFling } from '@/utils/magnet';
 import { plural } from '@/utils/plural';

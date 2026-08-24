@@ -11,7 +11,7 @@ import {
     otherSide,
     shipWidthPercent,
     slotWidthPercent,
-} from '@/types/channel';
+} from '@shared/types/channel';
 
 /**
  * Ход корабля по сцене: сколько ему идти, куда и как долго.

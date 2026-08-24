@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import { Member } from '@/types/channel';
+import { Member } from './types/channel';
 
-import { refitNotices, shipTitle } from '@/backend/notice';
+import { refitNotices, shipTitle } from './notice';
 
 /**
  * Записи канала о корабле. Проверяем ровно то, за что здесь отвечает бэкенд: что случилось

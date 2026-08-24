@@ -1,6 +1,6 @@
 import { ReactNode } from 'react';
 
-import { SHIP_KIND_LABELS, ShipField, ShipNotice, ShipTitle } from '@/types/channel';
+import { SHIP_KIND_LABELS, ShipField, ShipNotice, ShipTitle } from '@shared/types/channel';
 
 /**
  * Строчка канала о корабле: вошёл, переоснастился, снялся с рейда.

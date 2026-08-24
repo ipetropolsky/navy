@@ -1,6 +1,8 @@
 import { readFileSync } from 'fs';
 import { describe, expect, it } from 'vitest';
 
+import { SLUG_MAX_LENGTH } from '@/utils/slug';
+
 import {
     HULL_NUMBER_LENGTH,
     MAX_MESSAGE_LENGTH,
@@ -13,8 +15,7 @@ import {
     memberRef,
     projectLeft,
     slotShare,
-} from '@/types/channel';
-import { SLUG_MAX_LENGTH } from '@/utils/slug';
+} from './channel';
 
 /**
  * Как в ленте находят автора. Правило простое, но у него две стороны, и обе видны только

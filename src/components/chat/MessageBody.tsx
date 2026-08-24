@@ -1,6 +1,6 @@
 import { ReactNode } from 'react';
 
-import { Message } from '@/types/channel';
+import { Message } from '@shared/types/channel';
 
 import ShipNoticeLine from '@/components/chat/ShipNoticeLine';
 

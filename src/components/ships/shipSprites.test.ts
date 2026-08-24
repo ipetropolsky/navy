@@ -8,7 +8,7 @@ import {
     SpritePoint,
     hasTwoLights,
 } from '@/components/ships/shipSprites';
-import { SHIP_KINDS, ShipKind } from '@/types/channel';
+import { SHIP_KINDS, ShipKind } from '@shared/types/channel';
 
 /**
  * Отметки на спрайтах. Ставят их глазами — открыл картинку, навёл курсор, переписал числа, —

@@ -9,6 +9,9 @@ import Input from '@/components/ui/Input';
 import Panel from '@/components/ui/Panel';
 import { useSnackbar } from '@/components/ui/Snackbar';
 import { HAIL_SIGNAL } from '@/hooks/morse';
+import { limitMessage, overLimit } from '@/utils/limit';
+import { Press, isTap, startPress } from '@/utils/tap';
+import { isTouch } from '@/utils/viewport';
 import {
     HULL_NUMBER_LENGTH,
     MEMBER_COLORS,
@@ -20,10 +23,7 @@ import {
     ShipKind,
     Side,
     isValidHullNumber,
-} from '@/types/channel';
-import { limitMessage, overLimit } from '@/utils/limit';
-import { Press, isTap, startPress } from '@/utils/tap';
-import { isTouch } from '@/utils/viewport';
+} from '@shared/types/channel';
 
 import styles from './MemberForm.module.less';
 

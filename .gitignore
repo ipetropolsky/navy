@@ -3,6 +3,9 @@ build
 .idea
 .local
 
+# Собранные функции: firebase deploy пересобирает сам, в репозиторий не едут.
+functions/lib
+
 # Настройки подключения к Firebase: у каждого свои, в репозиторий не едут.
 .env.local
 .env.*.local

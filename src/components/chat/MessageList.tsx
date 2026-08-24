@@ -4,8 +4,8 @@ import Avatar from '@/components/ships/Avatar';
 import CodePennant from '@/components/ships/CodePennant';
 import MemberName from '@/components/ships/MemberName';
 import { useSnackbar } from '@/components/ui/Snackbar';
-import { AuthorLook, Member, MemberRef, Message, authorLook } from '@/types/channel';
 import { Press, drifted, isTap, selectedSince, startPress } from '@/utils/tap';
+import { AuthorLook, Member, MemberRef, Message, authorLook } from '@shared/types/channel';
 
 import MessageBody from '@/components/chat/MessageBody';
 import ReplyQuote from '@/components/chat/ReplyQuote';

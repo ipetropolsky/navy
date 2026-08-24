@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 
-import { COLLECTIONS, berthId, parseBerthId, paths } from '@/config/model';
+import { COLLECTIONS, berthId, parseBerthId, paths } from './model';
 
 /**
  * Модель приложения: пути к коллекциям и ключ брони места.

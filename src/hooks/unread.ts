@@ -1,4 +1,4 @@
-import { Message } from '@/types/channel';
+import { Message } from '@shared/types/channel';
 
 /**
  * Непрочитанное: сколько чужих реплик пришло с тех пор, как разговор в последний раз был

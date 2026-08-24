@@ -42,7 +42,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } fr
 
 import { createFirebaseBackend } from '@/backend/firebaseBackend';
 import { ChannelBackend, ChannelError, ChannelEvent, MemberDraft } from '@/backend/types';
-import { paths } from '@/config/model';
+import { paths } from '@shared/config/model';
 
 const PROJECT_ID = 'demo-navy-channels';
 

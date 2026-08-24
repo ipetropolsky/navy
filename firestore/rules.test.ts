@@ -33,8 +33,8 @@ import {
 } from 'firebase/firestore';
 import { afterAll, beforeAll, beforeEach, describe, test } from 'vitest';
 
-import { paths } from '@/config/model';
-import { MAX_MESSAGE_LENGTH, NAME_MAX_LENGTH, TITLE_MAX_LENGTH } from '@/types/channel';
+import { paths } from '@shared/config/model';
+import { MAX_MESSAGE_LENGTH, NAME_MAX_LENGTH, TITLE_MAX_LENGTH } from '@shared/types/channel';
 import { SLUG_MAX_LENGTH } from '@/utils/slug';
 
 // Проект-пустышка: настоящий Firebase-проект эмулятору не нужен, а demo-префикс — явная

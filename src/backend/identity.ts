@@ -1,5 +1,5 @@
-import { ShipKind } from '@/types/channel';
 import { sessionStore } from '@/utils/storage';
+import { ShipKind } from '@shared/types/channel';
 
 /**
  * Кто эта вкладка. Лежит отдельно от данных «сервера»: бэкенд знает про всех участников,

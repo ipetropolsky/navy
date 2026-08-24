@@ -2,8 +2,8 @@ import { GoogleAuthProvider, User, onAuthStateChanged, signInWithPopup, signOut 
 import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 
 import { firebaseAuth, firestore } from '@/config/firebase';
-import { paths } from '@/config/model';
 import { sessionStore } from '@/utils/storage';
+import { paths } from '@shared/config/model';
 
 import { ChannelError, Unsubscribe } from '@/backend/types';
 

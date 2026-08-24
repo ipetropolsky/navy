@@ -41,7 +41,7 @@ import {
     slotDepth,
     slotScale,
     slotShare,
-} from '@/types/channel';
+} from '@shared/types/channel';
 
 import {
     EdgeCourse,
