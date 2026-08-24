@@ -15,6 +15,7 @@ import {
 } from 'firebase/firestore';
 import { Functions, FunctionsError, httpsCallable } from 'firebase/functions';
 
+import { MESSAGE_PAGE } from '@/config/network';
 import { isValidSlug } from '@/utils/slug';
 import { paths } from '@shared/config/model';
 import { CHANNEL_ERROR_CODES, ChannelErrorCode } from '@shared/errors';
@@ -107,12 +108,12 @@ interface MessageDoc {
 }
 
 /**
- * Сколько последних сообщений читаем при открытии канала. Это не настоящая страничная
- * лента — догрузка вверх при прокрутке (loadOlderMessages, «упёрся в край — попроси ещё») —
- * это #68, а просто хвост разговора: без предела getChannel читал бы годовую переписку
- * одним запросом.
+ * Сколько последних сообщений читаем при открытии канала — та же страница, что и в мерках
+ * разговора с сервером (`config/network.ts`), а не своё число рядом: страница у ленты одна,
+ * и второй такой же константе разъехаться с первой ничего не мешает. Догрузка вверх
+ * при прокрутке (loadOlderMessages, «упёрся в край — попроси ещё») — это #68; здесь пока
+ * просто хвост разговора: без предела getChannel читал бы годовую переписку одним запросом.
  */
-const MESSAGE_PAGE = 200;
 
 /** Документ → сущность контракта. serverAt наружу не отдаётся — это внутренняя метка. */
 const toChannel = (channelId: string, data: ChannelDoc): Channel => ({
