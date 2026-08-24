@@ -1,6 +1,8 @@
-import { afterEach, beforeEach, describe, expect, test } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { MAX_COURSE_LENGTH, MAX_MESSAGE_LENGTH, Member, Message, ShipNoticeMessage } from '@shared/types/channel';
+
+import { MESSAGE_PAGE } from '@/config/network';
 
 import { createLocalBackend } from '@/backend/localBackend';
 import { ChannelBackend, ChannelError, ChannelEvent, MemberDraft } from '@/backend/types';
@@ -121,6 +123,28 @@ const members = async (backend: ChannelBackend, channelId: string): Promise<Memb
 const ownerOf = async (backend: ChannelBackend, channelId: string): Promise<string | undefined> =>
     (await backend.getChannel({ channelId }))?.channel.owner?.memberId;
 
+/**
+ * Много сообщений подряд, для проверок страниц. Часы должны быть подложными (`vi.useFakeTimers`)
+ * ещё до вызова: `delay()` внутри бэкенда крутит настоящий `setTimeout`, и без подмены сотни
+ * сообщений шли бы по живым миллисекундам.
+ */
+const sendMany = async (
+    backend: ChannelBackend,
+    channelId: string,
+    memberId: string,
+    count: number
+): Promise<Message[]> => {
+    const sent: Message[] = [];
+    for (let i = 0; i < count; i += 1) {
+        const pending = backend.sendMessage({ channelId, memberId, message: { text: `msg-${i}` } });
+        // eslint-disable-next-line no-await-in-loop -- подложные часы двигаем ровно на одно сообщение за раз
+        await vi.advanceTimersByTimeAsync(50);
+        // eslint-disable-next-line no-await-in-loop -- отправка идёт по одной, через общую очередь бэкенда
+        sent.push((await pending).message);
+    }
+    return sent;
+};
+
 beforeEach(() => {
     shelf.clear();
     wires.clear();
@@ -137,6 +161,9 @@ beforeEach(() => {
 afterEach(() => {
     delete (globalThis as unknown as { window?: unknown }).window;
     delete (globalThis as unknown as { BroadcastChannel?: unknown }).BroadcastChannel;
+    // На случай теста с подложными часами (см. «лента страницами»): следующему тесту
+    // настоящие часы нужны настоящими, а не оставшимися от предыдущего.
+    vi.useRealTimers();
 });
 
 describe('адрес канала', () => {
@@ -590,5 +617,97 @@ describe('две вкладки', () => {
 
         expect(await members(first, channelId)).toHaveLength(2);
         expect(one.member.place).not.toEqual(other.member.place);
+    });
+});
+
+describe('лента страницами', () => {
+    test('лента режется на страницы по MESSAGE_PAGE, а loadOlderMessages подряд восстанавливает её без потерь и дублей', async () => {
+        const backend = createLocalBackend();
+        const channelId = await freshChannel(backend, 'bolshaya-lenta');
+        const { member } = await backend.join({ channelId, member: draft('Связист', '007') });
+        const [joinNotice] = await messages(backend, channelId);
+
+        vi.useFakeTimers();
+        const sent = await sendMany(backend, channelId, member.memberId, MESSAGE_PAGE * 2 + 20);
+        vi.useRealTimers();
+
+        const tail = await messages(backend, channelId);
+        const tailHasMore = (await backend.getChannel({ channelId }))?.hasMoreMessages;
+        expect(tail).toHaveLength(MESSAGE_PAGE);
+        expect(tailHasMore).toBe(true);
+        expect(tail.map((message) => message.messageId)).toEqual(
+            sent.slice(-MESSAGE_PAGE).map((message) => message.messageId)
+        );
+
+        // Поднимаемся страницами до самого верха, каждый раз подставляя новую страницу
+        // перед уже собранным: так же, как это будет делать интерфейс.
+        let older: Message[] = [];
+        let before = tail[0].messageId;
+        let hasMore = tailHasMore ?? false;
+        let guard = 0;
+        while (hasMore) {
+            guard += 1;
+            // Строк отправлено ровно на три страницы — если цикл не остановился на третьей,
+            // это уже не пагинация, а зацикливание.
+            expect(guard).toBeLessThan(10);
+            // eslint-disable-next-line no-await-in-loop -- страницы поднимаются по цепочке: следующий before известен только из ответа на предыдущую
+            const page = await backend.loadOlderMessages({ channelId, before: { messageId: before } });
+            older = [...page.messages, ...older];
+            before = page.messages[0].messageId;
+            hasMore = page.hasMore;
+        }
+
+        const full = [...older, ...tail];
+        expect(full.map((message) => message.messageId)).toEqual([
+            joinNotice.messageId,
+            ...sent.map((message) => message.messageId),
+        ]);
+        expect(new Set(full.map((message) => message.messageId)).size).toBe(full.length);
+    }, 15000);
+
+    test('канал короче страницы — hasMoreMessages ложно что у getChannel, что у getChannelBySlug', async () => {
+        const backend = createLocalBackend();
+        const channelId = await freshChannel(backend, 'malenkaya-lenta');
+        const { member } = await backend.join({ channelId, member: draft('Альбатрос', '317') });
+        await backend.sendMessage({ channelId, memberId: member.memberId, message: { text: 'Раз' } });
+        await backend.sendMessage({ channelId, memberId: member.memberId, message: { text: 'Два' } });
+
+        expect((await backend.getChannel({ channelId }))?.hasMoreMessages).toBe(false);
+        expect((await backend.getChannelBySlug({ slug: 'malenkaya-lenta' }))?.hasMoreMessages).toBe(false);
+    });
+
+    test('loadOlderMessages: before не найден в ленте — пустая страница, а не отказ', async () => {
+        const backend = createLocalBackend();
+        const channelId = await freshChannel(backend, 'bez-etogo-soobshcheniya');
+        await backend.join({ channelId, member: draft('Альбатрос', '317') });
+
+        const page = await backend.loadOlderMessages({ channelId, before: { messageId: 'net-takogo-soobshcheniya' } });
+        expect(page).toEqual({ messages: [], hasMore: false });
+    });
+
+    test('loadOlderMessages: limit задаёт размер одной страницы, а не всей ленты', async () => {
+        const backend = createLocalBackend();
+        const channelId = await freshChannel(backend, 'svoy-limit');
+        const { member } = await backend.join({ channelId, member: draft('Альбатрос', '317') });
+        const sent: Message[] = [];
+        for (let i = 0; i < 10; i += 1) {
+            // eslint-disable-next-line no-await-in-loop -- десяток сообщений: без подложных часов проще ждать по одному
+            const { message } = await backend.sendMessage({
+                channelId,
+                memberId: member.memberId,
+                message: { text: `m${i}` },
+            });
+            sent.push(message);
+        }
+
+        const all = await messages(backend, channelId);
+        const before = all[all.length - 1]; // последнее из десяти отправленных
+        const page = await backend.loadOlderMessages({ channelId, before: { messageId: before.messageId }, limit: 3 });
+
+        expect(page.messages).toHaveLength(3);
+        expect(page.hasMore).toBe(true);
+        expect(page.messages.map((message) => message.messageId)).toEqual(
+            sent.slice(-4, -1).map((message) => message.messageId)
+        );
     });
 });

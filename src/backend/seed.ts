@@ -2,7 +2,7 @@ import { Standing, berthAt, placeShip } from '@shared/placement';
 import { AuthorLook, Berth, CORRIDORS, Corridor, Member, MemberRef, ShipKind, memberLook } from '@shared/types/channel';
 import { pick, pickBetween, shuffled } from '@shared/utils/random';
 
-import { ChannelSnapshot } from '@/backend/types';
+import { StoredChannel } from '@/backend/migrate';
 
 /**
  * Демо-канал: три корабля и уже начатый разговор. Нужен, чтобы чат было на что посмотреть
@@ -114,7 +114,7 @@ const placeDemoCrew = (): Member[] => {
     });
 };
 
-export const createDemoChannel = (): ChannelSnapshot => {
+export const createDemoChannel = (): StoredChannel => {
     const members = placeDemoCrew();
 
     /**

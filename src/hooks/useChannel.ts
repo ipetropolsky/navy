@@ -57,6 +57,12 @@ export interface ChannelController {
     /** Высадить чужой корабль. Доступно только старшему на рейде — это проверяет бэкенд. */
     kick: (memberId: string) => Promise<void>;
     sendMessage: (draft: MessageDraft) => Promise<void>;
+    /** Есть ли выше messages ещё лента — то же самое, что `ChannelSnapshot.hasMoreMessages`. */
+    hasMoreMessages: boolean;
+    /** Страница уже в пути: второй запрос до её прихода не нужен, а кнопку показать нечем. */
+    loadingOlder: boolean;
+    /** Догрузить ленту выше уже показанного — на один экран (см. `backend.loadOlderMessages`). */
+    loadOlder: () => Promise<void>;
 }
 
 export function useChannel(
@@ -83,12 +89,17 @@ export function useChannel(
     const myIdRef = useRef(myId);
     myIdRef.current = myId;
     /**
-     * Что сейчас показано — для первого эффекта. Ссылкой по той же причине, что и myId выше:
-     * эффекту надо знать, тот ли это канал, но пересобираться на каждую перемену снимка
-     * ему незачем.
+     * Что сейчас показано — для первого эффекта и для loadOlder. Ссылкой по той же причине,
+     * что и myId выше: обоим надо знать нынешний снимок, но пересобираться на каждую его
+     * перемену им незачем.
      */
     const shownRef = useRef(channel);
     shownRef.current = channel;
+    const [loadingOlder, setLoadingOlder] = useState(false);
+    // Синхронный дублёр loadingOlder: React обновляет состояние не сразу, а прокрутка внутри
+    // одного кадра может позвать loadOlder дважды — вторая заявка должна увидеть первую
+    // раньше, чем до неё дойдёт отрисовка.
+    const loadingOlderRef = useRef(false);
 
     // Открыли канал: разбираем адрес из ссылки, спрашиваем состояние и решаем, кто мы в нём.
     // Ответ может прийти, когда вкладка уже ушла на другой канал, — тогда его надо выбросить,
@@ -310,6 +321,39 @@ export function useChannel(
         [channelId, myId]
     );
 
+    /**
+     * Догрузить страницу выше показанного. Читает канал и признак хвоста через shownRef,
+     * а не через channel/channelId из замыкания: тогда колбэк не пересобирается на каждый
+     * пришедший снимок, и ссылка на него в MessageList остаётся стабильной.
+     */
+    const loadOlder = useCallback(async () => {
+        const current = shownRef.current;
+        const oldest = current?.messages[0];
+        if (!current || !current.hasMoreMessages || !oldest || loadingOlderRef.current) {
+            return;
+        }
+        loadingOlderRef.current = true;
+        setLoadingOlder(true);
+        try {
+            const { messages: older, hasMore } = await backend.loadOlderMessages({
+                channelId: current.channel.channelId,
+                before: { messageId: oldest.messageId },
+            });
+            setChannel((state) =>
+                state?.channel.channelId === current.channel.channelId
+                    ? { ...state, messages: [...older, ...state.messages], hasMoreMessages: hasMore }
+                    : state
+            );
+        } catch {
+            // Отказ (нет связи, таймаут) отдельно не показываем: hasMoreMessages остаётся
+            // правдой, и следующая прокрутка к тому же краю запросит страницу заново —
+            // тот же приём, что и у retryLoad, только без отдельной кнопки.
+        } finally {
+            loadingOlderRef.current = false;
+            setLoadingOlder(false);
+        }
+    }, []);
+
     return {
         loading,
         loadError,
@@ -323,5 +367,8 @@ export function useChannel(
         leave,
         kick,
         sendMessage,
+        hasMoreMessages: channel?.hasMoreMessages ?? false,
+        loadingOlder,
+        loadOlder,
     };
 }

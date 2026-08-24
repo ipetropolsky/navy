@@ -80,7 +80,8 @@ await backend.updateChannel({ channelId, channel: { slug: 'nord-ost-2', title } 
 interface ChannelSnapshot {
     channel: Channel;
     members: Member[];
-    messages: Message[];
+    messages: Message[]; // последняя страница ленты, не вся целиком — см. MESSAGE_PAGE
+    hasMoreMessages: boolean; // есть ли выше messages ещё лента — повод звать loadOlderMessages
 }
 
 interface Channel {
@@ -178,18 +179,19 @@ interface ShipSpec {
 
 ## Методы
 
-| Метод                                           | Что делает                           | Возвращает                |
-| ----------------------------------------------- | ------------------------------------ | ------------------------- |
-| `getChannel({ channelId })`                     | Состояние канала целиком             | `ChannelSnapshot \| null` |
-| `getChannelBySlug({ slug })`                    | Разбор адреса из ссылки              | `ChannelSnapshot \| null` |
-| `createChannel({ channel })`                    | Заводит канал без участников         | `{ channel }`             |
-| `updateChannel({ channelId, channel })`         | Меняет адрес и название канала       | `{ channel }`             |
-| `join({ channelId, member })`                   | Ставит корабль в строй               | `{ member }`              |
-| `updateMember({ channelId, memberId, member })` | Меняет позывной, номер, силуэт, цвет | `{ member }`              |
-| `leave({ channelId, memberId, course? })`       | Выводит корабль из канала            | —                         |
-| `kick({ channelId, memberId, member })`         | Высаживает чужой корабль             | —                         |
-| `sendMessage({ channelId, memberId, message })` | Отправляет сообщение                 | `{ message }`             |
-| `subscribe({ channelId, onEvent })`             | Подписка на события канала           | функция отписки           |
+| Метод                                              | Что делает                           | Возвращает                |
+| -------------------------------------------------- | ------------------------------------ | ------------------------- |
+| `getChannel({ channelId })`                        | Состояние канала целиком             | `ChannelSnapshot \| null` |
+| `getChannelBySlug({ slug })`                       | Разбор адреса из ссылки              | `ChannelSnapshot \| null` |
+| `createChannel({ channel })`                       | Заводит канал без участников         | `{ channel }`             |
+| `updateChannel({ channelId, channel })`            | Меняет адрес и название канала       | `{ channel }`             |
+| `join({ channelId, member })`                      | Ставит корабль в строй               | `{ member }`              |
+| `updateMember({ channelId, memberId, member })`    | Меняет позывной, номер, силуэт, цвет | `{ member }`              |
+| `leave({ channelId, memberId, course? })`          | Выводит корабль из канала            | —                         |
+| `kick({ channelId, memberId, member })`            | Высаживает чужой корабль             | —                         |
+| `sendMessage({ channelId, memberId, message })`    | Отправляет сообщение                 | `{ message }`             |
+| `loadOlderMessages({ channelId, before, limit? })` | Страница ленты выше `before`         | `{ messages, hasMore }`   |
+| `subscribe({ channelId, onEvent })`                | Подписка на события канала           | функция отписки           |
 
 ### Открыть канал и подписаться
 
@@ -366,6 +368,33 @@ await backend.sendMessage({
 должно жить там, где данные. Больше `MAX_MESSAGE_LENGTH` = 500 символов — отказ с кодом
 `message-too-long` и готовым текстом «Максимум 500 символов, у вас 505». Набранное при этом
 не обрезается: обрезать чужой текст нельзя.
+
+### Лента страницами
+
+`getChannel` и `getChannelBySlug` отдают не весь разговор, а его хвост — `MESSAGE_PAGE`
+последних сообщений (`src/config/network.ts`). Разговор в канале не ограничен, а держать его
+в памяти вкладки целиком незачем, пока видна только нижняя часть. `hasMoreMessages` в ответе
+говорит, есть ли выше ещё лента.
+
+```ts
+const snapshot = await backend.getChannel({ channelId });
+// snapshot.messages — последняя страница, snapshot.hasMoreMessages — есть ли ещё выше
+
+if (snapshot?.hasMoreMessages) {
+    const { messages, hasMore } = await backend.loadOlderMessages({
+        channelId,
+        before: { messageId: snapshot.messages[0].messageId },
+        limit: 50, // необязательно; по умолчанию MESSAGE_PAGE
+    });
+    // messages — следующая страница выше before, в естественном порядке (старые сверху)
+}
+```
+
+Курсор — ссылка на сообщение (`before`), а не число: у Firestore это снимок документа
+(`startAfter(snapshot)`), а не `sentAt` в лоб, — двум сообщениям случается совпасть по времени
+до миллисекунды, и числовой курсор потерял бы одно из них или прочитал дважды на соседних
+страницах. Раз загруженная страница живёт без подписки: подписка держит только новое, что
+приходит после точки открытия, а старое одной перезаписью и остаётся.
 
 ### Печать по проводу не идёт
 

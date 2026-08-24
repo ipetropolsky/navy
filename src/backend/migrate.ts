@@ -29,10 +29,17 @@ import { ChannelSnapshot } from '@/backend/types';
  * приведение может забрать его оттуда хоть завтра.
  */
 
+/**
+ * Как канал лежит в хранилище — то же самое, что ChannelSnapshot, отдаваемый наружу,
+ * только без hasMoreMessages: это не факт о канале, а факт о прочитанной странице,
+ * и его считают при чтении (см. backend/localBackend.ts, paged), а не хранят.
+ */
+export type StoredChannel = Omit<ChannelSnapshot, 'hasMoreMessages'>;
+
 /** Состояние «сервера» целиком: каналов может быть сколько угодно, адресуются по id. */
 export interface ServerState {
     version: number;
-    channels: Record<string, ChannelSnapshot>;
+    channels: Record<string, StoredChannel>;
 }
 
 /** Разобранный JSON, форма которого ещё ничем не подтверждена. */
@@ -130,7 +137,7 @@ const isChannel = (value: unknown): value is Channel =>
  * значит хранилище надо переписать, а прежнее отложить.
  */
 interface Parsed {
-    channels: Record<string, ChannelSnapshot>;
+    channels: Record<string, StoredChannel>;
     whole: boolean;
 }
 
@@ -145,7 +152,7 @@ interface Parsed {
  * и не заметил бы.
  */
 const parseChannels = (value: unknown): Parsed => {
-    const channels: Record<string, ChannelSnapshot> = {};
+    const channels: Record<string, StoredChannel> = {};
     let whole = true;
     for (const [id, snapshot] of Object.entries(isRecord(value) ? value : {})) {
         if (isRecord(snapshot) && isChannel(snapshot.channel)) {

@@ -5,6 +5,7 @@ import {
     doc,
     getDoc,
     getDocs,
+    limit as limitDocs,
     limitToLast,
     onSnapshot,
     orderBy,
@@ -12,6 +13,7 @@ import {
     runTransaction,
     serverTimestamp,
     setDoc,
+    startAfter,
 } from 'firebase/firestore';
 import { Functions, FunctionsError, httpsCallable } from 'firebase/functions';
 
@@ -241,13 +243,20 @@ export function createFirebaseBackend({ db, functions }: { db: Firestore; functi
     const membersQuery = (channelId: string) =>
         query(collection(db, paths.members({ channelId })), orderBy('joinedAt'));
     // limitToLast с order by sentAt по возрастанию — это последние MESSAGE_PAGE документов,
-    // но в естественном порядке чтения (старые сверху): то же самое нужно и getChannel,
-    // и подписке ниже. Число берётся из общих мерок разговора с сервером (config/network.ts),
-    // а не заводится своё рядом: страница у ленты одна. Догрузка вверх при прокрутке
-    // (loadOlderMessages, «упёрся в край — попроси ещё») — это #68; пока здесь просто хвост
-    // разговора: без предела getChannel читал бы годовую переписку одним запросом.
+    // но в естественном порядке чтения (старые сверху): то же самое нужно и одноразовому
+    // чтению ниже, и подписке. Число берётся из общих мерок разговора с сервером
+    // (config/network.ts), а не заводится своё рядом: страница у ленты одна.
     const feedQuery = (channelId: string) =>
         query(collection(db, paths.messages({ channelId })), orderBy('sentAt'), limitToLast(MESSAGE_PAGE));
+
+    // Тот же запрос, но на один документ шире — только для readChannel. Лишний документ
+    // и есть ответ на «а выше есть что-нибудь ещё»: пришло MESSAGE_PAGE + 1 — значит есть,
+    // и самый старый из пришедших в ответ не идёт, отбрасывается (см. readChannel). Отдельный
+    // запрос «сколько всего сообщений» стоил бы дороже: это ещё одно чтение коллекции,
+    // а здесь та же цена, что и у самой страницы. Подписке лишний документ не нужен —
+    // у неё hasMoreMessages не пересчитывается, это дело только чтения страницы.
+    const feedReadQuery = (channelId: string) =>
+        query(collection(db, paths.messages({ channelId })), orderBy('sentAt'), limitToLast(MESSAGE_PAGE + 1));
 
     const joinChannelCall = httpsCallable<JoinChannelRequest, MemberResponse>(functions, 'joinChannel');
     const updateMemberCall = httpsCallable<UpdateMemberRequest, MemberResponse>(functions, 'updateMember');
@@ -298,12 +307,18 @@ export function createFirebaseBackend({ db, functions }: { db: Firestore; functi
         }
         const [membersSnap, feedSnap] = await Promise.all([
             getDocs(membersQuery(channelId)),
-            getDocs(feedQuery(channelId)),
+            getDocs(feedReadQuery(channelId)),
         ]);
+        // Пришёл лишний документ сверх страницы — значит, выше есть что догружать; сам он
+        // в ответ не идёт (docs отсортированы по возрастанию sentAt, лишний — самый старый,
+        // он первый).
+        const hasMoreMessages = feedSnap.docs.length > MESSAGE_PAGE;
+        const pageDocs = hasMoreMessages ? feedSnap.docs.slice(1) : feedSnap.docs;
         return {
             channel: toChannel(channelId, channelSnap.data() as ChannelDoc),
             members: membersSnap.docs.map((item) => toMember(item.id, item.data() as MemberDoc)),
-            messages: feedSnap.docs.map((item) => toMessage(item.id, item.data() as MessageDoc)),
+            messages: pageDocs.map((item) => toMessage(item.id, item.data() as MessageDoc)),
+            hasMoreMessages,
         };
     };
 
@@ -539,6 +554,47 @@ export function createFirebaseBackend({ db, functions }: { db: Firestore; functi
                     // доставки, это #69, здесь его ещё нет.
                     return { message: { messageId, author, sentAt, text: draft.text, thread: draft.thread } };
                 }, WRITE_TIMEOUT);
+            } catch (failure) {
+                throw toChannelError(failure);
+            }
+        },
+
+        loadOlderMessages: async ({ channelId, before, limit }) => {
+            try {
+                return await withTimeout(async () => {
+                    // Курсор — по снимку документа (startAfter(snapshot)), а не по числу sentAt:
+                    // двум сообщениям случается совпасть по времени до миллисекунды, и числовой
+                    // startAfter потерял бы одно из них или прочитал его дважды на соседних
+                    // страницах. Снимок при этом приходится читать здесь: по контракту границу
+                    // называют ссылкой (before: { messageId }), а startAfter принимает документ —
+                    // одно лишнее чтение на страницу, и оно того стоит.
+                    const beforeSnap = await getDoc(doc(db, paths.message({ channelId, messageId: before.messageId })));
+                    if (!beforeSnap.exists()) {
+                        // Сообщений сегодня не удаляют, и на практике это не случается; но если
+                        // граница пропала, строить от неё курсор нечем — отдаём пустой ответ,
+                        // а не гадаем, что было выше.
+                        return { messages: [], hasMore: false };
+                    }
+                    const pageSize = limit ?? MESSAGE_PAGE;
+                    // desc — читаем от before назад, к началу разговора; лишний документ сверх
+                    // pageSize — тот же приём, что и в readChannel: пришёл — значит, выше есть
+                    // что читать ещё.
+                    const olderSnap = await getDocs(
+                        query(
+                            collection(db, paths.messages({ channelId })),
+                            orderBy('sentAt', 'desc'),
+                            startAfter(beforeSnap),
+                            limitDocs(pageSize + 1)
+                        )
+                    );
+                    const hasMore = olderSnap.docs.length > pageSize;
+                    const pageDocs = hasMore ? olderSnap.docs.slice(0, pageSize) : olderSnap.docs;
+                    // Запрос шёл в обратную сторону (desc, от before к началу) — переворачиваем
+                    // в естественный порядок чтения, старые сверху, тот же, в каком лежит
+                    // messages в ChannelSnapshot.
+                    const messages = pageDocs.reverse().map((item) => toMessage(item.id, item.data() as MessageDoc));
+                    return { messages, hasMore };
+                }, READ_TIMEOUT);
             } catch (failure) {
                 throw toChannelError(failure);
             }

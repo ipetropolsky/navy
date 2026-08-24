@@ -4,6 +4,7 @@ import Avatar from '@/components/ships/Avatar';
 import CodePennant from '@/components/ships/CodePennant';
 import MemberName from '@/components/ships/MemberName';
 import { useSnackbar } from '@/components/ui/Snackbar';
+import { PRELOAD_ABOVE } from '@/config/network';
 import { Press, drifted, isTap, selectedSince, startPress } from '@/utils/tap';
 import { AuthorLook, Member, MemberRef, Message, authorLook } from '@shared/types/channel';
 
@@ -32,6 +33,12 @@ interface MessageListProps {
      * в котором корабль и надо было увидеть, — и открывают её из списка на связи.
      */
     onHail: (memberId: string) => void;
+    /** Есть ли выше messages ещё лента — то же самое, что `ChannelController.hasMoreMessages`. */
+    hasMoreMessages: boolean;
+    /** Страница уже в пути: пока идёт, вместо даты наверху стоит «Загрузка…». */
+    loadingOlder: boolean;
+    /** Позвать следующую страницу ленты выше уже показанного. */
+    onLoadOlder: () => void;
 }
 
 /**
@@ -45,7 +52,16 @@ const STICK_SLOP = 24;
 const NOTICE_TITLE = 'Техническое сообщение';
 
 /** Лента сообщений в стиле Telegram: группировка по автору, ответы, тап по сообщению — ответить. */
-function MessageList({ messages, members, myId, onReply, onHail }: MessageListProps) {
+function MessageList({
+    messages,
+    members,
+    myId,
+    onReply,
+    onHail,
+    hasMoreMessages,
+    loadingOlder,
+    onLoadOlder,
+}: MessageListProps) {
     const listRef = useRef<HTMLDivElement>(null);
     const notify = useSnackbar();
 
@@ -143,6 +159,73 @@ function MessageList({ messages, members, myId, onReply, onHail }: MessageListPr
             observer.disconnect();
         };
     }, []);
+
+    /**
+     * Когда звать следующую страницу — по прокрутке, а не по числу загруженного: строчки
+     * разной высоты, и треть ленты (см. `PRELOAD_ABOVE`) меряется экранами, а не репликами.
+     *
+     * Тройка входов, от которых это зависит, держится ссылками: слушатель заводится один раз,
+     * а не переподписывается на каждый пришедший снимок или каждую смену loadingOlder.
+     */
+    const hasMoreRef = useRef(hasMoreMessages);
+    hasMoreRef.current = hasMoreMessages;
+    const loadingOlderRef = useRef(loadingOlder);
+    loadingOlderRef.current = loadingOlder;
+    const onLoadOlderRef = useRef(onLoadOlder);
+    onLoadOlderRef.current = onLoadOlder;
+
+    useEffect(() => {
+        const list = listRef.current;
+        if (!list) {
+            return undefined;
+        }
+        const watchPreload = (): void => {
+            if (!hasMoreRef.current || loadingOlderRef.current) {
+                return;
+            }
+            if (list.scrollTop <= PRELOAD_ABOVE * list.scrollHeight) {
+                onLoadOlderRef.current();
+            }
+        };
+        list.addEventListener('scroll', watchPreload, { passive: true });
+        // Первая страница может не заполнить окошко (короткий разговор после открытия
+        // длинного) — тогда прокрутки не будет вовсе, а без явного вызова догрузка
+        // не позвалась бы никогда.
+        watchPreload();
+        return () => list.removeEventListener('scroll', watchPreload);
+    }, []);
+
+    /**
+     * Сотня сообщений, вставленных наверх, меняет высоту ленты. Якорь низа (`.bottomAnchor`)
+     * тут не спасает: опорным узлом браузер берёт только то, что видно, а якорь у отмотанной
+     * вверх ленты за экраном — держать ею нечего. Замер это подтвердил: без своей поправки
+     * лента подскакивала (см. проверку «подгрузка старой страницы не двигает то, что уже
+     * видно» в tests/channel.spec.ts).
+     *
+     * Поэтому сдвиг досчитываем сами: высоту запоминаем после каждой отрисовки, а на следующей,
+     * если первое сообщение сменилось (значит, догрузка что-то вставила выше него), двигаем
+     * scrollTop ровно на прирост высоты — вид остаётся там же, где его оставил человек.
+     *
+     * Без списка зависимостей: застать прирост высоты и запомнить его нужно после всякой
+     * отрисовки, а не только после смены messages, — самой высоте случается меняться и от
+     * чужого события, пришедшего между отрисовками с догрузкой.
+     */
+    const lastHeightRef = useRef(0);
+    const firstIdRef = useRef<string | null>(null);
+
+    useLayoutEffect(() => {
+        const list = listRef.current;
+        if (!list) {
+            return;
+        }
+        const firstId = messages[0]?.messageId ?? null;
+        const prepended = firstIdRef.current !== null && firstId !== firstIdRef.current;
+        if (prepended) {
+            list.scrollTop += list.scrollHeight - lastHeightRef.current;
+        }
+        firstIdRef.current = firstId;
+        lastHeightRef.current = list.scrollHeight;
+    });
 
     /** С чего началось нажатие: откуда и при каком выделении (см. `@/utils/tap`). */
     const pressRef = useRef<Press | null>(null);
@@ -285,7 +368,11 @@ function MessageList({ messages, members, myId, onReply, onHail }: MessageListPr
              * между ними живут на нём (см. .rows в стилях).
              */}
             <div className={styles.rows}>
-                {messages.length > 0 && <div className={styles.dateChip}>{formatDate(messages[0].sentAt)}</div>}
+                {messages.length > 0 && (
+                    // Место занято в любом случае, поэтому «Загрузка…» встаёт туда же, где обычно
+                    // дата: подставь дату сразу — лента дёрнулась бы на высоту чипа при её появлении.
+                    <div className={styles.dateChip}>{loadingOlder ? 'Загрузка…' : formatDate(messages[0].sentAt)}</div>
+                )}
                 {messages.map((message, index) => {
                     const own = message.author.memberId === myId;
                     const author = lookOf(message.author);

@@ -1,3 +1,4 @@
+import { MESSAGE_PAGE } from '@/config/network';
 import { watchOnlineStatus } from '@/utils/connection';
 import { isValidSlug } from '@/utils/slug';
 import { localStore } from '@/utils/storage';
@@ -16,7 +17,7 @@ import {
 } from '@shared/types/channel';
 import { limitMessage, overLimit } from '@shared/utils/limit';
 
-import { ServerState, archiveKey, restoreState } from '@/backend/migrate';
+import { ServerState, StoredChannel, archiveKey, restoreState } from '@/backend/migrate';
 import { DEMO_CHANNEL_ID, createDemoChannel } from '@/backend/seed';
 import { ChannelBackend, ChannelError, ChannelEvent, ChannelSnapshot, MemberDraft, Unsubscribe } from '@/backend/types';
 
@@ -151,7 +152,7 @@ const mutateState = <T>(change: (state: ServerState) => T): Promise<T> =>
     });
 
 /** То же самое, но про один канал: его отсутствие — общая для всех ошибка. */
-const mutate = <T>(channelId: string, change: (channel: ChannelSnapshot) => T): Promise<T> =>
+const mutate = <T>(channelId: string, change: (channel: StoredChannel) => T): Promise<T> =>
     mutateState((state) => {
         const channel = state.channels[channelId];
         if (!channel) {
@@ -159,6 +160,17 @@ const mutate = <T>(channelId: string, change: (channel: ChannelSnapshot) => T): 
         }
         return change(channel);
     });
+
+/**
+ * Хвост ленты в MESSAGE_PAGE сообщений — то же самое, что при чтении канала отдаёт
+ * настоящий бэкенд (см. firebaseBackend.ts, readChannel). Хранилище при этом не трогается:
+ * полный разговор остаётся в состоянии как есть, страницей режется только ответ.
+ */
+const paged = (snapshot: StoredChannel): ChannelSnapshot => {
+    const { messages } = snapshot;
+    const hasMoreMessages = messages.length > MESSAGE_PAGE;
+    return { ...snapshot, messages: hasMoreMessages ? messages.slice(-MESSAGE_PAGE) : messages, hasMoreMessages };
+};
 
 export function createLocalBackend(): ChannelBackend {
     // Чтение состояния при старте заодно кладёт демо-канал в хранилище, если его там нет.
@@ -207,7 +219,7 @@ export function createLocalBackend(): ChannelBackend {
     };
 
     /** Позывной и бортовой номер должны быть свободны: иначе в ленте не различить, кто говорит. */
-    const checkDraftIsFree = (snapshot: ChannelSnapshot, draft: MemberDraft, exceptId?: string): void => {
+    const checkDraftIsFree = (snapshot: StoredChannel, draft: MemberDraft, exceptId?: string): void => {
         const others = snapshot.members.filter((member) => member.memberId !== exceptId);
         if (others.some((member) => member.name.toLowerCase() === draft.name.trim().toLowerCase())) {
             throw new ChannelError('name-taken', 'Корабль с таким позывным уже на связи');
@@ -235,7 +247,7 @@ export function createLocalBackend(): ChannelBackend {
     const dropMember = async (
         channelId: string,
         memberId: string,
-        check?: (snapshot: ChannelSnapshot) => void,
+        check?: (snapshot: StoredChannel) => void,
         nextOwnerId?: string
     ): Promise<Member | null> => {
         const { gone, channel } = await mutate(channelId, (snapshot) => {
@@ -258,10 +270,15 @@ export function createLocalBackend(): ChannelBackend {
     };
 
     return {
-        getChannel: ({ channelId }) => delay(readState().channels[channelId] ?? null),
+        getChannel: ({ channelId }) => {
+            const snapshot = readState().channels[channelId];
+            return delay(snapshot ? paged(snapshot) : null);
+        },
 
-        getChannelBySlug: ({ slug }) =>
-            delay(Object.values(readState().channels).find((snapshot) => snapshot.channel.slug === slug) ?? null),
+        getChannelBySlug: ({ slug }) => {
+            const snapshot = Object.values(readState().channels).find((item) => item.channel.slug === slug);
+            return delay(snapshot ? paged(snapshot) : null);
+        },
 
         createChannel: async ({ channel: { slug, title } }) => {
             if (!isValidSlug(slug)) {
@@ -480,6 +497,22 @@ export function createLocalBackend(): ChannelBackend {
             });
             emit(channelId, { type: 'message-added', message });
             return delay({ message });
+        },
+
+        // Хранилище держит весь разговор массивом — догрузка здесь просто его срез.
+        // before не нашёлся (гипотетически: сообщений сегодня не удаляют) — курсору не
+        // от чего считать, и это тот же законный пустой ответ, что и у настоящего бэкенда.
+        loadOlderMessages: ({ channelId, before, limit: pageLimit }) => {
+            const snapshot = readState().channels[channelId];
+            const index = snapshot
+                ? snapshot.messages.findIndex((message) => message.messageId === before.messageId)
+                : -1;
+            if (!snapshot || index === -1) {
+                return delay({ messages: [], hasMore: false });
+            }
+            const pageSize = pageLimit ?? MESSAGE_PAGE;
+            const from = Math.max(0, index - pageSize);
+            return delay({ messages: snapshot.messages.slice(from, index), hasMore: from > 0 });
         },
 
         subscribe: ({ channelId, onEvent: listener }): Unsubscribe => {

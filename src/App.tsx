@@ -115,7 +115,18 @@ export default function App() {
     const route = useRoute();
     const auth = useAuth();
     const channelState = useChannel(route.channel, route.memberId, auth.account?.userId ?? null);
-    const { channel, myId, reception, lastLook, loading, loadError, retryLoad } = channelState;
+    const {
+        channel,
+        myId,
+        reception,
+        lastLook,
+        loading,
+        loadError,
+        retryLoad,
+        hasMoreMessages,
+        loadingOlder,
+        loadOlder,
+    } = channelState;
     const connection = useConnection();
     /**
      * Вошёл ли человек. Вход спрашивают не ради приличия: корабль принадлежит человеку,
@@ -876,6 +887,9 @@ export default function App() {
                         myId={me.memberId}
                         onReply={setReplyTo}
                         onHail={handleHail}
+                        hasMoreMessages={hasMoreMessages}
+                        loadingOlder={loadingOlder}
+                        onLoadOlder={() => void loadOlder()}
                     />
                     <Composer
                         // Плашкой ввода меряется пол разговора: свёрнутый до упора, он стоит

@@ -29,6 +29,7 @@ import {
     DocumentSnapshot,
     Firestore,
     QuerySnapshot,
+    Timestamp,
     collection,
     deleteDoc,
     doc,
@@ -135,6 +136,17 @@ const seedMember = (
         place: { slot: 0, corridor: 'center', left: 50, facing: 'left', enterFrom: 'right' },
         joinedAt,
         user: { userId: memberId },
+    });
+
+/**
+ * Сообщение в обход правил, с точным sentAt — чтобы страницы `loadOlderMessages` резались
+ * по известным границам, а не по тому, как быстро отвечает эмулятор на настоящий sendMessage.
+ */
+const seedMessage = (channelId: string, messageId: string, sentAt: number, text: string): Promise<void> =>
+    seedDoc(paths.message({ channelId, messageId }), {
+        author: { memberId: 'seed-author', look: { name: 'Сеятель', hullNumber: '000', color: '#8ecae6' } },
+        sentAt,
+        text,
     });
 
 /**
@@ -293,6 +305,107 @@ describe('чтение канала', () => {
         if (second.kind === undefined) {
             expect(second.text).toBe('Второе по счёту');
         }
+    });
+});
+
+describe('loadOlderMessages', () => {
+    test('страницы поднимаются по цепочке до начала разговора, hasMore ложно только на последней', async () => {
+        const backend = backendAs('u-page');
+        const { channel } = await backend.createChannel({ channel: { slug: 'stranitsy', title: 'Страницы' } });
+        const base = 1_700_000_000_000;
+        // sentAt строго по возрастанию индекса — порядок страниц предсказан заранее и сверяется
+        // ниже поштучно, а не просто длиной ответа.
+        await Promise.all(
+            [...Array(12).keys()].map((i) =>
+                seedMessage(channel.channelId, `msg-${i}`, base + i * 1000, `Реплика ${i}`)
+            )
+        );
+
+        const page1 = await backend.loadOlderMessages({
+            channelId: channel.channelId,
+            before: { messageId: 'msg-11' },
+            limit: 5,
+        });
+        expect(page1.messages.map((message) => message.messageId)).toEqual([
+            'msg-6',
+            'msg-7',
+            'msg-8',
+            'msg-9',
+            'msg-10',
+        ]);
+        expect(page1.hasMore).toBe(true);
+
+        const page2 = await backend.loadOlderMessages({
+            channelId: channel.channelId,
+            before: { messageId: 'msg-6' },
+            limit: 5,
+        });
+        expect(page2.messages.map((message) => message.messageId)).toEqual([
+            'msg-1',
+            'msg-2',
+            'msg-3',
+            'msg-4',
+            'msg-5',
+        ]);
+        // Дальше него ровно один документ (msg-0) — «плюс один» его застаёт, и это законное
+        // hasMore: true, а не перебор мимо конца.
+        expect(page2.hasMore).toBe(true);
+
+        const page3 = await backend.loadOlderMessages({
+            channelId: channel.channelId,
+            before: { messageId: 'msg-1' },
+            limit: 5,
+        });
+        expect(page3.messages.map((message) => message.messageId)).toEqual(['msg-0']);
+        expect(page3.hasMore).toBe(false);
+    });
+
+    test('before не нашёлся в базе — пустой ответ, а не отказ', async () => {
+        const backend = backendAs('u-page-missing');
+        const { channel } = await backend.createChannel({ channel: { slug: 'net-kursora', title: 'Нет курсора' } });
+
+        const page = await backend.loadOlderMessages({
+            channelId: channel.channelId,
+            before: { messageId: 'net-takogo-soobshcheniya' },
+        });
+        expect(page).toEqual({ messages: [], hasMore: false });
+    });
+
+    test('курсор различает соседей с одинаковым sentAt до миллисекунды', async () => {
+        const backend = backendAs('u-page-tie');
+        const { channel } = await backend.createChannel({ channel: { slug: 'sovpadenie', title: 'Совпадение' } });
+        const tie = 1_700_000_000_000;
+        // Оба совпадают по sentAt до миллисекунды — числовой startAfter не отличил бы их
+        // друг от друга и потерял бы либо msg-tied-a, либо оба разом (см. комментарий
+        // у loadOlderMessages в firebaseBackend.ts). msg-newer старше по sentAt — она задаёт
+        // границу первой страницы.
+        await seedMessage(channel.channelId, 'msg-tied-a', tie, 'Первая из пары');
+        await seedMessage(channel.channelId, 'msg-tied-b', tie, 'Вторая из пары');
+        await seedMessage(channel.channelId, 'msg-newer', tie + 1000, 'Самая новая');
+
+        // Порядок между msg-tied-a и msg-tied-b здесь не важен: какая из них окажется
+        // «первой после msg-newer», решает Firestore (сортировка по имени документа
+        // при равенстве sentAt), а не эта проверка. Важно, что после неё в базе не осталось
+        // ни потерянных, ни задвоенных строк, — это и проверяет docs.map() ниже.
+        const [tied] = (
+            await backend.loadOlderMessages({
+                channelId: channel.channelId,
+                before: { messageId: 'msg-newer' },
+                limit: 1,
+            })
+        ).messages;
+        expect(['msg-tied-a', 'msg-tied-b']).toContain(tied.messageId);
+        const other = tied.messageId === 'msg-tied-a' ? 'msg-tied-b' : 'msg-tied-a';
+
+        // Курсор — по этому самому документу с sentAt=tie, а не по числу tie: следующий вызов
+        // обязан вернуть именно оставшегося соседа, а не пустоту и не его же самого повторно.
+        const rest = await backend.loadOlderMessages({
+            channelId: channel.channelId,
+            before: { messageId: tied.messageId },
+            limit: 1,
+        });
+        expect(rest.messages.map((message) => message.messageId)).toEqual([other]);
+        expect(rest.hasMore).toBe(false);
     });
 });
 
@@ -577,4 +690,84 @@ describe('sendMessage', () => {
 
         expect((await rawCollection(paths.messages({ channelId: channel.channelId }))).empty).toBe(true);
     });
+
+    test('serverAt — настоящая серверная метка, отдельная от sentAt', async () => {
+        const memberId = 'u-server-at';
+        const backend = backendAs(memberId);
+        const { channel } = await backend.createChannel({ channel: { slug: 'server-at', title: 'ServerAt' } });
+        await seedMember(channel.channelId, memberId, 'Связист', '007', 100);
+
+        const before = Date.now();
+        const { message } = await backend.sendMessage({
+            channelId: channel.channelId,
+            memberId,
+            message: { text: 'Метка времени' },
+        });
+        const after = Date.now();
+
+        const raw = await rawDoc(paths.message({ channelId: channel.channelId, messageId: message.messageId }));
+        const data = raw.data() as Record<string, unknown>;
+
+        // sentAt — клиентские часы, то же число, что уже вернул ответ.
+        expect(data.sentAt).toBe(message.sentAt);
+        expect(data.sentAt).toBeGreaterThanOrEqual(before);
+        expect(data.sentAt).toBeLessThanOrEqual(after);
+
+        // serverAt — не число и не то же самое значение, а настоящая Timestamp, проставленная
+        // сервером при подтверждении записи (serverTimestamp()); к моменту чтения она уже
+        // разрешилась, иначе документа с этим полем не было бы вовсе (см. комментарий
+        // у MessageDoc в firebaseBackend.ts).
+        expect(data.serverAt).toBeInstanceOf(Timestamp);
+        const serverAtMs = (data.serverAt as Timestamp).toMillis();
+        expect(serverAtMs).toBeGreaterThanOrEqual(before);
+        // Проверка и эмулятор — один процесс на одной машине: секунды между часами разойтись
+        // не должны, если это вообще одна и та же запись.
+        expect(Math.abs(serverAtMs - (data.sentAt as number))).toBeLessThan(5000);
+    });
+});
+
+describe('задержка доставки', () => {
+    test('чужая реплика доходит до соседней вкладки за доли секунды', async () => {
+        const senderId = 'u-latency-sender';
+        const listenerId = 'u-latency-listener';
+        const sender = backendAs(senderId);
+        const listener = backendAs(listenerId);
+        const { channel } = await sender.createChannel({ channel: { slug: 'zaderzhka', title: 'Задержка' } });
+        await seedMember(channel.channelId, senderId, 'Отправитель', '001', 100);
+
+        // «Соседняя вкладка» — тот же канал, но своя подписка от другого uid: ровно то, чем
+        // была бы вторая вкладка чужого человека в этом канале.
+        let onDelivered: (() => void) | null = null;
+        const delivered = new Promise<void>((resolve) => {
+            onDelivered = resolve;
+        });
+        const unsubscribe = listener.subscribe({
+            channelId: channel.channelId,
+            onEvent: (event) => {
+                if (event.type === 'message-added') {
+                    onDelivered?.();
+                }
+            },
+        });
+        // Первый снимок подписки — не событие (см. «подписка на ленту» выше); отправлять
+        // раньше, чем он осядет, — значит мерить не задержку доставки, а время до оседания.
+        await sleep(400);
+
+        const startedAt = performance.now();
+        await sender.sendMessage({
+            channelId: channel.channelId,
+            memberId: senderId,
+            message: { text: 'Доброй вахты' },
+        });
+        await delivered;
+        const latencyMs = performance.now() - startedAt;
+
+        unsubscribe();
+
+        // Порог — не гарантия для прод-сети, а сторож от подписки, замолчавшей насовсем;
+        // само число идёт в отчёт по задаче как измеренная задержка (см. «доли секунды»).
+        expect(latencyMs).toBeLessThan(5000);
+        // eslint-disable-next-line no-console -- число нужно в выводе прогона человеку, не только ассерту
+        console.log(`[задержка доставки] сообщение дошло до соседней вкладки за ${latencyMs.toFixed(0)} мс`);
+    }, 15000);
 });

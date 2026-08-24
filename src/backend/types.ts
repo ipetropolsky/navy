@@ -25,7 +25,14 @@ import { Channel, Member, MemberRef, Message, MessageRef } from '@shared/types/c
 export interface ChannelSnapshot {
     channel: Channel;
     members: Member[];
+    /**
+     * Лента — не вся, а последняя страница (см. `config/network.ts`, MESSAGE_PAGE):
+     * разговор в канале не ограничен, а держать его в памяти вкладки целиком незачем,
+     * пока видна только нижняя часть.
+     */
     messages: Message[];
+    /** Есть ли выше messages ещё лента. Правда — повод звать loadOlderMessages. */
+    hasMoreMessages: boolean;
 }
 
 /**
@@ -148,6 +155,22 @@ export interface ChannelBackend {
     kick(request: MemberAddress & { member: MemberRef }): Promise<void>;
 
     sendMessage(request: MemberAddress & { message: MessageDraft }): Promise<{ message: Message }>;
+
+    /**
+     * Догрузить ленту выше уже показанного — на один экран, а не всю переписку разом
+     * (см. `ChannelSnapshot.hasMoreMessages`).
+     *
+     * `before` называет сообщение, выше которого читаем: само оно уже показано и в ответ
+     * не попадает. `limit` необязателен — умолчание то же, что и у первой страницы
+     * (MESSAGE_PAGE, `config/network.ts`); полем, а не отдельной константой здесь, потому
+     * что страница может понадобиться другого размера, даже если сегодня такого зовущего нет.
+     *
+     * Отвечает в естественном порядке чтения — старые сверху, — том же самом, в каком лежит
+     * messages: результат подставляется перед ним без переворота.
+     */
+    loadOlderMessages(
+        request: ChannelAddress & { before: MessageRef; limit?: number }
+    ): Promise<{ messages: Message[]; hasMore: boolean }>;
 
     /**
      * Подписка на всё, что происходит в канале. Возвращает функцию отписки.
