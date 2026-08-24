@@ -18,7 +18,7 @@
     "format-files-check": "prettier --check --ignore-unknown",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "test:rules": "firebase emulators:exec --only firestore --project demo-navy-rules \"vitest run --config vitest.rules.config.ts\"",
+    "test:emulator": "firebase emulators:exec --only firestore --project demo-navy \"vitest run --config vitest.emulator.config.ts\"",
     "check": "npm run ts-check && npm run lint-check && npm run format-check && npm run test",
     "check-and-fix": "npm run lint && npm run format",
     "deploy": "npm run build && gh-pages -d build",

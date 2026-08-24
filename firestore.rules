@@ -12,7 +12,7 @@ rules_version = '2';
 // свободно ли место, занят ли позывной, кто старший, — правилом не выражается вовсе; такое
 // пишет сервер (см. docs/FIREBASE.md, «Правила рейда живут на сервере»).
 //
-// Проверяются правила не глазами: firestore/rules.test.ts, `npm run test:rules`.
+// Проверяются правила не глазами: firestore/rules.test.ts, `npm run test:emulator`.
 
 service cloud.firestore {
     match /databases/{database}/documents {

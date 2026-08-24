@@ -2,8 +2,8 @@
  * Юнит-проверки firestore.rules — против настоящего эмулятора Firestore, а не пересказа
  * правил своими словами.
  *
- * Файл лежит не в src и гоняется не обычным `npm run test`, а отдельным `npm run test:rules`
- * (конфиг — vitest.rules.config.ts, порт эмулятора — из firebase.json): этим проверкам нужен
+ * Файл лежит не в src и гоняется не обычным `npm run test`, а отдельным `npm run test:emulator`
+ * (конфиг — vitest.emulator.config.ts, порт эмулятора — из firebase.json): этим проверкам нужен
  * поднятый эмулятор, а обычный набор участвует в сборке на GitHub Pages, где никакого Firebase
  * нет и поднимать эмулятор незачем. Смешать наборы значило бы тянуть Java и firebase-tools
  * в каждый прогон `npm run test`.
@@ -38,7 +38,7 @@ import { MAX_MESSAGE_LENGTH, NAME_MAX_LENGTH, TITLE_MAX_LENGTH } from '@/types/c
 import { SLUG_MAX_LENGTH } from '@/utils/slug';
 
 // Проект-пустышка: настоящий Firebase-проект эмулятору не нужен, а demo-префикс — явная
-// метка, что это не 'navy-chat' из .firebaserc. Тот же id стоит в `--project` у `npm run test:rules`.
+// метка, что это не 'navy-chat' из .firebaserc. Тот же id стоит в `--project` у `npm run test:emulator`.
 const PROJECT_ID = 'demo-navy-rules';
 
 let testEnv: RulesTestEnvironment;
