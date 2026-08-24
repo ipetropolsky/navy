@@ -1,6 +1,6 @@
 import { InputHTMLAttributes, ReactNode, Ref } from 'react';
 
-import { overLimit } from '@/utils/limit';
+import { overLimit } from '@shared/utils/limit';
 
 import styles from './Input.module.less';
 
@@ -12,7 +12,7 @@ import styles from './Input.module.less';
  * `maxLength` здесь мягкий и до разметки не доходит: браузер по этому атрибуту молча
  * не пускает лишние знаки, а набранное сверх предела обрезать нельзя — вставленный текст
  * терялся бы хвостом, о котором никто не сказал. Вместо этого поле краснеет, а насколько
- * перебрали, говорит снекбар по нажатию на отправку (`@/utils/limit`). Правило одно на все
+ * перебрали, говорит снекбар по нажатию на отправку (`@shared/utils/limit`). Правило одно на все
  * поля с пределом, и живёт оно здесь, а не переписывается в каждой форме.
  */
 

@@ -29,8 +29,22 @@ jobs:
             - name: Install
               run: npm ci
 
+            # Свой package.json и своя установка: node_modules/firebase-admin и firebase-functions
+            # лежат в functions/, а не в корне, и npm ci из корня их не ставит. Без этого шага
+            # Check ниже не разрешит 'firebase-admin/app' и подобные импорты в functions/src —
+            # ts-check из корня проверяет и этот каталог тоже (см. tsconfig.json).
+            - name: Install functions
+              run: npm ci --prefix functions
+
             - name: Check
               run: npm run check
+
+            # Отдельная сборка функций: npm run build ниже собирает только клиентский бандл
+            # (vite), а то, что реально уезжает в Cloud Functions, собирает свой tsc со своим
+            # tsconfig.json (module: NodeNext) — и без этого шага поломка именно этой сборки
+            # осталась бы незамеченной до самого деплоя функций.
+            - name: Build functions
+              run: npm --prefix functions run build
 
             # Настройки Firebase приезжают из переменных репозитория (Settings → Secrets and
             # variables → Actions → Variables). Секретами они не назначены нарочно: эти значения

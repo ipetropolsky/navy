@@ -1,4 +1,7 @@
-import { Berth, Channel, Member, MemberRef, Message, MessageRef, ShipKind, Side } from '@shared/types/channel';
+// Реэкспортом, а не только импортом: интерфейс ниже (ChannelBackend) использует MemberDraft
+// напрямую, а `export type { X } from '…'` даёт лишь пересылку — локального имени она не заводит.
+import type { MemberDraft } from '@shared/types/calls';
+import { Channel, Member, MemberRef, Message, MessageRef } from '@shared/types/channel';
 
 /**
  * Контракт бэкенда. Фронтенд знает только его и ничего — про то, где лежат данные:
@@ -25,25 +28,11 @@ export interface ChannelSnapshot {
     messages: Message[];
 }
 
-/** Что участник о себе сообщает: и когда встаёт в строй, и когда переоснащает корабль. */
-export interface MemberDraft {
-    name: string;
-    hullNumber: string;
-    shipKind: ShipKind;
-    color: string;
-    /**
-     * Выбранное место на рейде. Пожелание, а не приказ: пока человек заполнял форму, туда мог
-     * встать кто-то другой, и тогда бэкенд поставит корабль на случайное свободное. Не указано —
-     * место выбирается целиком бэкендом; у стоящего в строю корабля оно при этом не меняется.
-     */
-    berth?: Berth;
-    /**
-     * Курс: куда смотрит нос, когда корабль встал на рейд. В отличие от места это не пожелание,
-     * а приказ — курс ничем не занят и отобрать его не у кого. Не указан — курс достаётся
-     * от стороны захода, как было до того, как его начали выбирать.
-     */
-    facing?: Side;
-}
+/**
+ * Что участник о себе сообщает: и когда встаёт в строй, и когда переоснащает корабль.
+ * Общая с сервером форма — оба конца провода должны разбирать один и тот же черновик.
+ */
+export type { MemberDraft };
 
 /** Что у канала можно задать и потом поменять: адрес и человеческое название. */
 export interface ChannelDraft {
@@ -93,34 +82,12 @@ export type ChannelEvent = ChannelEventBase &
 
 export type ChannelEventType = ChannelEvent['type'];
 
-/** Почему действие не вышло. Коды перечислены, чтобы UI мог показать внятный текст. */
-export type ChannelErrorCode =
-    | 'channel-not-found'
-    | 'channel-full'
-    | 'slug-taken'
-    | 'slug-invalid'
-    | 'name-taken'
-    | 'hull-taken'
-    | 'member-not-found'
-    | 'not-senior'
-    | 'message-too-long'
-    | 'course-too-long'
-    // Сеть и вход. Тем же перечислением и той же ошибкой: у приложения один способ отказать,
-    // и читателю не приходится гадать, какой из двух он поймал.
-    | 'offline'
-    | 'sign-in-cancelled'
-    | 'sign-in-blocked'
-    | 'unknown';
-
-export class ChannelError extends Error {
-    constructor(
-        readonly code: ChannelErrorCode,
-        message: string
-    ) {
-        super(message);
-        this.name = 'ChannelError';
-    }
-}
+/**
+ * Почему действие не вышло. Коды одни и те же у сервера и у клиента: сервер бросает
+ * `ChannelError` изнутри транзакции, а этот файл остаётся единственной дверью для фронтенда.
+ */
+export { ChannelError } from '@shared/errors';
+export type { ChannelErrorCode } from '@shared/errors';
 
 export type Unsubscribe = () => void;
 

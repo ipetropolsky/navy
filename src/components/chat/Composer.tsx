@@ -3,8 +3,8 @@ import { Ref, SyntheticEvent, useEffect, useRef, useState } from 'react';
 import IconButton from '@/components/ui/IconButton';
 import Input from '@/components/ui/Input';
 import { paced } from '@/config/time';
-import { limitMessage, overLimit } from '@/utils/limit';
 import { AuthorLook, MAX_MESSAGE_LENGTH, Message } from '@shared/types/channel';
+import { limitMessage, overLimit } from '@shared/utils/limit';
 
 import MessageBody from '@/components/chat/MessageBody';
 import ReplyQuote from '@/components/chat/ReplyQuote';

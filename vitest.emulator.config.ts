@@ -9,12 +9,15 @@ import { defineConfig } from 'vitest/config';
  *
  * Имя — по эмулятору, а не по правилам: набор проверяет не только firestore.rules
  * (firestore/rules.test.ts), но и то, как настоящий бэкенд ходит в Firestore и подчиняется
- * тем же правилам (firestore/channels.test.ts) — оба живут в одном каталоге и требуют одного
+ * тем же правилам (firestore/channels.test.ts), а с ними — и то, как те же правила соблюдает
+ * сервер (functions/src/raid.test.ts) — все они живут в разных каталогах, но требуют одного
  * и того же поднятого эмулятора.
  *
  * Алиасы '@' и '@shared' — те же, что в resolve.alias у vite.config.ts: без них файлы
  * из firestore/ пришлось бы заново называть коллекции строками, а имена коллекций и пути
- * к документам собирают только функции из shared/config/model.ts.
+ * к документам собирают только функции из shared/config/model.ts. Файлам из functions/src
+ * они не нужны — там сборка ходит относительными путями (см. functions/tsconfig.json),
+ * но на общий набор алиасов это не влияет: лишний алиас не мешает файлам, которые им не пользуются.
  */
 export default defineConfig({
     resolve: {
@@ -24,7 +27,7 @@ export default defineConfig({
         },
     },
     test: {
-        include: ['firestore/**/*.test.ts'],
+        include: ['firestore/**/*.test.ts', 'functions/src/**/*.test.ts'],
         environment: 'node',
     },
 });

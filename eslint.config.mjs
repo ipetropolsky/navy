@@ -13,9 +13,10 @@ export default [
         ignores: ['functions/lib'],
     },
     {
-        // shared/ собирает и functions — обычным tsc, без бандлера, — а алиасы из tsconfig
-        // paths в собранный JS не попадают, поэтому импорты внутри каталога только относительные.
-        files: ['shared/**/*.ts'],
+        // shared/ и functions/src собирает обычный tsc, без бандлера, — а алиасы из tsconfig
+        // paths в собранный JS не попадают, поэтому импорты в обоих каталогах только
+        // относительные: поставь там алиас, и собранный код не найдёт, куда за ним идти.
+        files: ['shared/**/*.ts', 'functions/src/**/*.ts'],
         rules: { 'no-restricted-imports': 'off' },
     },
     { rules: { 'prettier/prettier': 'off' } },

@@ -856,7 +856,7 @@ export default function App() {
                         onCancelReply={() => setReplyTo(null)}
                         onSend={handleSend}
                         // Фразу об отказе складывает само поле по общей мерке длины
-                        // (`@/utils/limit`), нам остаётся её показать.
+                        // (`@shared/utils/limit`), нам остаётся её показать.
                         onTooLong={notify}
                         onTyped={handleTyped}
                     />

@@ -10,10 +10,10 @@ import { useSnackbar } from '@/components/ui/Snackbar';
 import { LinkIcon } from '@/components/ui/icons';
 import { channelLink } from '@/routing';
 import { copyText } from '@/utils/clipboard';
-import { limitMessage, overLimit } from '@/utils/limit';
 import { SLUG_MAX_LENGTH, isValidSlug, slugify, slugifyInput } from '@/utils/slug';
 import { isTouch } from '@/utils/viewport';
 import { TITLE_MAX_LENGTH } from '@shared/types/channel';
+import { limitMessage, overLimit } from '@shared/utils/limit';
 
 import styles from './CreateChannel.module.less';
 
@@ -69,7 +69,7 @@ export default function CreateChannel({ onCreate, demoHref, onOpenDemo, account,
             return;
         }
         // Перебор длины кнопку не гасит: недоступная кнопка молчит, а тут надо сказать,
-        // насколько перебрали. Правило и слова общие со строкой сообщения (`@/utils/limit`).
+        // насколько перебрали. Правило и слова общие со строкой сообщения (`@shared/utils/limit`).
         if (overLimit(title, TITLE_MAX_LENGTH)) {
             notify(limitMessage(title, TITLE_MAX_LENGTH));
             return;

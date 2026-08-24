@@ -23,6 +23,7 @@ import {
     freeBerths,
     freeCorridors,
     isBerthFree,
+    nearestBerth,
     placeShip,
     preferredBerths,
     restingDrift,
@@ -286,14 +287,14 @@ describe('выбранное в форме место', () => {
         expect(place).toMatchObject(wanted);
     });
 
-    test('занятое — корабль встаёт на свободное, а не отказывается', () => {
-        // Место заняли, пока человек раздумывал. Отказывать не за что: корабль встаёт так,
-        // как если бы места не выбирали вовсе, — на свободное и по правилам расстановки.
-        const wanted = berthAt(NEAR, 'center');
-        const place = placeShip(KIND, [standing(NEAR, 'center')], wanted);
-        expect(place).not.toBeNull();
-        expect(place).not.toMatchObject({ slot: wanted.slot, corridor: wanted.corridor });
-        expect(isBerthFree(place!, KIND, [standing(NEAR, 'center')]), 'встал на занятое место').toBe(true);
+    test('занятое — корабль встаёт на ближайшее свободное, а не на первое попавшееся', () => {
+        // Место заняли, пока человек раздумывал. Отказывать не за что, но и раскидывать
+        // корабль по всему рейду тоже: он целился в конкретную точку, и правильный ответ —
+        // тот же, что и у nearestBerth (см. ниже) на том же рейде и с тем же пожеланием.
+        const wanted = berthAt(5, 'center');
+        const taken = [standing(3, 'center'), standing(4, 'center'), standing(5, 'center'), standing(6, 'center')];
+        const place = placeShip(KIND, taken, wanted);
+        expect(place).toMatchObject(berthAt(7, 'center'));
     });
 
     test('мест нет вовсе — расстановка отказывает', () => {
@@ -301,6 +302,47 @@ describe('выбранное в форме место', () => {
         // должен быть определённый: null, а не первое попавшееся место.
         expect(placeShip(KIND, FULL_RAID)).toBeNull();
         expect(placeShip(KIND, FULL_RAID, berthAt(NEAR, 'left'))).toBeNull();
+    });
+});
+
+/**
+ * Ближайшее свободное место — запасной ход, когда пожелание занято. Расстояние одно
+ * на все случаи (см. FIREBASE.md, «Правила рейда живут на сервере»): слоты вглубь плюс
+ * коридоры вбок с ценой перехода CORRIDOR_COST. Числа здесь небольшие и подобраны так,
+ * чтобы ответ был единственным — иначе от прогона к прогону его решал бы жребий.
+ */
+describe('ближайшее свободное место', () => {
+    test('два слота в своём коридоре ближе, чем один коридор вбок', () => {
+        // Вокруг пожелания и на нём самом — соседи по тому же коридору: слот 7 в двух шагах
+        // (цена 2) остаётся единственным близким местом, хотя соседний коридор на том же
+        // слоте всего в шаге в сторону (цена 3) — дальше, а не ближе.
+        const from = berthAt(5, 'center');
+        const taken = [standing(3, 'center'), standing(4, 'center'), standing(5, 'center'), standing(6, 'center')];
+        expect(nearestBerth(KIND, taken, from)).toEqual(berthAt(7, 'center'));
+    });
+
+    test('четыре слота своим коридором — уже дальше соседнего коридора', () => {
+        // Свой коридор занят от слота 3 до 8 — свободно на нём только через четыре слота,
+        // на девятом (цена 4). Сосед по коридору на том же слоте, что и пожелание, обходится
+        // дешевле (цена 3) и потому выигрывает, хоть он и в другой полосе.
+        const from = berthAt(5, 'left');
+        const taken = [3, 4, 5, 6, 7, 8].map((slot) => standing(slot, 'left'));
+        expect(isBerthFree(berthAt(9, 'left'), KIND, taken), 'дальний слот своего коридора не освободили').toBe(true);
+        expect(nearestBerth(KIND, taken, from)).toEqual(berthAt(5, 'center'));
+    });
+
+    test('ответ всегда берётся из freeBerths — запреты рейда не нарушаются', () => {
+        // Рейд занят так, что свободны только два тесных места (см. CROWDED_RAID). Считать
+        // расстояние можно от любой точки, но ответ обязан остаться среди них: острова,
+        // интервалы и размеры формула расстояния не знает — их держит freeBerths.
+        const free = spots(freeBerths(KIND, CROWDED_RAID));
+        const nearest = nearestBerth(KIND, CROWDED_RAID, berthAt(9, 'right'));
+        expect(nearest).not.toBeNull();
+        expect(free).toContain(`${nearest!.slot}:${nearest!.corridor}`);
+    });
+
+    test('свободных мест нет вовсе — null', () => {
+        expect(nearestBerth(KIND, FULL_RAID, berthAt(3, 'left'))).toBeNull();
     });
 });
 

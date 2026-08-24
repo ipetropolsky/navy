@@ -9,7 +9,6 @@ import Input from '@/components/ui/Input';
 import Panel from '@/components/ui/Panel';
 import { useSnackbar } from '@/components/ui/Snackbar';
 import { HAIL_SIGNAL } from '@/hooks/morse';
-import { limitMessage, overLimit } from '@/utils/limit';
 import { Press, isTap, startPress } from '@/utils/tap';
 import { isTouch } from '@/utils/viewport';
 import {
@@ -24,6 +23,7 @@ import {
     Side,
     isValidHullNumber,
 } from '@shared/types/channel';
+import { limitMessage, overLimit } from '@shared/utils/limit';
 
 import styles from './MemberForm.module.less';
 
@@ -187,7 +187,7 @@ export default function MemberForm({
             return;
         }
         // Перебор длины кнопку не гасит: недоступная кнопка молчит, а тут надо сказать,
-        // насколько перебрали. Правило и слова общие со строкой сообщения (`@/utils/limit`).
+        // насколько перебрали. Правило и слова общие со строкой сообщения (`@shared/utils/limit`).
         if (overLimit(name, NAME_MAX_LENGTH)) {
             notify(limitMessage(name, NAME_MAX_LENGTH));
             return;

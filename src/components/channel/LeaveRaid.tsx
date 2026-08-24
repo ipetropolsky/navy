@@ -8,10 +8,10 @@ import Input from '@/components/ui/Input';
 import Sheet from '@/components/ui/Sheet';
 import { useSnackbar } from '@/components/ui/Snackbar';
 import { LeaveIcon } from '@/components/ui/icons';
-import { limitMessage, overLimit } from '@/utils/limit';
 import { Press, isTap, startPress } from '@/utils/tap';
 import { isTouch } from '@/utils/viewport';
 import { MAX_COURSE_LENGTH, Member } from '@shared/types/channel';
+import { limitMessage, overLimit } from '@shared/utils/limit';
 
 import styles from './LeaveRaid.module.less';
 
@@ -43,7 +43,7 @@ interface LeaveRaidProps {
  *
  * Поэтому поле обязательное: без курса уходить некуда, и кнопка ухода до него недоступна.
  * Ограничение длины общее со всеми полями приложения — набранное сверх предела не обрезается,
- * поле краснеет, а насколько перебрали, говорит снекбар по нажатию (см. `@/utils/limit`).
+ * поле краснеет, а насколько перебрали, говорит снекбар по нажатию (см. `@shared/utils/limit`).
  *
  * Уходит старший, а на рейде остаётся кто-то ещё, — тем же движением предлагаем выбрать
  * и преемника: иначе старшинство всегда доставалось бы тому, кто дольше всех на рейде,

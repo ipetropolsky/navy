@@ -1,4 +1,3 @@
-import { limitMessage, overLimit } from '@/utils/limit';
 import { isValidSlug } from '@/utils/slug';
 import { localStore } from '@/utils/storage';
 import { refitNotices, shipTitle } from '@shared/notice';
@@ -14,6 +13,7 @@ import {
     isSameBerth,
     memberRef,
 } from '@shared/types/channel';
+import { limitMessage, overLimit } from '@shared/utils/limit';
 
 import { ServerState, archiveKey, restoreState } from '@/backend/migrate';
 import { DEMO_CHANNEL_ID, createDemoChannel } from '@/backend/seed';

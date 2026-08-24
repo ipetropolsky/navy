@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 
-import { limitMessage, overLimit } from '@/utils/limit';
+import { limitMessage, overLimit } from './limit';
 
 /**
  * Предел длины. Правило короткое, но живёт оно в четырёх полях сразу — сообщение, позывной,
