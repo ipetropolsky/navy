@@ -159,38 +159,6 @@ const mutate = <T>(channelId: string, change: (channel: ChannelSnapshot) => T): 
         return change(channel);
     });
 
-/**
- * Зеркало канала на эмуляторе. Не часть контракта `ChannelBackend` — временная подпорка на
- * время переезда (issue #65): канал и бронь адреса теперь ведает Firestore, а участники
- * и лента остаются здесь до #66. Чтобы `join`, `sendMessage` и всё остальное в этом файле
- * по-прежнему находили канал по `channelId`, в эмуляторе должна лежать хотя бы запись о нём —
- * её и заводит либо освежает эта функция при каждом обращении к настоящему бэкенду. Исчезнет
- * вместе с участниками, когда на #66 переедет и рейд.
- *
- * Записи о канале ещё нет — заводит пустой снимок: `{ channel, members: [], messages: [] }`.
- * Есть — освежает `slug`, `title`, `createdAt` из Firestore и не трогает `owner`: старшинство
- * пока живёт только здесь, Firestore о нём не знает.
- *
- * Пишет через ту же очередь (`mutateState`), что и остальные перемены состояния, — иначе можно
- * столкнуться с записью, идущей в это же время из другой вкладки.
- */
-export const mirrorChannel = (channel: Channel): Promise<ChannelSnapshot> =>
-    mutateState((state) => {
-        const existing = state.channels[channel.channelId];
-        if (!existing) {
-            const fresh: ChannelSnapshot = { channel, members: [], messages: [] };
-            state.channels[channel.channelId] = fresh;
-            return fresh;
-        }
-        existing.channel = {
-            ...existing.channel,
-            slug: channel.slug,
-            title: channel.title,
-            createdAt: channel.createdAt,
-        };
-        return existing;
-    });
-
 export function createLocalBackend(): ChannelBackend {
     // Чтение состояния при старте заодно кладёт демо-канал в хранилище, если его там нет.
     // Иначе мок появлялся бы только после того, как кто-то откроет канал.

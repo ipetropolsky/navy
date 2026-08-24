@@ -7,6 +7,7 @@ import {
     persistentLocalCache,
     persistentMultipleTabManager,
 } from 'firebase/firestore';
+import { Functions, connectFunctionsEmulator, getFunctions } from 'firebase/functions';
 
 /**
  * Подключение к Firebase: настройки проекта и ленивая сборка того, чем пользуются остальные.
@@ -32,7 +33,16 @@ export const FIREBASE_CONFIG = {
 export const EMULATORS = {
     firestore: { host: '127.0.0.1', port: 8080 },
     auth: { url: 'http://127.0.0.1:9099' },
+    functions: { host: '127.0.0.1', port: 5001 },
 };
+
+/**
+ * Регион функций — тот же, что `setGlobalOptions` в `functions/src/index.ts`, и тот же,
+ * что `firestore.location` в `firebase.json`. Функция физически развёрнута в одном регионе,
+ * и если клиент попросит вызов в другом, `httpsCallable` уйдёт не туда, куда доехала функция —
+ * не ошибкой, а молчаливым тайм-аутом, потому что там просто нет обработчика с таким именем.
+ */
+const FUNCTIONS_REGION = 'europe-central2';
 
 /** Ходим ли в эмуляторы. Не `useEmulator`: имя с `use` линтер принимает за хук. */
 export const emulated = (): boolean => env.VITE_FIREBASE_EMULATOR === '1';
@@ -51,6 +61,7 @@ export const isFirebaseConfigured = (): boolean =>
 let app: FirebaseApp | null = null;
 let db: Firestore | null = null;
 let auth: Auth | null = null;
+let fns: Functions | null = null;
 
 export const firebaseApp = (): FirebaseApp => {
     app ??= initializeApp(FIREBASE_CONFIG);
@@ -84,4 +95,15 @@ export const firebaseAuth = (): Auth => {
         }
     }
     return auth;
+};
+
+/** См. `FUNCTIONS_REGION` — регион передаём явно, иначе `getFunctions` берёт дефолтный. */
+export const functions = (): Functions => {
+    if (!fns) {
+        fns = getFunctions(firebaseApp(), FUNCTIONS_REGION);
+        if (emulated()) {
+            connectFunctionsEmulator(fns, EMULATORS.functions.host, EMULATORS.functions.port);
+        }
+    }
+    return fns;
 };

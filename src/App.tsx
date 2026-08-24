@@ -113,7 +113,7 @@ const legalSize = (size: number, { floor, min }: Layout): number => {
 export default function App() {
     const route = useRoute();
     const auth = useAuth();
-    const channelState = useChannel(route.channel, route.memberId);
+    const channelState = useChannel(route.channel, route.memberId, auth.account?.userId ?? null);
     const { channel, myId, reception, lastLook, loading } = channelState;
     /**
      * Вошёл ли человек. Вход спрашивают не ради приличия: корабль принадлежит человеку,

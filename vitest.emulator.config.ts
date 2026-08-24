@@ -9,7 +9,7 @@ import { defineConfig } from 'vitest/config';
  *
  * Имя — по эмулятору, а не по правилам: набор проверяет не только firestore.rules
  * (firestore/rules.test.ts), но и то, как настоящий бэкенд ходит в Firestore и подчиняется
- * тем же правилам (firestore/channels.test.ts), а с ними — и то, как те же правила соблюдает
+ * тем же правилам (firestore/backend.test.ts), а с ними — и то, как те же правила соблюдает
  * сервер (functions/src/raid.test.ts) — все они живут в разных каталогах, но требуют одного
  * и того же поднятого эмулятора.
  *

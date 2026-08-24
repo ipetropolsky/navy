@@ -51,7 +51,11 @@ export interface ChannelController {
     sendMessage: (draft: MessageDraft) => Promise<void>;
 }
 
-export function useChannel(slug: string | null, memberIdFromUrl: string | null): ChannelController {
+export function useChannel(
+    slug: string | null,
+    memberIdFromUrl: string | null,
+    userId: string | null
+): ChannelController {
     const [loading, setLoading] = useState(true);
     const [channel, setChannel] = useState<ChannelSnapshot | null>(null);
     const [myId, setMyId] = useState<string | null>(null);
@@ -91,7 +95,15 @@ export function useChannel(slug: string | null, memberIdFromUrl: string | null):
                     }
                     // Адрес важнее сохранённого: так соседняя вкладка говорит за другой корабль.
                     // Личность привязана к channelId, а не к slug: адрес канала может смениться.
-                    const candidate = memberIdFromUrl ?? readMemberId(snapshot.channel.channelId);
+                    //
+                    // Третий кандидат — вошедший: на Firebase участие адресуется личностью
+                    // (memberId === userId), а sessionStorage свой у каждой вкладки, — без этого
+                    // вторая вкладка того же человека не узнавала бы свой корабль и предлагала
+                    // встать в строй заново, хотя он уже на рейде. Для локального бэкенда это
+                    // ничем не грозит: там userId один на всех ('local', см. backend/auth.ts),
+                    // а memberId устроен иначе (randomId('m'), см. backend/localBackend.ts) —
+                    // совпасть с настоящим участником такому кандидату нечем.
+                    const candidate = memberIdFromUrl ?? readMemberId(snapshot.channel.channelId) ?? userId;
                     const aboard = snapshot.members.some((member) => member.memberId === candidate);
                     // Корабль мог выйти из другой вкладки, пока эта была закрыта.
                     setMyId(aboard ? candidate : null);
@@ -105,7 +117,7 @@ export function useChannel(slug: string | null, memberIdFromUrl: string | null):
         return () => {
             alive = false;
         };
-    }, [slug, memberIdFromUrl]);
+    }, [slug, memberIdFromUrl, userId]);
 
     // Дальше всё адресуется основным идентификатором канала, а не адресом из ссылки.
     const channelId = channel?.channel.channelId ?? null;

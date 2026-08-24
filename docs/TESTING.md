@@ -17,7 +17,7 @@ chromium`. Если Chromium уже стоит и качать его незач
 
 Третьим набором стоят те, которым нужен поднятый Firestore: правила безопасности
 ([`firestore/rules.test.ts`](../firestore/rules.test.ts)), работа бэкенда с каналами
-([`firestore/channels.test.ts`](../firestore/channels.test.ts)) и правила рейда на серверных
+([`firestore/backend.test.ts`](../firestore/backend.test.ts)) и правила рейда на серверных
 транзакциях ([`functions/src/raid.test.ts`](../functions/src/raid.test.ts)). Гоняются они
 `npm run test:emulator` — команда сама поднимает эмулятор и сама его гасит, — и в `npm run check`
 не входят: эмулятору нужна Java и `firebase-tools`, а обычный прогон идёт и на сборке

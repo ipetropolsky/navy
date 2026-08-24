@@ -1,4 +1,4 @@
-import { firestore, isFirebaseConfigured } from '@/config/firebase';
+import { firestore, functions, isFirebaseConfigured } from '@/config/firebase';
 
 import { Entrance, createFirebaseEntrance, createLocalEntrance } from '@/backend/auth';
 import { createFirebaseBackend } from '@/backend/firebaseBackend';
@@ -16,11 +16,10 @@ import { ChannelBackend } from '@/backend/types';
 const wanted = import.meta.env.VITE_BACKEND ?? 'local';
 const onFirebase = wanted === 'firebase' && isFirebaseConfigured();
 
-/**
- * Данные канала. Канал и бронь адреса уже переехали в Firestore; участники и лента —
- * следующими шагами (см. docs/FIREBASE.md, «План по шагам»).
- */
-export const backend: ChannelBackend = onFirebase ? createFirebaseBackend({ db: firestore() }) : createLocalBackend();
+/** Данные канала: канал, участники и лента — всё уже в Firestore, рейдом распоряжаются функции. */
+export const backend: ChannelBackend = onFirebase
+    ? createFirebaseBackend({ db: firestore(), functions: functions() })
+    : createLocalBackend();
 
 /** Вход. Настоящий — через аккаунт; понарошку — когда за данными стоит эмулятор. */
 export const entrance: Entrance = onFirebase ? createFirebaseEntrance() : createLocalEntrance();
