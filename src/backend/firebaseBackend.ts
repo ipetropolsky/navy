@@ -3,6 +3,7 @@ import {
     Timestamp,
     collection,
     doc,
+    getCountFromServer,
     getDoc,
     getDocs,
     limit as limitDocs,
@@ -14,7 +15,9 @@ import {
     serverTimestamp,
     setDoc,
     startAfter,
+    updateDoc,
     waitForPendingWrites,
+    where,
 } from 'firebase/firestore';
 import { Functions, FunctionsError, httpsCallable } from 'firebase/functions';
 
@@ -102,6 +105,12 @@ interface MemberDoc {
     joinedAt: number;
     /** Чей это корабль. Сегодня равно ключу документа, и всё же полем: ссылка — объект. */
     user: { userId: string };
+    /**
+     * Докуда участник дочитал разговор. Пишет только он сам, прямо в этот документ,
+     * поверх функции рейда (см. `markSeen`, `firestore.rules`, functions/src/raid.ts —
+     * там merge: true именно из-за этого поля).
+     */
+    lastSeen?: { messageId: string; at: number };
 }
 
 /**
@@ -137,6 +146,7 @@ const toMember = (memberId: string, data: MemberDoc): Member => ({
     color: data.color,
     place: data.place,
     joinedAt: data.joinedAt,
+    lastSeen: data.lastSeen,
 });
 
 /**
@@ -838,6 +848,46 @@ export function createFirebaseBackend({
                     // messages в ChannelSnapshot.
                     const messages = pageDocs.reverse().map((item) => toMessage(item.id, item.data() as MessageDoc));
                     return { messages, hasMore };
+                }, READ_TIMEOUT);
+            } catch (failure) {
+                throw toChannelError(failure);
+            }
+        },
+
+        /**
+         * Пишет прямо в документ участника, а не вызовом функции: правило внутри
+         * `firestore.rules` само проверяет, что правит владелец и только поле lastSeen —
+         * распоряжаться здесь особо нечем, и звать ради этого рейд незачем (см. #70).
+         */
+        markSeen: async ({ channelId, memberId, message }) => {
+            try {
+                await withTimeout(
+                    () =>
+                        updateDoc(memberDocRef(channelId, memberId), {
+                            // at — sentAt самого сообщения, а не Date.now() этой вкладки:
+                            // по этой черте countUnread сравнивает sentAt, и часы у обеих
+                            // сторон сравнения должны быть одни (см. Member.lastSeen).
+                            lastSeen: { messageId: message.messageId, at: message.sentAt },
+                        }),
+                    WRITE_TIMEOUT
+                );
+            } catch (failure) {
+                throw toChannelError(failure);
+            }
+        },
+
+        /**
+         * Счёт, а не чтение документов: getCountFromServer отвечает числом, не унося
+         * с сервера сами сообщения, — оплате подлежит один агрегирующий запрос вне
+         * зависимости от того, сколько их набралось (см. комментарий у ChannelBackend.countUnread).
+         */
+        countUnread: async ({ channelId, after }) => {
+            try {
+                return await withTimeout(async () => {
+                    const snap = await getCountFromServer(
+                        query(collection(db, paths.messages({ channelId })), where('sentAt', '>', after))
+                    );
+                    return { count: snap.data().count };
                 }, READ_TIMEOUT);
             } catch (failure) {
                 throw toChannelError(failure);

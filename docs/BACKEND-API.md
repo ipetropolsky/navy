@@ -196,6 +196,8 @@ interface ShipSpec {
 | `retryMessage({ channelId, memberId, message })`   | Отправляет неотправленное заново, тем же `messageId` | `{ message }`             |
 | `discardMessage({ channelId, message })`           | Выбрасывает неотправленное из ящика                  | —                         |
 | `loadOlderMessages({ channelId, before, limit? })` | Страница ленты выше `before`                         | `{ messages, hasMore }`   |
+| `markSeen({ channelId, memberId, message })`       | Ставит отметку «дочитано досюда» в своё участие      | —                         |
+| `countUnread({ channelId, after })`                | Сколько в канале сообщений позже отметки             | `{ count }`               |
 | `subscribe({ channelId, onEvent })`                | Подписка на события канала                           | функция отписки           |
 
 ### Открыть канал и подписаться

@@ -1105,3 +1105,167 @@ describe('статус отправки', () => {
         }
     }, 15000);
 });
+
+/** Отметка участника как она лежит в базе — в обход правил, тем же приёмом, что и rawDoc. */
+const readLastSeen = async (
+    channelId: string,
+    memberId: string
+): Promise<{ messageId: string; at: number } | undefined> => {
+    const raw = await rawDoc(paths.member({ channelId, memberId }));
+    return (raw.data() as Record<string, unknown>).lastSeen as { messageId: string; at: number } | undefined;
+};
+
+describe('markSeen', () => {
+    test('пишет lastSeen в свой же документ участника — номер сообщения и его же метку времени', async () => {
+        const memberId = 'u-mark-seen';
+        const backend = backendAs(memberId);
+        const { channel } = await backend.createChannel({ channel: { slug: 'otmetka', title: 'Отметка' } });
+        await seedMember(channel.channelId, memberId, 'Связист', '007', 100);
+
+        // Заведомо не «сейчас»: отметка обязана взять метку самого сообщения, а не снять её
+        // часами в миг записи. Ложись туда Date.now(), и черта отсчёта поехала бы по другим
+        // часам, чем sentAt, с которым её потом сравнивает countUnread.
+        const sentAt = 1_700_000_000_000;
+        await backend.markSeen({
+            channelId: channel.channelId,
+            memberId,
+            message: { messageId: 'msg-42', sentAt },
+        });
+
+        const raw = await rawDoc(paths.member({ channelId: channel.channelId, memberId }));
+        const data = raw.data() as Record<string, unknown>;
+        expect(Object.keys(data.lastSeen as Record<string, unknown>).sort()).toEqual(['at', 'messageId']);
+        const lastSeen = await readLastSeen(channel.channelId, memberId);
+        expect(lastSeen?.messageId).toBe('msg-42');
+        expect(lastSeen?.at).toBe(sentAt);
+        // Остальные поля документа правка не задевает — участие остаётся тем же самым.
+        expect(data.name).toBe('Связист');
+    });
+
+    test('отметка ложится на те же часы, по которым идёт счёт, — часы читателя её не сдвигают', async () => {
+        // Тот самый стык, ради которого в отметку идёт sentAt сообщения, а не Date.now():
+        // markSeen и countUnread обязаны сходиться и тогда, когда часы читателя далеко ушли
+        // от меток отправителя. Здесь sentAt — заведомо прошлое (2023), а Date.now() читателя
+        // больше любой из этих меток: запишись в отметку он, черта встала бы позже всей ленты
+        // разом и счёт дал бы ноль, потеряв непрочитанное молча.
+        const memberId = 'u-mark-seen-agrees';
+        const backend = backendAs(memberId);
+        const { channel } = await backend.createChannel({ channel: { slug: 'stykovka', title: 'Стыковка' } });
+        await seedMember(channel.channelId, memberId, 'Связист', '007', 100);
+        const base = 1_700_000_000_000;
+        expect(base).toBeLessThan(Date.now());
+        await Promise.all(
+            [...Array(4).keys()].map((i) => seedMessage(channel.channelId, `msg-${i}`, base + i * 1000, `Реплика ${i}`))
+        );
+
+        await backend.markSeen({
+            channelId: channel.channelId,
+            memberId,
+            message: { messageId: 'msg-2', sentAt: base + 2000 },
+        });
+        const lastSeen = await readLastSeen(channel.channelId, memberId);
+
+        // Дочитано до msg-2, позже него пришло ровно одно — msg-3.
+        const { count } = await backend.countUnread({ channelId: channel.channelId, after: lastSeen!.at });
+        expect(count).toBe(1);
+    });
+
+    test('чужое участие правилами закрыто — правит только сам владелец', async () => {
+        const owner = 'u-mark-seen-owner';
+        const stranger = backendAs('u-mark-seen-stranger');
+        const { channel } = await stranger.createChannel({ channel: { slug: 'chuzhoe', title: 'Чужое' } });
+        await seedMember(channel.channelId, owner, 'Хозяин', '001', 100);
+
+        await failsWith(
+            () =>
+                stranger.markSeen({
+                    channelId: channel.channelId,
+                    memberId: owner,
+                    message: { messageId: 'msg-1', sentAt: 1_700_000_000_000 },
+                }),
+            'permission-denied'
+        );
+
+        expect(await readLastSeen(channel.channelId, owner)).toBeUndefined();
+    });
+
+    test('повторная отметка переставляет обе половины разом — и номер, и метку', async () => {
+        // Половины не расходятся: at — это метка того самого сообщения, чей номер лёг рядом,
+        // а не время записи. Двигать отметку вперёд — забота зовущего (hooks/useUnread ведёт
+        // её за хвостом ленты); сам вызов просто кладёт то, что дали, и не сторожит порядок.
+        const memberId = 'u-mark-seen-advance';
+        const backend = backendAs(memberId);
+        const { channel } = await backend.createChannel({ channel: { slug: 'povtor-otmetki', title: 'Повтор' } });
+        await seedMember(channel.channelId, memberId, 'Связист', '007', 100);
+        const base = 1_700_000_000_000;
+
+        await backend.markSeen({
+            channelId: channel.channelId,
+            memberId,
+            message: { messageId: 'msg-1', sentAt: base },
+        });
+        const first = await readLastSeen(channel.channelId, memberId);
+        expect(first).toEqual({ messageId: 'msg-1', at: base });
+
+        await backend.markSeen({
+            channelId: channel.channelId,
+            memberId,
+            message: { messageId: 'msg-2', sentAt: base + 1000 },
+        });
+        expect(await readLastSeen(channel.channelId, memberId)).toEqual({ messageId: 'msg-2', at: base + 1000 });
+    });
+});
+
+describe('countUnread', () => {
+    test('считает сообщения позже отметки, границу не включает', async () => {
+        const backend = backendAs('u-count-basic');
+        const { channel } = await backend.createChannel({ channel: { slug: 'schet-prostoy', title: 'Счёт' } });
+        const base = 1_700_000_000_000;
+        await Promise.all(
+            [...Array(5).keys()].map((i) => seedMessage(channel.channelId, `msg-${i}`, base + i * 1000, `Реплика ${i}`))
+        );
+
+        // Ровно по границе одного из сообщений (msg-2, base+2000) — оно само не считается,
+        // считаются только те, что строго позже.
+        const { count } = await backend.countUnread({ channelId: channel.channelId, after: base + 2000 });
+        expect(count).toBe(2);
+    });
+
+    test('ничего не пришло позже отметки — ноль, а не отказ', async () => {
+        const backend = backendAs('u-count-zero');
+        const { channel } = await backend.createChannel({ channel: { slug: 'schet-nol', title: 'Ноль' } });
+        await seedMessage(channel.channelId, 'msg-only', 1_700_000_000_000, 'Одна реплика');
+
+        const { count } = await backend.countUnread({ channelId: channel.channelId, after: 1_700_000_001_000 });
+        expect(count).toBe(0);
+    });
+
+    test('канал без единого сообщения — ноль', async () => {
+        const backend = backendAs('u-count-empty');
+        const { channel } = await backend.createChannel({ channel: { slug: 'schet-pusto', title: 'Пусто' } });
+
+        const { count } = await backend.countUnread({ channelId: channel.channelId, after: 0 });
+        expect(count).toBe(0);
+    });
+
+    test('считает и то, что уже не поместилось бы в одну страницу ленты', async () => {
+        // Тот самый мотив задачи (#70): лента с #68 приходит страницей (MESSAGE_PAGE), и её
+        // не перебрать целиком ради счёта. Здесь заведомо больше одной страницы сообщений,
+        // и ни getChannel, ни loadOlderMessages в этом наборе ни разу не зовутся — весь ответ
+        // идёт одним агрегирующим запросом к серверу.
+        const backend = backendAs('u-count-beyond-page');
+        const { channel } = await backend.createChannel({
+            channel: { slug: 'schet-za-stranitsu', title: 'За страницу' },
+        });
+        const base = 1_700_000_000_000;
+        const total = 130;
+        await Promise.all(
+            [...Array(total).keys()].map((i) => seedMessage(channel.channelId, `msg-${i}`, base + i * 1000, `№${i}`))
+        );
+
+        // Отметка стоит у тридцатого сообщения — часть «непрочитанного» лежит за пределами
+        // и той единственной страницы, которую вернул бы getChannel.
+        const { count } = await backend.countUnread({ channelId: channel.channelId, after: base + 30 * 1000 });
+        expect(count).toBe(total - 1 - 30);
+    });
+});

@@ -669,6 +669,33 @@ export function createLocalBackend(): ChannelBackend {
             return delay({ messages: snapshot.messages.slice(from, index), hasMore: from > 0 });
         },
 
+        /** Тот же приём, что у updateMember: нашли участника в общем состоянии, поправили поле, разослали снимок целиком. */
+        markSeen: async ({ channelId, memberId, message }) => {
+            const updated = await mutate(channelId, (current) => {
+                const member = current.members.find((item) => item.memberId === memberId);
+                if (!member) {
+                    throw new ChannelError('member-not-found', 'Такого корабля в канале нет');
+                }
+                member.lastSeen = { messageId: message.messageId, at: message.sentAt };
+                return { ...member };
+            });
+            emit(channelId, { type: 'member-updated', member: updated });
+            return delay(undefined);
+        },
+
+        /**
+         * Хранилище держит разговор целиком, и точный подсчёт (с разбором своих и системных
+         * записей) был бы здесь не труднее, чем у ChannelSnapshot. Но счёт нарочно такой же
+         * простой и слепой к содержимому, как у firebaseBackend.ts (см. там же и в контракте,
+         * почему): держать два разных поведения по разные стороны одного контракта — плодить
+         * разницу, которую после придётся объяснять, а не саму возможность посчитать точнее.
+         */
+        countUnread: ({ channelId, after }) => {
+            const snapshot = readState().channels[channelId];
+            const count = snapshot ? snapshot.messages.filter((message) => message.sentAt > after).length : 0;
+            return delay({ count });
+        },
+
         subscribe: ({ channelId, onEvent: listener }): Unsubscribe => {
             const forChannel = listeners.get(channelId) ?? new Set();
             forChannel.add(listener);
