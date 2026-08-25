@@ -1,7 +1,7 @@
 import { FunctionsError } from 'firebase/functions';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 
-import { toChannelError, withTimeout } from '@/backend/firebaseBackend';
+import { attemptWrite, toChannelError, withTimeout } from '@/backend/firebaseBackend';
 import { ChannelError } from '@/backend/types';
 
 /**
@@ -96,5 +96,53 @@ describe('withTimeout', () => {
         const assertion = expect(pending).rejects.toMatchObject({ code: 'timeout' });
         await vi.advanceTimersByTimeAsync(1000);
         await assertion;
+    });
+});
+
+/**
+ * attemptWrite — то же самое ожидание с гонкой против срока, но для отправки сообщения
+ * (см. комментарий над attemptWrite в firebaseBackend.ts): без офлайн-огражки withTimeout
+ * (run() должен дойти до setDoc(), даже когда сети нет вовсе — тогда в дело вступает
+ * локальный кеш Firestore), и отказ по сроку не бросается, а возвращается значением —
+ * это и есть статус доставки, который решает sendMessage/retryMessage.
+ */
+describe('attemptWrite', () => {
+    afterEach(() => {
+        vi.unstubAllGlobals();
+        vi.useRealTimers();
+    });
+
+    test('офлайн, но run() всё равно вызывается — не как у withTimeout', async () => {
+        vi.stubGlobal('navigator', { onLine: false });
+        const run = vi.fn(() => Promise.resolve());
+        await attemptWrite(run, 1000);
+        expect(run).toHaveBeenCalledOnce();
+    });
+
+    test('run() успел — null, а не отказ: доставлено', async () => {
+        await expect(attemptWrite(() => Promise.resolve(), 1000)).resolves.toBeNull();
+    });
+
+    test('не успел, сеть есть — код timeout', async () => {
+        vi.stubGlobal('navigator', { onLine: true });
+        vi.useFakeTimers();
+        const pending = attemptWrite(() => new Promise(() => {}), 1000);
+        const assertion = expect(pending).resolves.toMatchObject({ code: 'timeout' });
+        await vi.advanceTimersByTimeAsync(1000);
+        await assertion;
+    });
+
+    test('не успел, сети нет — код offline, тоже значением, а не исключением', async () => {
+        vi.stubGlobal('navigator', { onLine: false });
+        vi.useFakeTimers();
+        const pending = attemptWrite(() => new Promise(() => {}), 1000);
+        const assertion = expect(pending).resolves.toMatchObject({ code: 'offline' });
+        await vi.advanceTimersByTimeAsync(1000);
+        await assertion;
+    });
+
+    test('run() бросил раньше срока — исключение доходит как есть, не подменяется значением', async () => {
+        const own = new ChannelError('member-not-found', 'Корабль не найден');
+        await expect(attemptWrite(() => Promise.reject(own), 1000)).rejects.toBe(own);
     });
 });

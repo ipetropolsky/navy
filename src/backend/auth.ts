@@ -117,8 +117,12 @@ export function createFirebaseEntrance(): Entrance {
     };
 }
 
-/** Кем эта вкладка входит, пока за бэкендом стоит эмулятор. */
-const LOCAL_ACCOUNT: Account = { userId: 'local', name: 'Местный' };
+/**
+ * Кем эта вкладка входит, пока за бэкендом стоит эмулятор. Экспортирован: тот же userId
+ * нужен и localBackend.ts — им, и только им, ключуется ящик неотправленного (см.
+ * backend/outbox.ts), а memberId там у каждой вкладки свой и для этого ключа не годится.
+ */
+export const LOCAL_ACCOUNT: Account = { userId: 'local', name: 'Местный' };
 
 /**
  * Вышел ли человек из входа понарошку. В памяти вкладки, а не в переменной модуля: настоящий

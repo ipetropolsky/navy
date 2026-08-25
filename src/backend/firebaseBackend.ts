@@ -14,6 +14,7 @@ import {
     serverTimestamp,
     setDoc,
     startAfter,
+    waitForPendingWrites,
 } from 'firebase/firestore';
 import { Functions, FunctionsError, httpsCallable } from 'firebase/functions';
 
@@ -32,10 +33,12 @@ import {
 } from '@shared/types/calls';
 import {
     Channel,
+    ChatMessage,
     MAX_MESSAGE_LENGTH,
     Member,
     MemberRef,
     Message,
+    MessageDelivery,
     MessageRef,
     ShipKind,
     ShipNotice,
@@ -44,7 +47,15 @@ import {
 } from '@shared/types/channel';
 import { limitMessage, overLimit } from '@shared/utils/limit';
 
-import { ChannelBackend, ChannelError, ChannelSnapshot, Connection, ConnectionStatus } from '@/backend/types';
+import { discardOutboxMessage, mergeOutbox, putOutboxMessage, readOutbox, removeOutboxMessage } from '@/backend/outbox';
+import {
+    ChannelBackend,
+    ChannelError,
+    ChannelEvent,
+    ChannelSnapshot,
+    Connection,
+    ConnectionStatus,
+} from '@/backend/types';
 
 /**
  * Настоящий бэкенд (issue #66). Канал, участники и лента читаются из Firestore одним
@@ -216,6 +227,40 @@ export const withTimeout = <T>(run: () => Promise<T>, ms: number): Promise<T> =>
 };
 
 /**
+ * То же самое, чем withTimeout встречает запись, — но без офлайн-огражки: отправка сообщения
+ * (см. sendMessage, retryMessage ниже) должна дойти до setDoc(), даже когда сети нет вовсе, —
+ * тогда в дело вступает свой локальный кеш Firestore, сообщение сохраняется на диск и ждёт
+ * связи там же (см. docs/FIREBASE.md, «Онлайн: из чего складывается задержка»). setDoc()
+ * в офлайне не бросает и не резолвится сам, а просто ждёт связи, — решение «пора считать
+ * неудачей» здесь наше, а не его.
+ *
+ * Не уложились в срок — отказ не бросается, а возвращается значением: в отличие от прочих
+ * записей, у сообщения есть куда его показать (см. MessageDelivery), и заворачивать это
+ * в исключение незачем. Настоящий отказ (run() бросил раньше срока сам — например,
+ * ChannelError('member-not-found')) распространяется как есть, не превращаясь в задержку.
+ */
+export const attemptWrite = async (
+    run: () => Promise<void>,
+    ms: number
+): Promise<{ code: ChannelErrorCode; message: string } | null> => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let timedOut = false;
+    const timeout = new Promise<void>((resolve) => {
+        timer = setTimeout(() => {
+            timedOut = true;
+            resolve();
+        }, ms);
+    });
+    await Promise.race([run(), timeout]).finally(() => clearTimeout(timer));
+    if (!timedOut) {
+        return null;
+    }
+    return isOnline()
+        ? { code: 'timeout', message: 'Сервер долго не отвечает. Попробуйте ещё раз' }
+        : { code: 'offline', message: 'Нет связи. Попробуйте, когда она появится' };
+};
+
+/**
  * Черновик корабля к отправке. Необязательные поля добавляются, только когда они есть,
  * и по той же причине, что и у `leave` ниже: сериализатор вызова превращает `undefined`
  * в `null` (см. `encode` в @firebase/functions), поле уезжает на сервер ключом со значением
@@ -236,10 +281,31 @@ const draftToCall = ({ name, hullNumber, shipKind, color, berth, facing }: Membe
 /** Свой eventId на каждое событие — тем же способом, что и у локального бэкенда. */
 const randomEventId = (): string => `e-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
-export function createFirebaseBackend({ db, functions }: { db: Firestore; functions: Functions }): ChannelBackend {
+/** Ящик: положить или переписать запись с обычным статусом «в пути». */
+const putPending = (base: ChatMessage, userId: string, channelId: string): ChatMessage => {
+    const delivery: MessageDelivery = { status: 'pending' };
+    const tagged: ChatMessage = { ...base, delivery };
+    putOutboxMessage(userId, channelId, tagged);
+    return tagged;
+};
+
+export function createFirebaseBackend({
+    db,
+    functions,
+    // Тот же WRITE_TIMEOUT, что и у остальных записей, — своим значением, а не константой
+    // напрямую, ровно по той же причине, что у db/functions выше: проверке нужен короткий
+    // срок, чтобы не ждать взаправду десять секунд ради одного «не дождались — failed»
+    // (см. firestore/backend.test.ts, «статус отправки»), а приложению — настоящий.
+    writeTimeout = WRITE_TIMEOUT,
+}: {
+    db: Firestore;
+    functions: Functions;
+    writeTimeout?: number;
+}): ChannelBackend {
     const channelRef = (channelId: string) => doc(db, paths.channel({ channelId }));
     const slugRef = (slug: string) => doc(db, paths.slug({ slug }));
     const memberDocRef = (channelId: string, memberId: string) => doc(db, paths.member({ channelId, memberId }));
+    const messageDocRef = (channelId: string, messageId: string) => doc(db, paths.message({ channelId, messageId }));
     const membersQuery = (channelId: string) =>
         query(collection(db, paths.members({ channelId })), orderBy('joinedAt'));
     // limitToLast с order by sentAt по возрастанию — это последние MESSAGE_PAGE документов,
@@ -278,6 +344,21 @@ export function createFirebaseBackend({ db, functions }: { db: Firestore; functi
     let connection: Connection = { status: 'online', since: Date.now() };
     const connectionListeners = new Set<(connection: Connection) => void>();
 
+    /**
+     * Кому передать message-updated/message-removed, которые не пришли снимком Firestore,
+     * а решены самим бэкендом: не дождались подтверждения (sendMessage, retryMessage) —
+     * запись не менялась ни на одном документе, и настоящему onSnapshot взять событие
+     * неоткуда; выбросили из ящика (discardMessage) — тем более, там и подавно нет записи,
+     * которую можно было бы удалить (см. firestore.rules, allow update, delete: if false).
+     * Регистрируют себя подписки на ленту конкретного канала (subscribe ниже) — свой Set
+     * на каждый channelId, а не один общий, ровно затем, чтобы разослать только тем, кто
+     * его и открыл.
+     */
+    const feedListeners = new Map<string, Set<(event: ChannelEvent) => void>>();
+    const broadcastFeedEvent = (channelId: string, event: ChannelEvent): void => {
+        feedListeners.get(channelId)?.forEach((listener) => listener(event));
+    };
+
     const applyConnection = (): void => {
         const status: ConnectionStatus = browserOffline || snapshotOffline ? 'offline' : 'online';
         if (status === connection.status) {
@@ -297,6 +378,51 @@ export function createFirebaseBackend({ db, functions }: { db: Firestore; functi
     const reportSnapshotFailure = (): void => {
         snapshotOffline = true;
         applyConnection();
+    };
+
+    /**
+     * Развязка попытки записи (см. attemptWrite). Сервер подтвердил (outcome === null) —
+     * запись уходит из ящика и возвращается без delivery вовсе, это и есть обычное,
+     * всегдашнее состояние; не подтвердил — остаётся в ящике под тем же messageId,
+     * помеченная отказом.
+     *
+     * message-updated транслируется синтетикой всегда, а не только когда своя подписка
+     * этого не увидит сама: настоящий 'modified' у Firestore (см. subscribe ниже) приходит
+     * сам по себе, когда сервер и правда подтверждает запись, но полагаться на точное
+     * совпадение по времени с тем, что здесь решает setDoc()/waitForPendingWrites(), —
+     * рискованно. Повторный, тот же самый по данным message-updated не вредит: приёмник
+     * (useChannel.ts) заменяет запись по id, и применить одно и то же дважды — не отличается
+     * от одного раза.
+     */
+    const settleDelivery = (
+        base: ChatMessage,
+        outcome: { code: ChannelErrorCode; message: string } | null,
+        userId: string,
+        channelId: string
+    ): ChatMessage => {
+        let settled: ChatMessage;
+        if (!outcome) {
+            removeOutboxMessage(userId, channelId, base.messageId);
+            settled = {
+                messageId: base.messageId,
+                author: base.author,
+                sentAt: base.sentAt,
+                text: base.text,
+                thread: base.thread,
+            };
+        } else {
+            const delivery: MessageDelivery = { status: 'failed', error: outcome };
+            settled = { ...base, delivery };
+            putOutboxMessage(userId, channelId, settled);
+        }
+        broadcastFeedEvent(channelId, {
+            eventId: randomEventId(),
+            channelId,
+            at: Date.now(),
+            type: 'message-updated',
+            message: settled,
+        });
+        return settled;
     };
 
     /** Канал + участники + хвост ленты. Этим отвечают оба метода чтения. */
@@ -323,15 +449,16 @@ export function createFirebaseBackend({ db, functions }: { db: Firestore; functi
     };
 
     return {
-        getChannel: async ({ channelId }) => {
+        getChannel: async ({ channelId, userId }) => {
             try {
-                return await withTimeout(() => readChannel(channelId), READ_TIMEOUT);
+                const snapshot = await withTimeout(() => readChannel(channelId), READ_TIMEOUT);
+                return snapshot && mergeOutbox(snapshot, userId, channelId);
             } catch (failure) {
                 throw toChannelError(failure);
             }
         },
 
-        getChannelBySlug: async ({ slug }) => {
+        getChannelBySlug: async ({ slug, userId }) => {
             try {
                 return await withTimeout(async () => {
                     const reserved = await getDoc(slugRef(slug));
@@ -339,7 +466,8 @@ export function createFirebaseBackend({ db, functions }: { db: Firestore; functi
                         return null;
                     }
                     const { channelId } = reserved.data() as { channelId: string };
-                    return readChannel(channelId);
+                    const snapshot = await readChannel(channelId);
+                    return snapshot && mergeOutbox(snapshot, userId, channelId);
                 }, READ_TIMEOUT);
             } catch (failure) {
                 throw toChannelError(failure);
@@ -513,14 +641,30 @@ export function createFirebaseBackend({ db, functions }: { db: Firestore; functi
             }
         },
 
+        /**
+         * Идентификатор назначает отправитель, до записи и один раз (draft.messageId,
+         * если задан заранее, — иначе новый здесь): повтор с тем же id попадёт в тот же
+         * документ, а не заведёт второй (см. docs/FIREBASE.md, «Повтор без двойников»).
+         *
+         * Промис резолвится не только на «сервер подтвердил» — offline-сеть и правда
+         * не даёт ответа месяцами, и ждать его незачем: не дождались за writeTimeout
+         * (см. attemptWrite) — сообщение остаётся в ящике неотправленного, помеченное
+         * отказом, и возвращается именно таким, а не бросает исключение. Дальше решает
+         * человек: значок (!) в ленте и retryMessage по нажатию.
+         */
         sendMessage: async ({ channelId, memberId, message: draft }) => {
             // Длину проверяет бэкенд, а не только форма: интерфейсов может стать больше
             // одного, и правило должно жить там, где данные, а не там, где поле ввода.
             if (overLimit(draft.text, MAX_MESSAGE_LENGTH)) {
                 throw new ChannelError('message-too-long', limitMessage(draft.text, MAX_MESSAGE_LENGTH));
             }
+            const messageId = draft.messageId ?? doc(collection(db, paths.messages({ channelId }))).id;
+            const sentAt = Date.now();
+            // Присваивается внутри attemptWrite — до этого момента ждать нечего, класть
+            // в ящик и возвращать как результат нечего, пока участник не прочитан.
+            let base: ChatMessage | undefined;
             try {
-                return await withTimeout(async () => {
+                const outcome = await attemptWrite(async () => {
                     // Снимок автора берём из документа участника, а не из того, что помнит
                     // вкладка о себе, — вкладка могла устареть, а этот документ и есть момент
                     // истины прямо сейчас.
@@ -529,34 +673,134 @@ export function createFirebaseBackend({ db, functions }: { db: Firestore; functi
                         throw new ChannelError('member-not-found', 'Корабль не найден');
                     }
                     const author = memberRef(toMember(memberId, memberSnap.data() as MemberDoc));
-
-                    // Идентификатор назначает отправитель, до записи и один раз: повтор с тем
-                    // же id попадёт в тот же документ, а не заведёт второй (см. docs/FIREBASE.md,
-                    // «Повтор без двойников»).
-                    const messageId = doc(collection(db, paths.messages({ channelId }))).id;
-                    const sentAt = Date.now();
+                    // В ящик — до setDoc(), а не после: перезагрузка вкладки между этой
+                    // строкой и подтверждением сервера не должна терять набранное
+                    // (см. backend/outbox.ts). Видимой строчкой в чужой ленте это ещё
+                    // не становится — это сделает 'added' у самой подписки (см. subscribe),
+                    // когда до неё дойдёт очередь; здесь только память на случай перезагрузки.
+                    base = putPending(
+                        { messageId, author, sentAt, text: draft.text, thread: draft.thread },
+                        memberId,
+                        channelId
+                    );
 
                     // Ровно те поля, что разрешает правило (firestore.rules, match
                     // /messages/{messageId}): author, sentAt, serverAt, text и, если есть,
                     // thread — ничего сверх. thread добавляется полем, только когда есть:
                     // Firestore не пишет undefined как значение поля, оно там попросту
                     // не проходит валидацию записи.
-                    await setDoc(doc(db, paths.message({ channelId, messageId })), {
+                    await setDoc(messageDocRef(channelId, messageId), {
                         author,
                         sentAt,
                         serverAt: serverTimestamp(),
                         text: draft.text,
                         ...(draft.thread ? { thread: draft.thread } : {}),
                     });
+                }, writeTimeout);
 
-                    // До этой строчки промис не резолвится: пока сервер не подтвердил запись,
-                    // мы её ждём. Что показать в это время и что делать без сети — статус
-                    // доставки, это #69, здесь его ещё нет.
-                    return { message: { messageId, author, sentAt, text: draft.text, thread: draft.thread } };
-                }, WRITE_TIMEOUT);
+                if (!base) {
+                    // Не успели даже прочитать участника — писать в ящик было ещё нечего.
+                    // Взаправду срок короче одного чтения не бывает; в проверках, где
+                    // writeTimeout можно поставить сколь угодно малым, — бывает, и здесь это
+                    // обычный отказ, а не запись со статусом доставки.
+                    throw new ChannelError(
+                        outcome?.code ?? 'timeout',
+                        outcome?.message ?? 'Сервер долго не отвечает. Попробуйте ещё раз'
+                    );
+                }
+                return { message: settleDelivery(base, outcome, memberId, channelId) };
             } catch (failure) {
                 throw toChannelError(failure);
             }
+        },
+
+        retryMessage: async ({ channelId, memberId, message }) => {
+            const pending = readOutbox(memberId, channelId).find((item) => item.messageId === message.messageId);
+            if (!pending) {
+                // По обычному пути такого не бывает: показанное как «не вышло» само взялось
+                // либо из этого же ящика (getChannel/mergeOutbox), либо из события той же
+                // подписки, источник у которого — тот же ящик. Отдельного пути дочитки
+                // не заводим.
+                throw new ChannelError('unknown', 'Сообщение уже не в ящике неотправленного');
+            }
+            try {
+                const base = putPending(pending, memberId, channelId);
+                broadcastFeedEvent(channelId, {
+                    eventId: randomEventId(),
+                    channelId,
+                    at: Date.now(),
+                    type: 'message-updated',
+                    message: base,
+                });
+
+                const outcome = await attemptWrite(async () => {
+                    // Сперва — дождаться, а не написать заново: тот самый вызов, скорее
+                    // всего, всё ещё в очереди Firestore и сам пытается доставиться
+                    // (см. attemptWrite), и второй setDoc() с тем же id рискует по пути
+                    // стать для правила уже не созданием, а изменением, если первая попытка
+                    // дойдёт позже, чем мы решили, что не дождались (firestore.rules,
+                    // allow update, delete: if false).
+                    await waitForPendingWrites(db);
+
+                    // Но пустая очередь — это ещё не «дошло». Пустой она бывает и тогда,
+                    // когда первая попытка отвалилась насовсем: отказ по правилам, скажем,
+                    // выбрасывает запись из очереди, и ждать её после этого можно вечно —
+                    // ждать уже нечего. Поверить одному лишь «очередь пуста» значило бы
+                    // объявить доставленным то, чего на сервере нет вовсе, — сообщение
+                    // ушло бы из ящика неотправленного и пропало молча, с видом
+                    // отправленного. Поэтому спрашиваем сам документ; нет его — вот теперь
+                    // и пишем заново, и это по-прежнему создание, а не изменение: документа
+                    // нет, спорить правилу не с чем.
+                    const written = await getDoc(messageDocRef(channelId, message.messageId));
+                    if (!written.exists()) {
+                        await setDoc(messageDocRef(channelId, message.messageId), {
+                            author: base.author,
+                            sentAt: base.sentAt,
+                            serverAt: serverTimestamp(),
+                            text: base.text,
+                            ...(base.thread ? { thread: base.thread } : {}),
+                        });
+                    }
+                }, writeTimeout);
+
+                // waitForPendingWrites ждёт разом всю очередь этого клиента, а не одну эту
+                // запись: не дождались — не значит, что не дождались именно её, если рядом
+                // зависла другая отправка. Настоящее 'modified' у подписки (см. subscribe)
+                // могло тем временем само убрать её из ящика — перечитываем перед тем, как
+                // поверить исходу attemptWrite.
+                const stillPending = readOutbox(memberId, channelId).some(
+                    (item) => item.messageId === message.messageId
+                );
+                if (!stillPending) {
+                    return {
+                        message: {
+                            messageId: base.messageId,
+                            author: base.author,
+                            sentAt: base.sentAt,
+                            text: base.text,
+                            thread: base.thread,
+                        },
+                    };
+                }
+                return { message: settleDelivery(base, outcome, memberId, channelId) };
+            } catch (failure) {
+                throw toChannelError(failure);
+            }
+        },
+
+        // Не Promise.reject/async с одним лишь синхронным телом: работы здесь ровно на два
+        // синхронных шага (убрать из ящика, разослать своим подписчикам), и оборачивать их
+        // в лишний await незачем — форма всё равно Promise<void>, как и у остального контракта.
+        discardMessage: ({ channelId, message }) => {
+            discardOutboxMessage(channelId, message.messageId);
+            broadcastFeedEvent(channelId, {
+                eventId: randomEventId(),
+                channelId,
+                at: Date.now(),
+                type: 'message-removed',
+                message: { messageId: message.messageId },
+            });
+            return Promise.resolve();
         },
 
         loadOlderMessages: async ({ channelId, before, limit }) => {
@@ -600,7 +844,7 @@ export function createFirebaseBackend({ db, functions }: { db: Firestore; functi
             }
         },
 
-        subscribe: ({ channelId, onEvent }) => {
+        subscribe: ({ channelId, userId, onEvent }) => {
             // Первый снимок onSnapshot приходит целиком и это не события, а состояние —
             // то же самое, что уже отдал getChannel. Пропускаем его отдельным флагом
             // на каждую из трёх подписок: иначе каждое открытие канала заново рождало бы
@@ -685,6 +929,39 @@ export function createFirebaseBackend({ db, functions }: { db: Firestore; functi
                 }
             );
 
+            // Кому в этой подписке ещё не пришло подтверждение — только эти id интересны
+            // в modified ниже: событие message-updated значит «сменился статус доставки
+            // у того, чего мы ждали», и на документе, которого эта вкладка не отправляла,
+            // такого смысла нет.
+            //
+            // Начинаем не с пустого, и это главное: своё отправленное переживает
+            // перезагрузку вкладки в двух местах сразу — в ящике неотправленного и в очереди
+            // самого Firestore (кеш на диске, см. config/firebase.ts, persistentLocalCache).
+            // Очередь после перезагрузки досылает запись сама, и подтверждение ей приходит
+            // обычным modified — а первый снимок ниже проглатывается целиком, и завести
+            // такой id в pendingIds там уже негде. Не подобрать его из ящика — значок «в пути»
+            // над пережившим перезагрузку сообщением так и остался бы гореть навсегда.
+            const pendingIds = new Set<string>(
+                userId ? readOutbox(userId, channelId).map((item) => item.messageId) : []
+            );
+
+            // Слушатели синтетики этого канала (см. feedListeners выше) — регистрируем
+            // и здесь же снимаем в отписке, тем же Set, что раздаёт broadcastFeedEvent.
+            let feedListenerSet = feedListeners.get(channelId);
+            if (!feedListenerSet) {
+                feedListenerSet = new Set();
+                feedListeners.set(channelId, feedListenerSet);
+            }
+            feedListenerSet.add(onEvent);
+
+            // Без includeMetadataChanges, хотя дальше и читается metadata.hasPendingWrites,
+            // — и это замерено, а не додумано. Подтверждение своей записи метаданными
+            // не ограничивается: вместе с hasPendingWrites сервер проставляет и serverAt
+            // (до подтверждения его нет вовсе, см. serverTimestamp() в sendMessage), а это
+            // уже обычная перемена данных, и modified с ней доходит до подписки и без опции.
+            // Опция добавила бы к этому лишь ещё один снимок на переход кеш → сервер,
+            // у которого docChanges() пуст, — работы никакой, а повод решить, будто без неё
+            // hasPendingWrites не виден, есть.
             let firstFeed = true;
             const unsubscribeFeed = onSnapshot(
                 feedQuery(channelId),
@@ -695,23 +972,48 @@ export function createFirebaseBackend({ db, functions }: { db: Firestore; functi
                         return;
                     }
                     for (const change of snap.docChanges()) {
+                        const messageId = change.doc.id;
                         if (change.type === 'added') {
+                            const hasPendingWrites = change.doc.metadata.hasPendingWrites;
+                            const message = toMessage(messageId, change.doc.data() as MessageDoc);
+                            if (hasPendingWrites) {
+                                pendingIds.add(messageId);
+                            }
+                            const delivery: MessageDelivery = { status: 'pending' };
                             onEvent({
                                 eventId: randomEventId(),
                                 channelId,
                                 at: Date.now(),
                                 type: 'message-added',
-                                message: toMessage(change.doc.id, change.doc.data() as MessageDoc),
+                                message: hasPendingWrites ? { ...message, delivery } : message,
+                            });
+                        } else if (
+                            change.type === 'modified' &&
+                            pendingIds.has(messageId) &&
+                            !change.doc.metadata.hasPendingWrites
+                        ) {
+                            // Настоящее подтверждение сервера у уже показанного «в пути»
+                            // сообщения — единственное, что modified у отслеживаемого id
+                            // здесь может значить: текст не меняется никогда (правило
+                            // запрещает), а serverAt и hasPendingWrites приходят этим же
+                            // снимком, когда сервер принимает запись.
+                            pendingIds.delete(messageId);
+                            onEvent({
+                                eventId: randomEventId(),
+                                channelId,
+                                at: Date.now(),
+                                type: 'message-updated',
+                                message: toMessage(messageId, change.doc.data() as MessageDoc),
                             });
                         }
-                        // modified молчит: текст сообщения не меняется — это запрещает
-                        // правило, — а serverAt приходит вторым снимком, когда сервер
-                        // проставляет настоящее время взамен временной пустоты; это modified
-                        // у уже показанного сообщения, а не новая строчка в ленте.
-                        //
-                        // removed молчит тоже: при limitToLast самое старое сообщение
-                        // выпадает из окна, когда приходит новое, — это край окна подписки,
-                        // а не удаление, и события «сообщение пропало» в контракте нет вовсе.
+                        // Остальное молчит. modified у неотслеживаемого id — это не про
+                        // доставку: свою запись эта вкладка ждёт по ящику и по pendingIds,
+                        // а чужая приходит уже подтверждённой, одним лишь added, и второй
+                        // раз о ней рассказывать нечего. removed — это край окна limitToLast,
+                        // самое старое сообщение выпадает, когда приходит новое, а не
+                        // удаление — правило его и не разрешает; «сообщение пропало» в ленте
+                        // приходит только синтетикой из discardMessage (см. broadcastFeedEvent
+                        // выше).
                     }
                 },
                 () => {
@@ -724,6 +1026,10 @@ export function createFirebaseBackend({ db, functions }: { db: Firestore; functi
                 unsubscribeChannel();
                 unsubscribeMembers();
                 unsubscribeFeed();
+                feedListenerSet.delete(onEvent);
+                if (feedListenerSet.size === 0) {
+                    feedListeners.delete(channelId);
+                }
             };
         },
 

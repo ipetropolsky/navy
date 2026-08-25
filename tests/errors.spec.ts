@@ -9,6 +9,7 @@ import {
     leaveButton,
     openChannel,
     openSheet,
+    sceneReady,
     send,
     ships,
     systemLines,
@@ -109,6 +110,125 @@ test('нет связи — сказано одной строкой в шапк
 
     await context.setOffline(false);
     await expect(strip).not.toBeVisible();
+});
+
+/**
+ * Значок доставки у своей же реплики (issue #69, docs/FIREBASE.md «Статус отправки»): нет
+ * сети — сообщение остаётся в ленте пузырём со значком (!), а не пропадает и не виснет
+ * неопределённо; набранное переживает даже перезагрузку вкладки — ящик неотправленного
+ * лежит в sessionStorage (см. backend/outbox.ts), а не только в памяти вкладки; когда связь
+ * возвращается, сообщение уходит само — без клика по значку (см. localBackend.ts, подписка
+ * на watchOnlineStatus, «автоподхват при восстановлении связи»).
+ *
+ * Здесь, в отличие от соседних проверок, сеть контекста (`context.setOffline`) не трогаем
+ * вовсе: странице предстоит по-настоящему перезагрузиться, а с обрывом взаправду это не
+ * совмещается ни в одну сторону, ни в другую. С выключенной сетью загрузке неоткуда
+ * взяться (`net::ERR_INTERNET_DISCONNECTED`), а обратное включение, без которого
+ * перезагрузку не устроить, CDP тут же отмечает собственным, взаправдашним `online` на
+ * свежем документе — раньше проверки и независимо от того, что к тому моменту подложено
+ * через JS, так что и включать связь взаправду перед подложным обрывом незачем. Вместо
+ * этого подделываем ровно то, чем пользуется само приложение: `navigator.onLine` (см.
+ * `isOnline()` в utils/connection.ts, читает его заново при каждом обращении, не однажды
+ * при загрузке) — геттер на подложном флаге в sessionStorage, который потому и переживает
+ * перезагрузку точно так же, как ящик неотправленного. Оба перехода — что обрыв, что
+ * возврат связи — подаём тем же событием `window`, каким их встречает настоящий браузер
+ * (`dispatchEvent(new Event('online' | 'offline'))`), только не CDP, а сама проверка.
+ */
+test('нет связи — сообщение остаётся в ленте со значком, переживает перезагрузку, а по возврату связи уходит само', async ({
+    page,
+}) => {
+    await page.addInitScript(() => {
+        Object.defineProperty(window.navigator, 'onLine', {
+            configurable: true,
+            // eslint-disable-next-line no-restricted-syntax -- взгляд снаружи, а не код приложения
+            get: () => sessionStorage.getItem('kilvater-test.forceOffline') !== '1',
+        });
+    });
+
+    await openChannel(page, DEMO, ALBATROS);
+    const before = await bubbles(page).count();
+
+    await page.evaluate(() => {
+        // eslint-disable-next-line no-restricted-syntax -- взгляд снаружи, а не код приложения
+        sessionStorage.setItem('kilvater-test.forceOffline', '1');
+        window.dispatchEvent(new Event('offline'));
+    });
+    await expect(page.locator('[class*="connectionStrip"]')).toBeVisible();
+    await send(page, 'Курс без связи');
+
+    // Не «последний пузырь»: реплики демо-канала датированы сегодняшним же днём, но чуть
+    // позже (см. seed.ts, minutesAfterMidnight до 21:48) — стоит неотправленному пережить
+    // перезагрузку, как оно подмешается в ленту уже отсортированным по sentAt (mergeOutbox
+    // в outbox.ts) и окажется среди своих ровесников по времени, а не обязательно с краю.
+    // Ищем его по тексту, а счётом проверяем, что оно ровно одно — не пропало и не удвоилось.
+    const mine = bubbles(page).filter({ hasText: 'Курс без связи' });
+    const failedIcon = page.getByRole('button', { name: 'Не отправлено. Нажмите, чтобы отправить снова', exact: true });
+    await expect(failedIcon).toBeVisible();
+    await expect(bubbles(page)).toHaveCount(before + 1);
+    await expect(mine).toHaveCount(1);
+
+    // Настоящая перезагрузка: сеть контекста всё это время оставалась настоящей, странице
+    // есть откуда взяться. Флаг в sessionStorage переживает её так же, как и ящик
+    // неотправленного (тот же sessionStorage той же вкладки), так что navigator.onLine
+    // сразу после перезагрузки снова отвечает «нет связи» — без единого чужого события.
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await sceneReady(page);
+
+    // Пережило перезагрузку целиком: и сам пузырь, и его текст, и значок незавершённой
+    // отправки — не выдумка по одному лишь наличию записи, а то же самое неотправленное.
+    await expect(bubbles(page)).toHaveCount(before + 1);
+    await expect(mine).toHaveCount(1);
+    await expect(failedIcon).toBeVisible();
+
+    // Только теперь — настоящий приход связи: то же самое событие window, каким его и
+    // встречает браузер по-настоящему, отправляем сами (см. комментарий над тестом), сняв
+    // прежде подложный флаг.
+    await page.evaluate(() => {
+        // eslint-disable-next-line no-restricted-syntax -- взгляд снаружи, а не код приложения
+        sessionStorage.removeItem('kilvater-test.forceOffline');
+        window.dispatchEvent(new Event('online'));
+    });
+
+    await expect(failedIcon).toBeHidden();
+    await expect(bubbles(page)).toHaveCount(before + 1);
+    await expect(mine).toHaveCount(1);
+});
+
+/**
+ * Клик по значку (!), пока связи всё ещё нет, не заводит второй копии (issue #69: «Повторное
+ * нажатие не плодит двойников»). Решение здесь одномоментное (см. retryMessage в localBackend.ts:
+ * `isOnline()`, без ожидания) — оба клика при выключенной сети возвращают то же самое
+ * неотправленное как есть, ни один не пишет в общее состояние второй записи.
+ */
+test('значок (!), нажатый дважды подряд без связи, не заводит второго пузыря', async ({ page, context }) => {
+    await openChannel(page, DEMO, ALBATROS);
+    const before = await bubbles(page).count();
+
+    await context.setOffline(true);
+    await expect(page.locator('[class*="connectionStrip"]')).toBeVisible();
+    await send(page, 'Двойной клик по значку');
+
+    const failedIcon = page.getByRole('button', { name: 'Не отправлено. Нажмите, чтобы отправить снова', exact: true });
+    await expect(failedIcon).toBeVisible();
+    await expect(bubbles(page)).toHaveCount(before + 1);
+
+    // Оба нажатия разом, в обход актёрства мыши — тот же приём, что и у двойной высадки ниже:
+    // уходят раньше, чем первое успевает отработать и убрать элемент из разметки.
+    await failedIcon.evaluate((button: HTMLElement) => {
+        button.click();
+        button.click();
+    });
+
+    await expect(bubbles(page)).toHaveCount(before + 1);
+    await expect(failedIcon).toBeVisible();
+
+    // Связь вернулась — доставилось само, ровно одним сообщением, а не двумя копиями.
+    await context.setOffline(false);
+    await expect(
+        page.getByRole('button', { name: 'Не отправлено. Нажмите, чтобы отправить снова', exact: true })
+    ).toBeHidden();
+    await expect(bubbles(page)).toHaveCount(before + 1);
+    await expect(bubbles(page).last()).toContainText('Двойной клик по значку');
 });
 
 /**

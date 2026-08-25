@@ -32,16 +32,19 @@ import {
     Timestamp,
     collection,
     deleteDoc,
+    disableNetwork,
     doc,
+    enableNetwork,
     getDoc,
     getDocs,
     setDoc,
     updateDoc,
 } from 'firebase/firestore';
 import { Functions, getFunctions } from 'firebase/functions';
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from 'vitest';
 
 import { createFirebaseBackend } from '@/backend/firebaseBackend';
+import { putOutboxMessage, readOutbox } from '@/backend/outbox';
 import { ChannelBackend, ChannelError, ChannelEvent } from '@/backend/types';
 import { paths } from '@shared/config/model';
 import { MAX_MESSAGE_LENGTH } from '@shared/types/channel';
@@ -607,7 +610,7 @@ describe('подписка на участников', () => {
 });
 
 describe('подписка на ленту', () => {
-    test('новое сообщение — message-added, подтверждение serverAt — тишина', async () => {
+    test('новое сообщение приходит со статусом pending (hasPendingWrites), подтверждение сервера — отдельным событием без него', async () => {
         const memberId = 'u-feed-sub';
         const backend = backendAs(memberId);
         const { channel } = await backend.createChannel({ channel: { slug: 'lenta', title: 'Лента' } });
@@ -624,20 +627,55 @@ describe('подписка на ленту', () => {
             message: { text: 'Приняли ветер в правый борт' },
         });
 
-        // Своя запись (setDoc) может дойти и одним снимком, и двумя — сразу же, ещё
-        // не подтверждённой сервером, и снова, когда serverAt проставлен взамен временной
-        // пустоты. Второй снимок подписка отдаёт молчанием (см. firebaseBackend.ts,
-        // комментарий у modified в подписке на ленту), так что итог не зависит от того,
-        // сколько снимков пришло на самом деле, — событие должно остаться одно.
-        await expect.poll(() => events.length, { timeout: 5000, interval: 50 }).toBeGreaterThan(0);
-        await sleep(500);
+        // Своя запись (setDoc) доходит до подписки локальным эхом раньше, чем сервер её
+        // подтвердит: сперва message-added со значком «в пути» (metadata.hasPendingWrites,
+        // см. firebaseBackend.ts, subscribe), потом подтверждение — уже без него. Ждём именно
+        // подтверждения, а не первого пришедшего события: порог — про то, что подписка
+        // не замолчала насовсем, а не про то, сколько именно снимков пришло.
+        await expect
+            .poll(
+                () =>
+                    events.some(
+                        (event) =>
+                            (event.type === 'message-added' || event.type === 'message-updated') &&
+                            event.message.delivery === undefined
+                    ),
+                { timeout: 5000, interval: 50 }
+            )
+            .toBe(true);
+        await sleep(300);
 
-        expect(events).toHaveLength(1);
+        // Первым подписка узнаёт о сообщении всегда через message-added — будь оно тут же
+        // подтверждённым (сервер успел раньше, чем дошёл до слушателя первый снимок) или ещё
+        // в пути; в этой связке (свой же клиент почти сразу за отправкой) оно приходит именно
+        // «в пути» — так и проверяем, а не гадаем между двумя вариантами.
         expect(events[0].type).toBe('message-added');
-        if (events[0].type === 'message-added') {
-            expect(events[0].message.kind).toBeUndefined();
-            if (events[0].message.kind === undefined) {
-                expect(events[0].message.text).toBe('Приняли ветер в правый борт');
+        const [added, ...rest] = events;
+        let addedMessageId = '';
+        if (added.type === 'message-added') {
+            addedMessageId = added.message.messageId;
+            expect(added.message.kind).toBeUndefined();
+            if (added.message.kind === undefined) {
+                expect(added.message.text).toBe('Приняли ветер в правый борт');
+            }
+            expect(added.message.delivery).toEqual({ status: 'pending' });
+        }
+
+        // Дальше — только подтверждения того же сообщения, без значка. Подтверждает и сама
+        // подписка (настоящее modified у Firestore), и sendMessage синтетикой изнутри
+        // (см. settleDelivery) — оба несут одни и те же данные, повторное применение одного
+        // и того же не вредит (см. комментарий у settleDelivery в firebaseBackend.ts), и здесь
+        // важно не их число, а то, что ни одно не рассказывает что-то другое.
+        expect(rest.length).toBeGreaterThan(0);
+        for (const event of rest) {
+            expect(event.type).toBe('message-updated');
+            if (event.type === 'message-updated') {
+                expect(event.message.messageId).toBe(addedMessageId);
+                expect(event.message.delivery).toBeUndefined();
+                expect(event.message.kind).toBeUndefined();
+                if (event.message.kind === undefined) {
+                    expect(event.message.text).toBe('Приняли ветер в правый борт');
+                }
             }
         }
 
@@ -769,5 +807,301 @@ describe('задержка доставки', () => {
         expect(latencyMs).toBeLessThan(5000);
         // eslint-disable-next-line no-console -- число нужно в выводе прогона человеку, не только ассерту
         console.log(`[задержка доставки] сообщение дошло до соседней вкладки за ${latencyMs.toFixed(0)} мс`);
+    }, 15000);
+});
+
+describe('статус отправки', () => {
+    /**
+     * retryMessage и discardMessage читают ящик неотправленного напрямую (см. readOutbox
+     * в firebaseBackend.ts) — он и есть источник истины о том, что вкладка ещё не подтвердила.
+     * Ящик живёт в sessionStorage (backend/outbox.ts), а этот набор гоняется в среде `node`
+     * (см. vitest.emulator.config.ts) — настоящего окна тут нет вовсе, и без подмены
+     * sessionStore (src/utils/storage.ts) молча работает вхолостую: `window` не определён,
+     * try/catch внутри guarded() глотает ReferenceError, readOutbox всегда отвечает пустым
+     * списком. Подмена — своя карта на ключ-значение, тот же приём, что и в outbox.test.ts
+     * и localBackend.test.ts, и заведена только в этом describe: остальным проверкам файла
+     * работающий ящик не нужен и не должен менять их поведение.
+     */
+    const shelf = new Map<string, string>();
+    const fakeSessionStorage = {
+        getItem: (key: string): string | null => shelf.get(key) ?? null,
+        setItem: (key: string, value: string): void => {
+            shelf.set(key, value);
+        },
+        removeItem: (key: string): void => {
+            shelf.delete(key);
+        },
+        get length(): number {
+            return shelf.size;
+        },
+        key: (index: number): string | null => [...shelf.keys()][index] ?? null,
+    };
+
+    beforeEach(() => {
+        shelf.clear();
+        (globalThis as unknown as { window: unknown }).window = { sessionStorage: fakeSessionStorage };
+    });
+
+    afterEach(() => {
+        delete (globalThis as unknown as { window?: unknown }).window;
+    });
+
+    /**
+     * writeTimeout короткий и намеренно детерминированный, а не «мало ли, вдруг успеет»:
+     * сеть по-настоящему выключена вызовом disableNetwork (firebase/firestore) — setDoc
+     * внутри attemptWrite не может долететь ни при какой нагрузке машины, пока она выключена,
+     * так что 500 мс — не гонка со временем отклика, а просто «сколько ждём, прежде чем
+     * сдаться» (см. firebaseBackend.ts, doc-комментарий у writeTimeout: «см.
+     * firestore/backend.test.ts, «статус отправки»» — это он и есть).
+     *
+     * Прогрев через getChannel() — обязателен: он настоящим чтением (getDocs по составу)
+     * кладёт документ участника в локальный кеш клиента, и getDoc(участника) внутри
+     * sendMessage потом резолвится из кеша быстро, даже пока сеть выключена. Без прогрева
+     * ChannelError бросается раньше, чем что-либо успевает попасть в ящик неотправленного
+     * (см. sendMessage: `if (!base) throw …` — не успели даже прочитать участника).
+     */
+    const OFFLINE_TIMEOUT = 500;
+
+    test('нет сети — sendMessage отвечает delivery failed/timeout, не бросает и не зависает; набранное остаётся в ящике', async () => {
+        const memberId = 'u-delivery-offline';
+        const db = emulatorDb(testEnv.authenticatedContext(memberId));
+        const backend = createFirebaseBackend({ db, functions: testFunctions, writeTimeout: OFFLINE_TIMEOUT });
+        const { channel } = await backend.createChannel({ channel: { slug: 'delivery-offline', title: 'Офлайн' } });
+        await seedMember(channel.channelId, memberId, 'Связист', '007', 100);
+        await backend.getChannel({ channelId: channel.channelId });
+
+        await disableNetwork(db);
+        try {
+            const { message } = await backend.sendMessage({
+                channelId: channel.channelId,
+                memberId,
+                message: { text: 'В шторм без связи' },
+            });
+
+            expect(message.delivery?.status).toBe('failed');
+            expect(message.delivery?.error?.code).toBe('timeout');
+
+            // То же самое человек увидит и после «перезагрузки вкладки» — не выдумка по
+            // промису, а действительно записанное в ящик неотправленного.
+            const stored = readOutbox(memberId, channel.channelId);
+            expect(stored).toHaveLength(1);
+            expect(stored[0].messageId).toBe(message.messageId);
+            expect(stored[0].delivery?.status).toBe('failed');
+
+            // Сеть по-прежнему выключена: до сервера набранное ещё не долетело.
+            expect((await rawCollection(paths.messages({ channelId: channel.channelId }))).empty).toBe(true);
+        } finally {
+            await enableNetwork(db);
+        }
+    }, 15000);
+
+    test('подписка видит весь путь: pending (локальное эхо) → failed (не дождались) → подтверждено само, без клика', async () => {
+        const memberId = 'u-delivery-lifecycle';
+        const db = emulatorDb(testEnv.authenticatedContext(memberId));
+        const backend = createFirebaseBackend({ db, functions: testFunctions, writeTimeout: OFFLINE_TIMEOUT });
+        const { channel } = await backend.createChannel({ channel: { slug: 'delivery-lifecycle', title: 'Путь' } });
+        await seedMember(channel.channelId, memberId, 'Связист', '007', 100);
+        await backend.getChannel({ channelId: channel.channelId });
+
+        const events: ChannelEvent[] = [];
+        const unsubscribe = backend.subscribe({ channelId: channel.channelId, onEvent: (event) => events.push(event) });
+
+        await disableNetwork(db);
+        let sentMessageId = '';
+        try {
+            const { message } = await backend.sendMessage({
+                channelId: channel.channelId,
+                memberId,
+                message: { text: 'Курс не меняем' },
+            });
+            sentMessageId = message.messageId;
+            expect(message.delivery?.status).toBe('failed');
+        } finally {
+            await enableNetwork(db);
+        }
+
+        // Без этого клика — второй раз никто ничего не нажимал: доставилось само, как
+        // только вернулась сеть (см. «Готово, когда» в тексте задачи).
+        await expect
+            .poll(
+                () =>
+                    events.some(
+                        (event) =>
+                            event.type === 'message-updated' &&
+                            event.message.messageId === sentMessageId &&
+                            event.message.delivery === undefined
+                    ),
+                { timeout: 5000, interval: 50 }
+            )
+            .toBe(true);
+
+        unsubscribe();
+
+        expect(events[0].type).toBe('message-added');
+        if (events[0].type === 'message-added') {
+            expect(events[0].message.messageId).toBe(sentMessageId);
+            expect(events[0].message.delivery).toEqual({ status: 'pending' });
+        }
+
+        const failedSeen = events.some(
+            (event) =>
+                event.type === 'message-updated' &&
+                event.message.messageId === sentMessageId &&
+                event.message.delivery?.status === 'failed'
+        );
+        expect(failedSeen).toBe(true);
+
+        // Ровно один документ в базе, сколько бы промежуточных событий ни случилось по пути.
+        const docs = await rawCollection(paths.messages({ channelId: channel.channelId }));
+        expect(docs.docs).toHaveLength(1);
+        expect(docs.docs[0].id).toBe(sentMessageId);
+    }, 15000);
+
+    test('повтор после отказа уходит тем же messageId — без второй копии; два клика подряд не плодят двойника', async () => {
+        const memberId = 'u-delivery-retry';
+        const db = emulatorDb(testEnv.authenticatedContext(memberId));
+        const backend = createFirebaseBackend({ db, functions: testFunctions, writeTimeout: OFFLINE_TIMEOUT });
+        const { channel } = await backend.createChannel({ channel: { slug: 'delivery-retry', title: 'Повтор' } });
+        await seedMember(channel.channelId, memberId, 'Связист', '007', 100);
+        await backend.getChannel({ channelId: channel.channelId });
+
+        await disableNetwork(db);
+        let sentMessageId = '';
+        try {
+            const { message } = await backend.sendMessage({
+                channelId: channel.channelId,
+                memberId,
+                message: { text: 'Повторим при случае' },
+            });
+            sentMessageId = message.messageId;
+            expect(message.delivery?.status).toBe('failed');
+        } finally {
+            await enableNetwork(db);
+        }
+
+        // Два клика по значку (!) почти разом — не должны завести двойника. И не заведут:
+        // запись всё это время стоит в очереди Firestore, retryMessage дожидается её
+        // (waitForPendingWrites), видит документ на месте и ничего не переписывает —
+        // писать заново он берётся, только когда документа нет вовсе (см. firebaseBackend.ts,
+        // retryMessage). Двойника, впрочем, не вышло бы и тогда: id у повтора тот же самый,
+        // а два setDoc с одним id — это один документ, не два.
+        const [first, second] = await Promise.all([
+            backend.retryMessage({ channelId: channel.channelId, memberId, message: { messageId: sentMessageId } }),
+            backend.retryMessage({ channelId: channel.channelId, memberId, message: { messageId: sentMessageId } }),
+        ]);
+
+        expect(first.message.messageId).toBe(sentMessageId);
+        expect(second.message.messageId).toBe(sentMessageId);
+        expect(first.message.delivery).toBeUndefined();
+        expect(second.message.delivery).toBeUndefined();
+
+        expect(readOutbox(memberId, channel.channelId)).toEqual([]);
+
+        const docs = await rawCollection(paths.messages({ channelId: channel.channelId }));
+        expect(docs.docs).toHaveLength(1);
+        expect(docs.docs[0].id).toBe(sentMessageId);
+    }, 15000);
+
+    /**
+     * Ящик помнит неотправленное дольше, чем очередь Firestore, — и это не выдумка ради
+     * проверки. Очередь теряет запись всякий раз, когда попытка отвалилась насовсем:
+     * отказ по правилам, скажем, выбрасывает её оттуда, а в ящике она остаётся лежать
+     * помеченной «не вышло», как ей и положено, — ждать клика по значку (!).
+     *
+     * Здесь этот расклад заводится напрямую (запись в ящик, документа нет вовсе) — так
+     * короче и вернее, чем гоняться за настоящим отказом правил. Проверяем то, из-за чего
+     * это вообще важно: повтор не должен верить одному лишь «очередь пуста». Поверил бы —
+     * объявил бы доставленным то, чего на сервере нет, убрал бы из ящика, и сообщение
+     * пропало бы молча, с видом отправленного.
+     */
+    test('повтор дописывает документ, если ждать в очереди уже нечего, а не объявляет доставленным', async () => {
+        const memberId = 'u-delivery-retry-lost';
+        const backend = backendAs(memberId);
+        const { channel } = await backend.createChannel({ channel: { slug: 'retry-lost', title: 'Потерялось' } });
+        await seedMember(channel.channelId, memberId, 'Связист', '007', 100);
+
+        const messageId = 'msg-poteryalos';
+        putOutboxMessage(memberId, channel.channelId, {
+            messageId,
+            author: { memberId, look: { name: 'Связист', hullNumber: '007', color: '#8ecae6' } },
+            sentAt: 1_700_000_000_000,
+            text: 'Дошло со второй попытки',
+            delivery: { status: 'failed', error: { code: 'timeout', message: 'Сервер долго не отвечает' } },
+        });
+        expect((await rawCollection(paths.messages({ channelId: channel.channelId }))).empty).toBe(true);
+
+        const { message } = await backend.retryMessage({
+            channelId: channel.channelId,
+            memberId,
+            message: { messageId },
+        });
+
+        expect(message.messageId).toBe(messageId);
+        expect(message.delivery).toBeUndefined();
+        expect(readOutbox(memberId, channel.channelId)).toEqual([]);
+
+        // Главное: документ теперь и правда есть, тем же id и тем же текстом — доставленным
+        // объявили не пустоту.
+        const docs = await rawCollection(paths.messages({ channelId: channel.channelId }));
+        expect(docs.docs).toHaveLength(1);
+        expect(docs.docs[0].id).toBe(messageId);
+        expect(docs.docs[0].data().text).toBe('Дошло со второй попытки');
+        expect(docs.docs[0].data().sentAt).toBe(1_700_000_000_000);
+    }, 15000);
+
+    test('retryMessage для сообщения не из ящика — отказ unknown, а не выдумка', async () => {
+        const memberId = 'u-delivery-retry-unknown';
+        const backend = backendAs(memberId);
+        const { channel } = await backend.createChannel({ channel: { slug: 'retry-unknown', title: 'Unknown' } });
+        await seedMember(channel.channelId, memberId, 'Связист', '007', 100);
+
+        await failsWith(
+            () =>
+                backend.retryMessage({
+                    channelId: channel.channelId,
+                    memberId,
+                    message: { messageId: 'net-takogo-v-yashike' },
+                }),
+            'unknown'
+        );
+    });
+
+    test('discardMessage выбрасывает неотправленное из ящика и оповещает подписку — до того, как сеть вернулась', async () => {
+        const memberId = 'u-delivery-discard';
+        const db = emulatorDb(testEnv.authenticatedContext(memberId));
+        const backend = createFirebaseBackend({ db, functions: testFunctions, writeTimeout: OFFLINE_TIMEOUT });
+        const { channel } = await backend.createChannel({ channel: { slug: 'delivery-discard', title: 'Отказ' } });
+        await seedMember(channel.channelId, memberId, 'Связист', '007', 100);
+        await backend.getChannel({ channelId: channel.channelId });
+
+        const events: ChannelEvent[] = [];
+        const unsubscribe = backend.subscribe({ channelId: channel.channelId, onEvent: (event) => events.push(event) });
+
+        await disableNetwork(db);
+        try {
+            const { message } = await backend.sendMessage({
+                channelId: channel.channelId,
+                memberId,
+                message: { text: 'Передумал отправлять' },
+            });
+            expect(message.delivery?.status).toBe('failed');
+
+            await backend.discardMessage({ channelId: channel.channelId, message: { messageId: message.messageId } });
+
+            expect(readOutbox(memberId, channel.channelId)).toEqual([]);
+
+            await expect
+                .poll(
+                    () =>
+                        events.some(
+                            (event) => event.type === 'message-removed' && event.message.messageId === message.messageId
+                        ),
+                    { timeout: 2000, interval: 50 }
+                )
+                .toBe(true);
+        } finally {
+            unsubscribe();
+            await enableNetwork(db);
+        }
     }, 15000);
 });

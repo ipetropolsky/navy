@@ -109,6 +109,9 @@ interface MessageBase {
     messageId: string;
     author: MemberRef; // кто отправил; у системной записи — тот, о ком она
     sentAt: number; // мс эпохи; как показать — дело интерфейса
+    // Статус отправки у этой вкладки; поля нет — сервер подтвердил. На сервере не хранится.
+    // Подробно — в FIREBASE.md, «Статус отправки».
+    delivery?: { status: 'pending' | 'failed'; error?: { code: ChannelErrorCode; message: string } };
 }
 
 interface ChatMessage extends MessageBase {
@@ -179,19 +182,21 @@ interface ShipSpec {
 
 ## Методы
 
-| Метод                                              | Что делает                           | Возвращает                |
-| -------------------------------------------------- | ------------------------------------ | ------------------------- |
-| `getChannel({ channelId })`                        | Состояние канала целиком             | `ChannelSnapshot \| null` |
-| `getChannelBySlug({ slug })`                       | Разбор адреса из ссылки              | `ChannelSnapshot \| null` |
-| `createChannel({ channel })`                       | Заводит канал без участников         | `{ channel }`             |
-| `updateChannel({ channelId, channel })`            | Меняет адрес и название канала       | `{ channel }`             |
-| `join({ channelId, member })`                      | Ставит корабль в строй               | `{ member }`              |
-| `updateMember({ channelId, memberId, member })`    | Меняет позывной, номер, силуэт, цвет | `{ member }`              |
-| `leave({ channelId, memberId, course? })`          | Выводит корабль из канала            | —                         |
-| `kick({ channelId, memberId, member })`            | Высаживает чужой корабль             | —                         |
-| `sendMessage({ channelId, memberId, message })`    | Отправляет сообщение                 | `{ message }`             |
-| `loadOlderMessages({ channelId, before, limit? })` | Страница ленты выше `before`         | `{ messages, hasMore }`   |
-| `subscribe({ channelId, onEvent })`                | Подписка на события канала           | функция отписки           |
+| Метод                                              | Что делает                                           | Возвращает                |
+| -------------------------------------------------- | ---------------------------------------------------- | ------------------------- |
+| `getChannel({ channelId })`                        | Состояние канала целиком                             | `ChannelSnapshot \| null` |
+| `getChannelBySlug({ slug })`                       | Разбор адреса из ссылки                              | `ChannelSnapshot \| null` |
+| `createChannel({ channel })`                       | Заводит канал без участников                         | `{ channel }`             |
+| `updateChannel({ channelId, channel })`            | Меняет адрес и название канала                       | `{ channel }`             |
+| `join({ channelId, member })`                      | Ставит корабль в строй                               | `{ member }`              |
+| `updateMember({ channelId, memberId, member })`    | Меняет позывной, номер, силуэт, цвет                 | `{ member }`              |
+| `leave({ channelId, memberId, course? })`          | Выводит корабль из канала                            | —                         |
+| `kick({ channelId, memberId, member })`            | Высаживает чужой корабль                             | —                         |
+| `sendMessage({ channelId, memberId, message })`    | Отправляет сообщение                                 | `{ message }`             |
+| `retryMessage({ channelId, memberId, message })`   | Отправляет неотправленное заново, тем же `messageId` | `{ message }`             |
+| `discardMessage({ channelId, message })`           | Выбрасывает неотправленное из ящика                  | —                         |
+| `loadOlderMessages({ channelId, before, limit? })` | Страница ленты выше `before`                         | `{ messages, hasMore }`   |
+| `subscribe({ channelId, onEvent })`                | Подписка на события канала                           | функция отписки           |
 
 ### Открыть канал и подписаться
 
@@ -433,6 +438,8 @@ type ChannelEvent = { eventId: string; channelId: string; at: number } & (
     | { type: 'member-updated'; member: Member }
     | { type: 'member-left'; member: MemberRef }
     | { type: 'message-added'; message: Message }
+    | { type: 'message-updated'; message: Message }
+    | { type: 'message-removed'; message: MessageRef }
 );
 ```
 

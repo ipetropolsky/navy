@@ -56,6 +56,12 @@ export interface MessageDraft {
     text: string;
     /** Ответ: сообщение, к которому он привязан. */
     thread?: MessageRef;
+    /**
+     * Под каким идентификатором записать сообщение. Повторная отправка с тем же —
+     * не второе сообщение, а та же запись: так устроен повтор после обрыва
+     * (см. retryMessage). Не указан — назначает бэкенд, как и раньше.
+     */
+    messageId?: string;
 }
 
 /**
@@ -85,6 +91,10 @@ export type ChannelEvent = ChannelEventBase &
         | { type: 'member-updated'; member: Member }
         | { type: 'member-left'; member: MemberRef }
         | { type: 'message-added'; message: Message }
+        /** Статус доставки сменился — например, пришло подтверждение сервера. См. #69. */
+        | { type: 'message-updated'; message: Message }
+        /** Неотправленное выброшено (см. discardMessage) — в ленте его больше нет. */
+        | { type: 'message-removed'; message: MessageRef }
     );
 
 export type ChannelEventType = ChannelEvent['type'];
@@ -121,9 +131,14 @@ interface MemberAddress extends ChannelAddress {
 }
 
 export interface ChannelBackend {
-    getChannel(request: ChannelAddress): Promise<ChannelSnapshot | null>;
+    /**
+     * `userId` не обязателен, но нужен, чтобы подмешать в ленту своё же неотправленное
+     * (см. `backend/outbox.ts`): без него ящик не найти — ключ у него `<userId>.<channelId>`.
+     * Не передан — ответ тот же, что и раньше, без ящика.
+     */
+    getChannel(request: ChannelAddress & { userId?: string }): Promise<ChannelSnapshot | null>;
     /** Разбор адреса из ссылки: по slug находим канал и дальше работаем с его channelId. */
-    getChannelBySlug(request: { slug: string }): Promise<ChannelSnapshot | null>;
+    getChannelBySlug(request: { slug: string; userId?: string }): Promise<ChannelSnapshot | null>;
 
     createChannel(request: { channel: ChannelDraft }): Promise<{ channel: Channel }>;
     updateChannel(request: ChannelAddress & { channel: ChannelDraft }): Promise<{ channel: Channel }>;
@@ -157,6 +172,29 @@ export interface ChannelBackend {
     sendMessage(request: MemberAddress & { message: MessageDraft }): Promise<{ message: Message }>;
 
     /**
+     * Отправить заново то, что не ушло. Тем же `messageId`, что и у неудачной попытки, —
+     * поэтому двойника не будет: повтор попадает в ту же запись, а не заводит вторую
+     * (см. docs/FIREBASE.md, «Повтор без двойников»). Текст неотправленного отправитель
+     * не приносит заново — он берётся из ящика (`backend/outbox.ts`) по `message.messageId`.
+     */
+    retryMessage(request: MemberAddress & { message: MessageRef }): Promise<{ message: Message }>;
+
+    /**
+     * Выбросить неотправленное: человек передумал. Убирает запись из ящика и из ленты
+     * этой (и только этой) вкладки. `memberId` в адресе не нужен — ящик неотправленного
+     * общий у канала, а не у участника внутри него.
+     *
+     * Границу стоит знать: у настоящего бэкенда это отказ от ожидания, а не отмена записи.
+     * Отправка в офлайне уже легла в собственную очередь Firestore (кеш на диске, см.
+     * config/firebase.ts), отменять записи оттуда SDK не умеет вовсе, и когда связь
+     * вернётся, сообщение всё-таки уйдёт и вернётся в ленту обычным message-added. Отказаться
+     * от него насовсем можно, пока связи нет; у локального бэкенда, где очереди никакой нет,
+     * — всегда. Кнопки на это в интерфейсе пока и не заведено (issue #69: метод — в контракт,
+     * значок в ленте — только повтору).
+     */
+    discardMessage(request: ChannelAddress & { message: MessageRef }): Promise<void>;
+
+    /**
      * Догрузить ленту выше уже показанного — на один экран, а не всю переписку разом
      * (см. `ChannelSnapshot.hasMoreMessages`).
      *
@@ -176,8 +214,14 @@ export interface ChannelBackend {
      * Подписка на всё, что происходит в канале. Возвращает функцию отписки.
      * События приходят и от чужих вкладок, и от собственных действий этой вкладки —
      * UI не должен угадывать, кто сделал изменение, чтобы применить его.
+     *
+     * `userId` не обязателен, но нужен, чтобы узнать в исходящем `message-updated`/
+     * `message-removed` свою же запись из ящика неотправленного, заведённую ещё до этого
+     * вызова, — например, отправленное перед самой перезагрузкой. Без него отказ и повтор
+     * такого сообщения подпиской замечены не будут (хотя в самой ленте, через getChannel,
+     * оно всё равно останется видно).
      */
-    subscribe(request: ChannelAddress & { onEvent: (event: ChannelEvent) => void }): Unsubscribe;
+    subscribe(request: ChannelAddress & { userId?: string; onEvent: (event: ChannelEvent) => void }): Unsubscribe;
 
     /**
      * Состояние связи с бэкендом — не с каналом, а с сервером вообще. Отдельно от подписки:

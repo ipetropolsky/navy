@@ -57,6 +57,14 @@ export interface ChannelController {
     /** Высадить чужой корабль. Доступно только старшему на рейде — это проверяет бэкенд. */
     kick: (memberId: string) => Promise<void>;
     sendMessage: (draft: MessageDraft) => Promise<void>;
+    /**
+     * Отправить заново то, что не ушло, — тем же messageId (см. `Message.delivery`,
+     * `ChannelBackend.retryMessage`). Молча ничего не делает вне рейда: без своего места
+     * там нет и своего неотправленного, которое можно было бы повторить.
+     */
+    retryMessage: (messageId: string) => Promise<void>;
+    /** Выбросить неотправленное — человек передумал (см. `ChannelBackend.discardMessage`). */
+    discardMessage: (messageId: string) => Promise<void>;
     /** Есть ли выше messages ещё лента — то же самое, что `ChannelSnapshot.hasMoreMessages`. */
     hasMoreMessages: boolean;
     /** Страница уже в пути: второй запрос до её прихода не нужен, а кнопку показать нечем. */
@@ -124,7 +132,7 @@ export function useChannel(
                 setMyId(null);
             }
             void backend
-                .getChannelBySlug({ slug })
+                .getChannelBySlug({ slug, userId: userId ?? undefined })
                 .then((snapshot) => {
                     if (!alive) {
                         return;
@@ -202,10 +210,40 @@ export function useChannel(
                             members: current.members.filter((item) => item.memberId !== event.member.memberId),
                         };
                     case 'message-added':
-                        // Повтор возможен, если событие придёт дважды: по id и отсекаем.
-                        return current.messages.some((message) => message.messageId === event.message.messageId)
-                            ? current
-                            : { ...current, messages: [...current.messages, event.message] };
+                        // Тот же messageId уже показан — не обязательно повтор одного и того же
+                        // события: так приходит и отправленное заново тем же id, но с другим
+                        // статусом доставки (см. retryMessage, backend/localBackend.ts —
+                        // «автоподхват при восстановлении связи»). Заменяем запись по id вместо
+                        // прежней, а не отбрасываем и не заводим вторую.
+                        return {
+                            ...current,
+                            messages: current.messages.some((message) => message.messageId === event.message.messageId)
+                                ? current.messages.map((message) =>
+                                      message.messageId === event.message.messageId ? event.message : message
+                                  )
+                                : [...current.messages, event.message],
+                        };
+                    case 'message-updated':
+                        // Статус доставки сменился (сервер подтвердил или, наоборот, не дождались,
+                        // см. Message.delivery) — запись та же самая, по messageId. Не нашлась —
+                        // тихий нет-оп, тем же способом, что и member-updated выше: событие
+                        // не про то, что сейчас показано (например, страница ленты догружена
+                        // не до него).
+                        return {
+                            ...current,
+                            messages: current.messages.map((message) =>
+                                message.messageId === event.message.messageId ? event.message : message
+                            ),
+                        };
+                    case 'message-removed':
+                        // Неотправленное выбросили (см. discardMessage) — на сервере его и не
+                        // было, показывать больше нечего.
+                        return {
+                            ...current,
+                            messages: current.messages.filter(
+                                (message) => message.messageId !== event.message.messageId
+                            ),
+                        };
                     default:
                         return current;
                 }
@@ -214,6 +252,7 @@ export function useChannel(
 
         return backend.subscribe({
             channelId,
+            userId: userId ?? undefined,
             onEvent: (event: ChannelEvent) => {
                 // Чужая реплика доехала — разыгрываем её приём: она печатается по буквам,
                 // а корабль отправителя мигает лампой (см. `useReception`). Своё не разыгрываем:
@@ -248,7 +287,7 @@ export function useChannel(
                 }
             },
         });
-    }, [channelId, receive]);
+    }, [channelId, userId, receive]);
 
     // Корабль вышел (например, из другой вкладки) — эта вкладка возвращается к постановке в строй.
     useEffect(() => {
@@ -321,6 +360,24 @@ export function useChannel(
         [channelId, myId]
     );
 
+    const retryMessage = useCallback(
+        async (messageId: string) => {
+            if (channelId && myId) {
+                await backend.retryMessage({ channelId, memberId: myId, message: { messageId } });
+            }
+        },
+        [channelId, myId]
+    );
+
+    const discardMessage = useCallback(
+        async (messageId: string) => {
+            if (channelId) {
+                await backend.discardMessage({ channelId, message: { messageId } });
+            }
+        },
+        [channelId]
+    );
+
     /**
      * Догрузить страницу выше показанного. Читает канал и признак хвоста через shownRef,
      * а не через channel/channelId из замыкания: тогда колбэк не пересобирается на каждый
@@ -367,6 +424,8 @@ export function useChannel(
         leave,
         kick,
         sendMessage,
+        retryMessage,
+        discardMessage,
         hasMoreMessages: channel?.hasMoreMessages ?? false,
         loadingOlder,
         loadOlder,

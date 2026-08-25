@@ -135,8 +135,13 @@ const FADE_MS = 600 / TIME_SCALE + 100;
  * Спросить о нём саму страницу (`getAnimations`) не выходит — к этому мигу переход может ещё
  * не начаться, и тогда ждать нечего; по прозрачности слоёв тоже не понять — облака и на
  * проступившей сцене стоят полупрозрачными, такими они и нарисованы.
+ *
+ * Экспортирован ради проверок, которым нужна настоящая перезагрузка вкладки (`page.reload`,
+ * а не переход по адресу) — например, что набранное, но не отправленное, переживает её
+ * (issue #69, ящик неотправленного в sessionStorage). `openChannel`/`openNewChannel` внизу
+ * пользуются им же, тем же самым признаком готовности, а не своим.
  */
-const sceneReady = async (page: Page): Promise<void> => {
+export const sceneReady = async (page: Page): Promise<void> => {
     await page.locator('[data-scene-painted][data-scene-ready]').first().waitFor({ timeout: 3_000 });
     await page.waitForTimeout(FADE_MS);
 };

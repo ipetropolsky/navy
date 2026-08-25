@@ -38,6 +38,28 @@ const fakeStorage = {
 };
 
 /**
+ * Ящик неотправленного (backend/outbox.ts) лежит в sessionStorage — своя карта, отдельная
+ * от shelf выше: у вкладки своя память, общей на все бэкенды здесь ей быть незачем. Полнее
+ * localStorage-подложки (с length/key): discardOutboxMessage и автоподхват при связи
+ * (см. localBackend.ts) перебирают ключи, а не читают по одному известному.
+ */
+const sessionShelf = new Map<string, string>();
+
+const fakeSessionStorage = {
+    getItem: (key: string): string | null => sessionShelf.get(key) ?? null,
+    setItem: (key: string, value: string): void => {
+        sessionShelf.set(key, value);
+    },
+    removeItem: (key: string): void => {
+        sessionShelf.delete(key);
+    },
+    get length(): number {
+        return sessionShelf.size;
+    },
+    key: (index: number): string | null => [...sessionShelf.keys()][index] ?? null,
+};
+
+/**
  * Провод между вкладками. Настоящий `BroadcastChannel` в node есть, но своё же сообщение
  * он доставляет не сразу, и проверке пришлось бы ждать неизвестно сколько. Свой провод
  * доставляет его тем же тиком: очередь событий у эмулятора всё равно своя, а проверять
@@ -145,14 +167,30 @@ const sendMany = async (
     return sent;
 };
 
+/**
+ * Дождаться, пока опустеет очередь микрозадач. Автоподхват при связи (watchOnlineStatus
+ * в localBackend.ts) запускает flushPending синхронно, но сама запись идёт через mutate() —
+ * то есть уже отложенно, микрозадачей (см. exclusive() в localBackend.ts: без настоящего
+ * navigator.locks там `Promise.resolve().then(run)`). Между концом конструктора бэкенда
+ * и следующей строкой проверки эта микрозадача ещё не успевает выполниться, и чтение
+ * состояния тут же после перезагрузки застало бы старое.
+ *
+ * Настоящий setTimeout, а не подложные часы окна: микрозадачи опустошаются дочиста
+ * перед всяким макрозаданием, даже нулевым таймером, — это правило цикла событий JS,
+ * а не везение.
+ */
+const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+
 beforeEach(() => {
     shelf.clear();
+    sessionShelf.clear();
     wires.clear();
     // Проверки идут в node, а бэкенд живёт в браузере: подставляем ему хранилище, часы
     // и провод. Больше ему от окна ничего не нужно — замка (`navigator.locks`) тут нет,
     // и он обходится без очереди, как и в старом браузере.
     (globalThis as unknown as { window: unknown }).window = {
         localStorage: fakeStorage,
+        sessionStorage: fakeSessionStorage,
         setTimeout: (run: () => void, ms: number) => setTimeout(run, ms),
     };
     (globalThis as unknown as { BroadcastChannel: unknown }).BroadcastChannel = TestBroadcastChannel;
@@ -161,6 +199,9 @@ beforeEach(() => {
 afterEach(() => {
     delete (globalThis as unknown as { window?: unknown }).window;
     delete (globalThis as unknown as { BroadcastChannel?: unknown }).BroadcastChannel;
+    // На случай проверки с подложным navigator (см. «статус отправки»): следующему тесту
+    // он нужен настоящим, а не оставшимся от предыдущего.
+    vi.unstubAllGlobals();
     // На случай теста с подложными часами (см. «лента страницами»): следующему тесту
     // настоящие часы нужны настоящими, а не оставшимися от предыдущего.
     vi.useRealTimers();
@@ -709,5 +750,212 @@ describe('лента страницами', () => {
         expect(page.messages.map((message) => message.messageId)).toEqual(
             sent.slice(-4, -1).map((message) => message.messageId)
         );
+    });
+});
+
+describe('статус отправки', () => {
+    test('нет связи — сообщение остаётся в ленте со значком (!), а соседняя вкладка о нём не узнаёт', async () => {
+        const backend = createLocalBackend();
+        const channelId = await freshChannel(backend, 'bez-svyazi');
+        const { member } = await backend.join({ channelId, member: draft('Тральщик', '221') });
+
+        const otherTab = createLocalBackend();
+        const seenByOther = watch(otherTab, channelId);
+
+        vi.stubGlobal('navigator', { onLine: false });
+        const { message } = await backend.sendMessage({
+            channelId,
+            memberId: member.memberId,
+            message: { text: 'Ушёл ли ты' },
+        });
+
+        // Код проверяем, текст — нет: текст — дело интерфейса (см. failsWith выше).
+        expect(message.delivery?.status).toBe('failed');
+        expect(message.delivery?.error?.code).toBe('offline');
+        expect((await messages(backend, channelId)).some((item) => item.messageId === message.messageId)).toBe(true);
+        expect(
+            seenByOther.some((event) => event.type === 'message-added' && event.message.messageId === message.messageId)
+        ).toBe(false);
+    });
+
+    test('офлайн-отправка не трогает общее состояние: текст переживает «перезагрузку вкладки»', async () => {
+        const backend = createLocalBackend();
+        const channelId = await freshChannel(backend, 'perezhivaet-perezagruzku');
+        const { member } = await backend.join({ channelId, member: draft('Буксир', '512') });
+
+        vi.stubGlobal('navigator', { onLine: false });
+        const { message } = await backend.sendMessage({
+            channelId,
+            memberId: member.memberId,
+            message: { text: 'До связи' },
+        });
+        expect(message.delivery?.status).toBe('failed');
+
+        // Новый бэкенд над тем же (подложным) хранилищем — как вкладка после перезагрузки.
+        const reloadedOffline = createLocalBackend();
+        const stillThere = (await messages(reloadedOffline, channelId)).find(
+            (item) => item.messageId === message.messageId
+        );
+        expect(stillThere?.delivery?.status).toBe('failed');
+    });
+
+    test('связь вернулась к моменту «перезагрузки» — неотправленное досылается само, без клика', async () => {
+        const backend = createLocalBackend();
+        const channelId = await freshChannel(backend, 'svyaz-k-perezagruzke');
+        const { member } = await backend.join({ channelId, member: draft('Ледокол', '901') });
+
+        vi.stubGlobal('navigator', { onLine: false });
+        const { message } = await backend.sendMessage({
+            channelId,
+            memberId: member.memberId,
+            message: { text: 'Два' },
+        });
+
+        // К моменту «перезагрузки» связь уже вернулась — новый бэкенд подхватывает
+        // осевшее в ящике сам, конструктором, без клика по значку.
+        vi.stubGlobal('navigator', { onLine: true });
+        const reloaded = createLocalBackend();
+        await settle();
+
+        const after = await messages(reloaded, channelId);
+        const found = after.find((item) => item.messageId === message.messageId);
+        expect(found).toBeDefined();
+        expect(found?.delivery).toBeUndefined();
+    });
+
+    test('связь вернулась прямо во время открытой вкладки, без перезагрузки, — тоже досылается сама', async () => {
+        vi.stubGlobal('navigator', { onLine: false });
+        // Своё окно для этой проверки, не общее из beforeEach: там window нарочно без
+        // addEventListener (см. connection.test.ts), а здесь нужно настоящее событие online.
+        const target = Object.assign(new EventTarget(), {
+            localStorage: fakeStorage,
+            sessionStorage: fakeSessionStorage,
+            setTimeout: (run: () => void, ms: number) => setTimeout(run, ms),
+        });
+        (globalThis as unknown as { window: unknown }).window = target;
+
+        const backend = createLocalBackend();
+        const channelId = await freshChannel(backend, 'vernulas-pryamo-seychas');
+        const { member } = await backend.join({ channelId, member: draft('Корвет', '333') });
+        const { message } = await backend.sendMessage({
+            channelId,
+            memberId: member.memberId,
+            message: { text: 'Жду' },
+        });
+        expect(message.delivery?.status).toBe('failed');
+
+        vi.stubGlobal('navigator', { onLine: true });
+        target.dispatchEvent(new Event('online'));
+        await settle();
+
+        const after = await messages(backend, channelId);
+        const found = after.find((item) => item.messageId === message.messageId);
+        expect(found).toBeDefined();
+        expect(found?.delivery).toBeUndefined();
+    });
+
+    test('повтор без связи — то же самое неотправленное, без изменений и без второй копии', async () => {
+        const backend = createLocalBackend();
+        const channelId = await freshChannel(backend, 'povtor-bez-svyazi');
+        const { member } = await backend.join({ channelId, member: draft('Землечерпалка', '804') });
+
+        vi.stubGlobal('navigator', { onLine: false });
+        const { message } = await backend.sendMessage({
+            channelId,
+            memberId: member.memberId,
+            message: { text: 'Раз' },
+        });
+
+        const { message: retried } = await backend.retryMessage({
+            channelId,
+            memberId: member.memberId,
+            message: { messageId: message.messageId },
+        });
+
+        expect(retried).toEqual(message);
+        expect(
+            (await messages(backend, channelId)).filter((item) => item.messageId === message.messageId)
+        ).toHaveLength(1);
+    });
+
+    test('повтор, когда связь уже есть, — сообщение уходит; два клика подряд не плодят двойника', async () => {
+        const backend = createLocalBackend();
+        const channelId = await freshChannel(backend, 'povtor-so-svyazyu');
+        const { member } = await backend.join({ channelId, member: draft('Ледокол', '552') });
+
+        vi.stubGlobal('navigator', { onLine: false });
+        const { message } = await backend.sendMessage({
+            channelId,
+            memberId: member.memberId,
+            message: { text: 'Два' },
+        });
+
+        vi.stubGlobal('navigator', { onLine: true });
+        const request = { channelId, memberId: member.memberId, message: { messageId: message.messageId } };
+        // Не дожидаясь друг друга нарочно: тот самый двойной клик, для которого и нужна
+        // проверка «уже записано» внутри mutate() (см. flushPending в localBackend.ts).
+        const [firstResult, secondResult] = await Promise.all([
+            backend.retryMessage(request),
+            backend.retryMessage(request),
+        ]);
+
+        expect(firstResult.message.delivery).toBeUndefined();
+        expect(secondResult.message.delivery).toBeUndefined();
+        const stored = await messages(backend, channelId);
+        expect(stored.filter((item) => item.messageId === message.messageId)).toHaveLength(1);
+    });
+
+    test('retryMessage для незнакомого сообщения — отказ unknown, а не выдумка', async () => {
+        const backend = createLocalBackend();
+        const channelId = await freshChannel(backend, 'net-v-yashchike');
+        const { member } = await backend.join({ channelId, member: draft('Шлюп', '446') });
+
+        await failsWith(
+            () =>
+                backend.retryMessage({
+                    channelId,
+                    memberId: member.memberId,
+                    message: { messageId: 'net-takogo-soobshcheniya' },
+                }),
+            'unknown'
+        );
+    });
+
+    test('discardMessage выбрасывает неотправленное из ленты и из ящика — насовсем', async () => {
+        const backend = createLocalBackend();
+        const channelId = await freshChannel(backend, 'peredumal');
+        const { member } = await backend.join({ channelId, member: draft('Сейнер', '117') });
+
+        vi.stubGlobal('navigator', { onLine: false });
+        const { message } = await backend.sendMessage({
+            channelId,
+            memberId: member.memberId,
+            message: { text: 'Не надо' },
+        });
+        expect((await messages(backend, channelId)).some((item) => item.messageId === message.messageId)).toBe(true);
+
+        await backend.discardMessage({ channelId, message: { messageId: message.messageId } });
+        expect((await messages(backend, channelId)).some((item) => item.messageId === message.messageId)).toBe(false);
+
+        // Выброшенное не воскресает и связью: раз человек передумал, повторной попытки
+        // больше нет, даже когда автоподхват мог бы её найти.
+        vi.stubGlobal('navigator', { onLine: true });
+        const reloaded = createLocalBackend();
+        await settle();
+        expect((await messages(reloaded, channelId)).some((item) => item.messageId === message.messageId)).toBe(false);
+    });
+
+    test('онлайновая отправка уважает messageId черновика — тот же приём, что и у Firebase-бэкенда', async () => {
+        const backend = createLocalBackend();
+        const channelId = await freshChannel(backend, 'svoy-messageid');
+        const { member } = await backend.join({ channelId, member: draft('Фрегат', '733') });
+
+        const { message } = await backend.sendMessage({
+            channelId,
+            memberId: member.memberId,
+            message: { text: 'Раз', messageId: 'svoy-id-42' },
+        });
+
+        expect(message.messageId).toBe('svoy-id-42');
     });
 });

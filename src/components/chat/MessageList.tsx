@@ -33,6 +33,12 @@ interface MessageListProps {
      * в котором корабль и надо было увидеть, — и открывают её из списка на связи.
      */
     onHail: (memberId: string) => void;
+    /**
+     * Отправить своё сообщение заново — по клику на значок (!) у не ушедшего (см.
+     * `Message.delivery`, `ChannelController.retryMessage`, docs/FIREBASE.md «Статус
+     * отправки»).
+     */
+    onRetry: (messageId: string) => void;
     /** Есть ли выше messages ещё лента — то же самое, что `ChannelController.hasMoreMessages`. */
     hasMoreMessages: boolean;
     /** Страница уже в пути: пока идёт, вместо даты наверху стоит «Загрузка…». */
@@ -58,6 +64,7 @@ function MessageList({
     myId,
     onReply,
     onHail,
+    onRetry,
     hasMoreMessages,
     loadingOlder,
     onLoadOlder,
@@ -414,6 +421,15 @@ function MessageList({
                         : { own: styles.bubbleOwn, other: styles.bubble };
 
                     /*
+                     * Статус доставки — только у своей же реплики: служебная запись пишется
+                     * сервером напрямую и через ящик неотправленного не проходит никогда,
+                     * а у чужой реплики delivery не бывает подавно — это её собственный статус
+                     * у отправителя, не то, что видно со стороны (см. Message.delivery,
+                     * backend/outbox.ts).
+                     */
+                    const delivery = !system && own ? message.delivery : undefined;
+
+                    /*
                      * Позывной у служебной строчки стоит всегда — и у своей, и у второй подряд
                      * в цепочке. Фраза в ней безличная («Сменил позывной»), и без имени над ней
                      * непонятно, кто сменил; у реплики такой беды нет — там кто говорит, видно
@@ -481,6 +497,36 @@ function MessageList({
                                  */}
                                 <span className={styles.text}>
                                     <MessageBody message={message} />
+                                    {delivery?.status === 'pending' && (
+                                        <span
+                                            className={styles.deliveryPending}
+                                            role="status"
+                                            aria-label="Отправляется"
+                                            title="Отправляется"
+                                        />
+                                    )}
+                                    {delivery?.status === 'failed' && (
+                                        <button
+                                            type="button"
+                                            className={styles.deliveryFailed}
+                                            aria-label="Не отправлено. Нажмите, чтобы отправить снова"
+                                            title={
+                                                delivery.error?.message ??
+                                                'Не отправлено. Нажмите, чтобы отправить снова'
+                                            }
+                                            // Тот же приём, что и у вымпела над служебной строчкой
+                                            // (см. pennantButton выше): нажатие по значку — про сам
+                                            // значок, а не про ответ на сообщение, которым отвечает
+                                            // вся плашка.
+                                            onPointerDown={(event) => event.stopPropagation()}
+                                            onClick={(event) => {
+                                                event.stopPropagation();
+                                                onRetry(message.messageId);
+                                            }}
+                                        >
+                                            !
+                                        </button>
+                                    )}
                                     <span className={styles.time}>{formatTime(message.sentAt)}</span>
                                 </span>
                             </div>

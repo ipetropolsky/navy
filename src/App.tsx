@@ -614,11 +614,27 @@ export default function App() {
     }, [channel, reception]);
 
     const handleSend = (text: string) => {
-        // Отказ показываем снекбаром: у бэкенда для него уже есть человеческий текст,
-        // а молча проглотить его нельзя — человек решит, что сообщение ушло.
+        // Ответ снимаем сразу, не дожидаясь бэкенда: сообщение уже видно в ленте — крутилкой
+        // или сразу значком (!), смотря по тому, есть ли связь (см. Message.delivery,
+        // MessageList) — и держать шторку ответа открытой до подтверждения сервера незачем.
+        setReplyTo(null);
+        // Снекбаром показываем только то, что бэкенд бросает исключением, — длину или подобную
+        // проверку до попытки записи. Отказ сети или сервера сюда больше не долетает: такое
+        // сообщение возвращается обычным ответом, просто со status: 'failed' в delivery,
+        // и в ленте у него свой значок (!) с повтором по клику, а не снекбар.
         void channelState
             .sendMessage({ text, thread: replyTo ? { messageId: replyTo.messageId } : undefined })
-            .then(() => setReplyTo(null))
+            .catch((failure: unknown) =>
+                notify(failure instanceof ChannelError ? failure.message : 'Не вышло отправить')
+            );
+    };
+
+    // Клик по значку (!) в ленте — отправить снова тем же messageId (см. MessageList,
+    // Message.delivery). Отказ здесь редкий — почти всегда «дошло само» между значком и кликом
+    // (retryMessage это и проверяет), — но снекбаром, как и у всего остального, а не молча.
+    const handleRetryMessage = (messageId: string) => {
+        void channelState
+            .retryMessage(messageId)
             .catch((failure: unknown) =>
                 notify(failure instanceof ChannelError ? failure.message : 'Не вышло отправить')
             );
@@ -887,6 +903,7 @@ export default function App() {
                         myId={me.memberId}
                         onReply={setReplyTo}
                         onHail={handleHail}
+                        onRetry={handleRetryMessage}
                         hasMoreMessages={hasMoreMessages}
                         loadingOlder={loadingOlder}
                         onLoadOlder={() => void loadOlder()}
