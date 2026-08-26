@@ -1,5 +1,8 @@
 node_modules
 build
+# Сборка с бэкендом Firebase для test:e2e:firebase — отдельная папка нарочно,
+# см. playwright.firebase.config.ts.
+build-firebase
 .idea
 .local
 

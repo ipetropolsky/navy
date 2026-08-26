@@ -73,6 +73,21 @@ export interface ChannelController {
     loadOlder: () => Promise<void>;
 }
 
+/**
+ * Поставить участника в снимок канала: тот же memberId — заменить, новый — дописать.
+ *
+ * Не просто «дописать в конец», потому что один и тот же участник приходит сюда дважды.
+ * Первый раз — своим же входом (`join` ниже кладёт в снимок ответ сервера сразу, не дожидаясь
+ * подписки), второй — событием `member-joined`, когда подписка донесёт ту же запись обратно.
+ * Дописывай мы вслепую — на рейде стояло бы два своих корабля на одной точке.
+ */
+const withMember = (snapshot: ChannelSnapshot, member: Member): ChannelSnapshot => ({
+    ...snapshot,
+    members: snapshot.members.some((item) => item.memberId === member.memberId)
+        ? snapshot.members.map((item) => (item.memberId === member.memberId ? member : item))
+        : [...snapshot.members, member],
+});
+
 export function useChannel(
     slug: string | null,
     memberIdFromUrl: string | null,
@@ -196,7 +211,7 @@ export function useChannel(
                     case 'channel-updated':
                         return { ...current, channel: event.channel };
                     case 'member-joined':
-                        return { ...current, members: [...current.members, event.member] };
+                        return withMember(current, event.member);
                     case 'member-updated':
                         return {
                             ...current,
@@ -316,6 +331,20 @@ export function useChannel(
             const { member } = await backend.join({ channelId, member: draft });
             rememberMemberId(channelId, member.memberId);
             keepLook(member);
+            // Свой корабль ставим в снимок сами, а не ждём, пока подписка пришлёт его обратно.
+            // Догадки тут нет: `member` — это ответ сервера, ровно та же запись, что придёт
+            // событием `member-joined` (и `withMember` её там не задвоит).
+            //
+            // Ждать нельзя. У местного бэкенда событие уходит до возврата из `join`, и обе
+            // правки состояния попадают в один проход React; у Firebase ответ приходит вызовом
+            // функции, а событие — отдельной задачей от подписки Firestore, уже после. В этом
+            // зазоре эффект «корабль вышел» (ниже) видел бы myId, которого нет среди участников,
+            // и молча сбрасывал бы его в null. Вход при этом проходил: корабль на рейде,
+            // на сервере запись, — а вкладка так и стояла с открытой формой постановки в строй,
+            // и своим корабль для неё уже не становился никогда. Замерено против эмулятора:
+            // joinChannel отвечал 200 с участником, корабль появлялся в кадре, а `shipMine`
+            // не появлялся вовсе (см. tests-firebase/e2e.spec.ts).
+            setChannel((current) => (current?.channel.channelId === channelId ? withMember(current, member) : current));
             setMyId(member.memberId);
         },
         [channelId, keepLook]

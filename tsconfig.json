@@ -28,6 +28,7 @@
       "@/*": ["./src/*"],
       "@shared/*": ["./shared/*"],
       "@tests/*": ["./tests/*"],
+      "@tests-firebase/*": ["./tests-firebase/*"],
       "~/*": ["./node_modules/*"]
     }
   },
@@ -36,6 +37,6 @@
   // каталога незачем — bundler-резолюция видит те же node_modules/functions/node_modules,
   // что и NodeNext, обычным поиском вверх по каталогам. Строгость сборки функций (что именно
   // войдёт в lib/) по-прежнему проверяет только functions/tsconfig.json через свою сборку.
-  "include": ["src", "shared", "tests", "firestore", "functions/src"],
+  "include": ["src", "shared", "tests", "tests-firebase", "firestore", "functions/src"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

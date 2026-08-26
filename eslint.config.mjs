@@ -10,7 +10,10 @@ export default [
     ...generateEslintConfig(PROJECT_TYPES.SERVICE),
     {
         // Собранные функции: lib/ вне корня общий игнор пакета не ловит — только вложенный путь.
-        ignores: ['functions/lib'],
+        // Рядом — сборка с бэкендом Firebase для test:e2e:firebase: общий игнор знает про
+        // `build`, но не про эту папку, и без неё линтер идёт разбирать сжатый бандл
+        // и выдаёт шестнадцать тысяч замечаний к чужому коду (см. playwright.firebase.config.ts).
+        ignores: ['functions/lib', 'build-firebase'],
     },
     {
         // shared/ и functions/src собирает обычный tsc, без бандлера, — а алиасы из tsconfig

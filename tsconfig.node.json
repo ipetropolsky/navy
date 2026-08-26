@@ -16,7 +16,15 @@
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "noFallthroughCasesInSwitch": true
+    "noFallthroughCasesInSwitch": true,
+
+    // tools/ идёт в дело через tsx (esbuild), а не через отдельную сборку в lib/, как
+    // functions/src, — алиас у него на выходе не теряется, и того же алиаса, что в tsconfig.json,
+    // достаточно, чтобы tools/seed-firestore.ts мог взять геометрию и модель из shared/,
+    // не заводя второй раз те же типы копией через относительный путь.
+    "paths": {
+      "@shared/*": ["./shared/*"]
+    }
   },
   "include": ["*.ts", "tools/**/*.ts"]
 }
