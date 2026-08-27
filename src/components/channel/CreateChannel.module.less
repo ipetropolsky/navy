@@ -1,3 +1,20 @@
 .demoLink {
     color: var(--color-accent);
 }
+
+// Приписка о вошедшем: строкой ниже демо-ссылки и тише её. Своя строка, а не хвост той же:
+// про демо и про себя — разное, и вместе они читаются как одно длинное предложение.
+.account {
+    display: block;
+    margin-top: 4px;
+}
+
+// Выход — кнопка, но выглядит ссылкой: действие редкое и по важности не ровня «Создать канал».
+.signOut {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--color-accent);
+    font: inherit;
+    cursor: pointer;
+}

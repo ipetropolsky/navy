@@ -804,6 +804,22 @@
     text-shadow: 0 1px 6px rgba(0, 0, 0, 0.7);
 }
 
+// Полоска «нет связи»: та же одёжка, что у заголовка со статусом рядом (текст лежит прямо
+// на воде, без подложки — небо и так тёмное), только предупреждающим цветом и своей строкой
+// сверху, а не взамен названия канала — оно должно остаться на месте и без связи.
+.connectionStrip {
+    display: block;
+    max-width: 100%;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    margin-bottom: 2px;
+    color: var(--color-danger);
+    font-size: var(--font-size-base);
+    font-weight: 500;
+    text-shadow: 0 1px 6px rgba(0, 0, 0, 0.7);
+}
+
 // Кнопки шапки стоят вплотную: между ними отступа нет, потому что это один блок действий.
 .headerActions {
     flex: none;

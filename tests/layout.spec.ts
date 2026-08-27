@@ -1,6 +1,5 @@
 import { Page, expect } from '@playwright/test';
 
-import { EDGE_MARGIN } from '@/backend/placement';
 import {
     CHAT_GRIP,
     CHAT_OVERLAP,
@@ -16,8 +15,9 @@ import {
     SHEET_WIDTH,
     SIDE_MIN_WIDTH,
 } from '@/config/layout';
-import { MAX_MESSAGE_LENGTH, SLOT_COUNT, slotDepth, slotShare } from '@/types/channel';
 import { FLING_MS, MAGNET_GIVE } from '@/utils/magnet';
+import { EDGE_MARGIN } from '@shared/placement';
+import { MAX_MESSAGE_LENGTH, SLOT_COUNT, slotDepth, slotShare } from '@shared/types/channel';
 
 import {
     ALBATROS,

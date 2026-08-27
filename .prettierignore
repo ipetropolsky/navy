@@ -1,3 +1,8 @@
 build
+# Сборка с бэкендом Firebase для test:e2e:firebase — см. playwright.firebase.config.ts.
+build-firebase
 node_modules
 package-lock.json
+
+# Навыки поставляются готовыми и форматируются не нами.
+.agents

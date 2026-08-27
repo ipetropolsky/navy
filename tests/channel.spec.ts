@@ -1,5 +1,7 @@
 import { Locator, Page, expect } from '@playwright/test';
 
+import { MESSAGE_PAGE } from '@/config/network';
+
 import {
     ALBATROS,
     DEMO,
@@ -719,8 +721,9 @@ test('уходит последний участник — рейд остаёт
  * Свои реплики — исключение, и единственное: отправить сообщение и не увидеть его нельзя.
  */
 // Сама лента, а не список кораблей: имя класса у обеих одно и то же (.list в своём модуле),
-// поэтому берём её через плашку с датой — та бывает только в ленте и лежит прямо в ней.
-const listBox = (page: Page) => page.locator('[class*="dateChip"]').locator('xpath=..');
+// поэтому берём её через плашку с датой — та бывает только в ленте. До самой прокручиваемой
+// коробки от неё две ступени вверх: плашка лежит в строчках (.rows), а те — уже в ленте (.list).
+const listBox = (page: Page) => page.locator('[class*="dateChip"]').locator('xpath=../..');
 
 const scrollState = (page: Page): Promise<{ top: number; bottom: number }> =>
     listBox(page).evaluate((node) => ({
@@ -799,6 +802,135 @@ test('лента держится низа при смене раскладки'
     await expect
         .poll(async () => (await scrollState(mine)).bottom, { message: 'после переезда лента отцепилась от низа' })
         .toBeLessThan(24);
+});
+
+/**
+ * Длинный разговор для проверок догрузки: без него негде проверить, что открытая с наскока
+ * лента показывает только хвост и подтягивает остаток по прокрутке (см. MESSAGE_PAGE).
+ *
+ * Кладём его сразу в хранилище, а не через форму: отправка спит между репликами (LATENCY_MS
+ * в localBackend), и несколько сотен через неё складывались бы в лишние секунды каждого
+ * прогона. Хранилище — тот же JSON, каким приложение само обменивается между вкладками
+ * (см. readState выше): проверка лишь раскладывает его заранее, а не в обход контракта.
+ *
+ * Все реплики — от одного участника, он же открывает канал: кто там говорит, для страниц
+ * не важно, а заводить второго ради этого — лишняя сущность в разметке.
+ */
+const HISTORY_CHANNEL_ID = 'ch-long-talk';
+const HISTORY_SLUG = 'long-talk';
+const HISTORY_MEMBER_ID = 'm-diarist';
+
+const seedHistory = async (page: Page, count: number): Promise<void> => {
+    // Не StoredState: тот тип для чтения (см. readState) и не знает title/createdAt канала —
+    // без них разбор хранилища выбрасывает канал целиком (см. isChannel в migrate.ts).
+    const state = {
+        version: 15, // STORAGE_VERSION в localBackend.ts: форма та же, шаг миграции не нужен
+        channels: {
+            [HISTORY_CHANNEL_ID]: {
+                channel: {
+                    channelId: HISTORY_CHANNEL_ID,
+                    slug: HISTORY_SLUG,
+                    title: 'Долгая вахта',
+                    createdAt: 0,
+                },
+                members: [
+                    {
+                        memberId: HISTORY_MEMBER_ID,
+                        name: 'Летописец',
+                        hullNumber: '100',
+                        shipKind: 'pr1234',
+                        place: { slot: 0, corridor: 'center', left: 50, facing: 'left', enterFrom: 'left' },
+                    },
+                ],
+                messages: [...Array(count).keys()].map((index) => ({
+                    messageId: `msg-${index}`,
+                    author: { memberId: HISTORY_MEMBER_ID },
+                    // Точка после числа: без неё «Запись номер 1» — подстрока «Запись номер 100»,
+                    // и метка ниже находила бы не то сообщение.
+                    text: `Запись номер ${index}.`,
+                    sentAt: index * 60_000,
+                })),
+            },
+        },
+    };
+    await page.addInitScript((seeded) => {
+        // eslint-disable-next-line no-restricted-syntax -- та же прямая запись, что и читающий её readState выше
+        localStorage.setItem('kilvater.state', JSON.stringify(seeded));
+    }, state);
+};
+
+test('долгий разговор открывается одной страницей, а верх подгружается по прокрутке', async ({ page }) => {
+    takes(4);
+    const total = MESSAGE_PAGE * 2 + 20;
+    await seedHistory(page, total);
+    await openChannel(page, HISTORY_SLUG, HISTORY_MEMBER_ID);
+
+    // С наскока видна только последняя страница — не весь разговор разом.
+    await expect(bubbles(page)).toHaveCount(MESSAGE_PAGE);
+
+    // Домотка до упора и есть сигнал «догрузить ещё»: после вставки видимое место остаётся
+    // у самого верха (см. правку в MessageList.tsx), и следующая прокрутка к нулю снова его
+    // застаёт — цикл идёт сам, пока страниц не кончится. Предел кругов — только защита
+    // от зависшей проверки, если бы догрузка когда-нибудь перестала отвечать.
+    const maxRounds = Math.ceil(total / MESSAGE_PAGE) + 2;
+    for (let round = 0; round < maxRounds; round += 1) {
+        // eslint-disable-next-line no-await-in-loop -- каждый круг ждёт итога предыдущей догрузки
+        const before = await bubbles(page).count();
+        if (before >= total) {
+            break;
+        }
+        // eslint-disable-next-line no-await-in-loop
+        await listBox(page).evaluate((node) => {
+            node.scrollTop = 0;
+        });
+        // eslint-disable-next-line no-await-in-loop
+        await expect
+            .poll(async () => bubbles(page).count(), { message: `догрузка застряла на ${before}` })
+            .toBeGreaterThan(before);
+    }
+
+    await expect(bubbles(page)).toHaveCount(total);
+    // Самое старое сообщение дошло — цепочка догрузок не потеряла и не задвоила ни одной страницы.
+    await expect(bubbles(page).first()).toContainText('Запись номер 0.');
+});
+
+test('подгрузка старой страницы не двигает то, что уже видно (замер)', async ({ page }) => {
+    takes(4);
+    const total = MESSAGE_PAGE * 2;
+    await seedHistory(page, total);
+    await openChannel(page, HISTORY_SLUG, HISTORY_MEMBER_ID);
+    await expect(bubbles(page)).toHaveCount(MESSAGE_PAGE);
+
+    // Помеченное — самое верхнее из уже показанного и первое, что уехало бы, не досчитай
+    // поправка высоту вставленной сверху сотни (см. lastHeightRef в MessageList.tsx).
+    const markText = `Запись номер ${total - MESSAGE_PAGE}.`;
+    const marked = bubbles(page).filter({ hasText: markText });
+    await expect(marked).toHaveCount(1);
+
+    // Прокрутка и замер «до» — один синхронный вызов страницы: scrollTop меняет раскладку
+    // немедленно, а 'scroll', которое будит догрузку, приходит отдельным тиком. Раздельные
+    // обращения рисковали бы поймать место уже после того, как оно тронулось.
+    const before = await page.evaluate((text) => {
+        const rows = document.querySelector('[class*="dateChip"]')?.parentElement;
+        const list = rows?.parentElement;
+        if (!list) {
+            return null;
+        }
+        list.scrollTop = 0;
+        const marker = [...document.querySelectorAll('[class*="bubble"]')].find((node) =>
+            node.textContent?.includes(text)
+        );
+        return marker?.getBoundingClientRect().top ?? null;
+    }, markText);
+    expect(before, 'помеченное сообщение не нашлось до догрузки').not.toBeNull();
+
+    await expect(bubbles(page)).toHaveCount(total);
+
+    const after = await marked.evaluate((node) => node.getBoundingClientRect().top);
+    const jumpPx = Math.abs(after - (before ?? 0));
+    // eslint-disable-next-line no-console -- число из задачи: замер, а не впечатление
+    console.log(`[замер] сдвиг видимого сообщения при догрузке верхней страницы — ${jumpPx.toFixed(1)}px`);
+    expect(jumpPx, 'видимое сообщение сдвинулось при догрузке верхней страницы').toBeLessThan(2);
 });
 
 /**

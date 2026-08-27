@@ -1,6 +1,6 @@
 import { useState } from 'react';
 
-import { ChannelDraft, ChannelError } from '@/backend';
+import { Account, ChannelDraft, ChannelError } from '@/backend';
 import Button from '@/components/ui/Button';
 import Field from '@/components/ui/Field';
 import IconButton from '@/components/ui/IconButton';
@@ -10,18 +10,12 @@ import { useSnackbar } from '@/components/ui/Snackbar';
 import { LinkIcon } from '@/components/ui/icons';
 import { channelLink } from '@/routing';
 import { copyText } from '@/utils/clipboard';
-import { limitMessage, overLimit } from '@/utils/limit';
 import { SLUG_MAX_LENGTH, isValidSlug, slugify, slugifyInput } from '@/utils/slug';
 import { isTouch } from '@/utils/viewport';
+import { TITLE_MAX_LENGTH } from '@shared/types/channel';
+import { limitMessage, overLimit } from '@shared/utils/limit';
 
 import styles from './CreateChannel.module.less';
-
-/**
- * Предел длины названия канала. Оно стоит в шапке одной строкой, и длинное там всё равно
- * не помещается. Мягкий, как и все пределы: набранное сверх него не обрезается, а поле
- * краснеет и отвечает снекбаром (см. `@/utils/limit`).
- */
-const TITLE_MAX_LENGTH = 40;
 
 interface CreateChannelProps {
     onCreate: (draft: ChannelDraft) => Promise<void>;
@@ -29,13 +23,16 @@ interface CreateChannelProps {
     demoHref: string;
     /** Переход в демо без перезагрузки страницы. */
     onOpenDemo: () => void;
+    /** Кто вошёл. Показывается мелко и только ему самому — в канале за человека говорит корабль. */
+    account: Account | null;
+    onSignOut: () => void;
 }
 
 /**
  * Главная сервиса: канал ещё не выбран, поэтому в море пусто — кораблей нет.
  * Отсюда два хода: завести свой канал связи или заглянуть в демо.
  */
-export default function CreateChannel({ onCreate, demoHref, onOpenDemo }: CreateChannelProps) {
+export default function CreateChannel({ onCreate, demoHref, onOpenDemo, account, onSignOut }: CreateChannelProps) {
     const [title, setTitle] = useState('');
     // Адрес предлагаем из названия, но как только его правят руками, перестаём перебивать:
     // человек знает, чего хочет, а название он может ещё десять раз поменять.
@@ -72,7 +69,7 @@ export default function CreateChannel({ onCreate, demoHref, onOpenDemo }: Create
             return;
         }
         // Перебор длины кнопку не гасит: недоступная кнопка молчит, а тут надо сказать,
-        // насколько перебрали. Правило и слова общие со строкой сообщения (`@/utils/limit`).
+        // насколько перебрали. Правило и слова общие со строкой сообщения (`@shared/utils/limit`).
         if (overLimit(title, TITLE_MAX_LENGTH)) {
             notify(limitMessage(title, TITLE_MAX_LENGTH));
             return;
@@ -119,6 +116,16 @@ export default function CreateChannel({ onCreate, demoHref, onOpenDemo }: Create
                     >
                         демо-канал
                     </a>
+                    {/* Кто вошёл — приписка, а не заголовок: имя и почта нужны здесь только
+                        для того, чтобы человек убедился, что он это он, и мог выйти. */}
+                    {account && (
+                        <span className={styles.account}>
+                            {`Вы вошли как ${account.name ?? account.email ?? 'моряк'}. `}
+                            <button type="button" className={styles.signOut} onClick={onSignOut}>
+                                Выйти
+                            </button>
+                        </span>
+                    )}
                 </>
             }
         >

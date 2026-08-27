@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 
 import { Box, ShipTarget, hullSpot, shipAt, tapArea } from '@/components/SeaScene/shipPick';
-import { HULL_CENTER } from '@/types/channel';
+import { HULL_CENTER } from '@shared/types/channel';
 
 /**
  * Нажатия по кораблям. Руками эту механику не проверить: на экране видно только то, что

@@ -1,7 +1,20 @@
 node_modules
 build
+# Сборка с бэкендом Firebase для test:e2e:firebase — отдельная папка нарочно,
+# см. playwright.firebase.config.ts.
+build-firebase
 .idea
 .local
+
+# Собранные функции: firebase deploy пересобирает сам, в репозиторий не едут.
+functions/lib
+
+# Кеш инкрементальной сборки tsc: пишется в корень при каждой проверке типов.
+*.tsbuildinfo
+
+# Настройки подключения к Firebase: у каждого свои, в репозиторий не едут.
+.env.local
+.env.*.local
 
 .claude/cache
 .claude/settings.local.json
@@ -9,3 +22,8 @@ build
 test-results
 playwright-report
 __pycache__/
+
+# Следы эмуляторов: пишутся в корень при каждом запуске, у каждого свои.
+firebase-debug.log
+firestore-debug.log
+ui-debug.log

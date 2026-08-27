@@ -1,8 +1,8 @@
 import { Locator, Page, expect } from '@playwright/test';
 
-import { Anchored, EDGE_MARGIN, restingDrift, restingYaw } from '@/backend/placement';
 import { SHIP_TAP_MIN } from '@/config/layout';
-import { slotShare } from '@/types/channel';
+import { Anchored, EDGE_MARGIN, restingDrift, restingYaw } from '@shared/placement';
+import { slotShare } from '@shared/types/channel';
 
 import {
     ALBATROS,

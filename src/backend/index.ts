@@ -1,11 +1,30 @@
+import { firestore, functions, isFirebaseConfigured } from '@/config/firebase';
+
+import { Entrance, createFirebaseEntrance, createLocalEntrance } from '@/backend/auth';
+import { createFirebaseBackend } from '@/backend/firebaseBackend';
 import { createLocalBackend } from '@/backend/localBackend';
 import { ChannelBackend } from '@/backend/types';
 
 /**
- * Единственная точка, где приложение выбирает реализацию бэкенда. Всё остальное
- * работает с типом ChannelBackend, поэтому подмена на FirebaseBackend — правка этой строки.
+ * Единственная точка, где приложение выбирает, с чем разговаривать. Всё остальное работает
+ * с типами `ChannelBackend` и `Entrance`, поэтому подмена — правка этих строк.
+ *
+ * Выбор — переменная сборки `VITE_BACKEND`, и он не слепой: настроек Firebase может
+ * не оказаться (свежая копия репозитория, чужая ветка, забытый `.env.local`), и тогда
+ * приложение работает на эмуляторе, а не встречает человека пустым экраном.
  */
-export const backend: ChannelBackend = createLocalBackend();
+const wanted = import.meta.env.VITE_BACKEND ?? 'local';
+const onFirebase = wanted === 'firebase' && isFirebaseConfigured();
+
+/** Данные канала: канал, участники и лента — всё уже в Firestore, рейдом распоряжаются функции. */
+export const backend: ChannelBackend = onFirebase
+    ? createFirebaseBackend({ db: firestore(), functions: functions() })
+    : createLocalBackend();
+
+/** Вход. Настоящий — через аккаунт; понарошку — когда за данными стоит эмулятор. */
+export const entrance: Entrance = onFirebase ? createFirebaseEntrance() : createLocalEntrance();
+
+export type { Account, AuthState, Entrance } from '@/backend/auth';
 
 export * from '@/backend/types';
 
@@ -21,5 +40,5 @@ export * from '@/backend/types';
  * модулям, и рано или поздно расстановка пустила бы на линию пару, которую сцена развести
  * не сумеет.
  */
-export { freeBerths, fleetLefts, restingDrift, restingLeft, restingYaw, suggestBerth } from '@/backend/placement';
-export type { Anchored } from '@/backend/placement';
+export { freeBerths, fleetLefts, restingDrift, restingLeft, restingYaw, suggestBerth } from '@shared/placement';
+export type { Anchored } from '@shared/placement';

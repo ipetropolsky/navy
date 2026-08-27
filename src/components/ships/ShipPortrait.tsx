@@ -1,5 +1,13 @@
-import { MorseFeed, SHIP_KINDS, SHIP_KIND_LABELS, SHIP_SPECS, ShipKind, Side, shipSizeShare } from '@/types/channel';
 import { plural } from '@/utils/plural';
+import {
+    MorseFeed,
+    SHIP_KINDS,
+    SHIP_KIND_LABELS,
+    SHIP_SPECS,
+    ShipKind,
+    Side,
+    shipSizeShare,
+} from '@shared/types/channel';
 
 import Ship from '@/components/ships/Ship';
 import { SHIP_SPRITES } from '@/components/ships/shipSprites';

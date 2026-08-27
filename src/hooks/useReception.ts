@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { paced } from '@/config/time';
-import { MorseFeed } from '@/types/channel';
+import { MorseFeed } from '@shared/types/channel';
 
 import { charDelay, receptionParts } from '@/hooks/reception';
 

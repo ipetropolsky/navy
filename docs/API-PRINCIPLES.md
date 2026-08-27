@@ -118,7 +118,7 @@ kick({ channelId, memberId, member: { memberId: targetId } });
 
 ## Что у нас уже так
 
-Контракт (`src/backend/types.ts`, `src/types/channel.ts`) приведён к этим правилам целиком:
+Контракт (`src/backend/types.ts`, `shared/types/channel.ts`) приведён к этим правилам целиком:
 
 - сущность отделена от коллекций: `ChannelSnapshot` — это `{ channel, members, messages }`;
 - у сущности один идентификатор, и в ссылке он называется так же: `member.memberId`

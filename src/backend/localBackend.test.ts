@@ -1,6 +1,8 @@
-import { afterEach, beforeEach, describe, expect, test } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
-import { MAX_COURSE_LENGTH, MAX_MESSAGE_LENGTH, Member, Message, ShipNoticeMessage } from '@/types/channel';
+import { MAX_COURSE_LENGTH, MAX_MESSAGE_LENGTH, Member, Message, ShipNoticeMessage } from '@shared/types/channel';
+
+import { MESSAGE_PAGE } from '@/config/network';
 
 import { createLocalBackend } from '@/backend/localBackend';
 import { ChannelBackend, ChannelError, ChannelEvent, MemberDraft } from '@/backend/types';
@@ -33,6 +35,28 @@ const fakeStorage = {
     removeItem: (key: string): void => {
         shelf.delete(key);
     },
+};
+
+/**
+ * Ящик неотправленного (backend/outbox.ts) лежит в sessionStorage — своя карта, отдельная
+ * от shelf выше: у вкладки своя память, общей на все бэкенды здесь ей быть незачем. Полнее
+ * localStorage-подложки (с length/key): discardOutboxMessage и автоподхват при связи
+ * (см. localBackend.ts) перебирают ключи, а не читают по одному известному.
+ */
+const sessionShelf = new Map<string, string>();
+
+const fakeSessionStorage = {
+    getItem: (key: string): string | null => sessionShelf.get(key) ?? null,
+    setItem: (key: string, value: string): void => {
+        sessionShelf.set(key, value);
+    },
+    removeItem: (key: string): void => {
+        sessionShelf.delete(key);
+    },
+    get length(): number {
+        return sessionShelf.size;
+    },
+    key: (index: number): string | null => [...sessionShelf.keys()][index] ?? null,
 };
 
 /**
@@ -121,14 +145,52 @@ const members = async (backend: ChannelBackend, channelId: string): Promise<Memb
 const ownerOf = async (backend: ChannelBackend, channelId: string): Promise<string | undefined> =>
     (await backend.getChannel({ channelId }))?.channel.owner?.memberId;
 
+/**
+ * Много сообщений подряд, для проверок страниц. Часы должны быть подложными (`vi.useFakeTimers`)
+ * ещё до вызова: `delay()` внутри бэкенда крутит настоящий `setTimeout`, и без подмены сотни
+ * сообщений шли бы по живым миллисекундам.
+ */
+const sendMany = async (
+    backend: ChannelBackend,
+    channelId: string,
+    memberId: string,
+    count: number
+): Promise<Message[]> => {
+    const sent: Message[] = [];
+    for (let i = 0; i < count; i += 1) {
+        const pending = backend.sendMessage({ channelId, memberId, message: { text: `msg-${i}` } });
+        // eslint-disable-next-line no-await-in-loop -- подложные часы двигаем ровно на одно сообщение за раз
+        await vi.advanceTimersByTimeAsync(50);
+        // eslint-disable-next-line no-await-in-loop -- отправка идёт по одной, через общую очередь бэкенда
+        sent.push((await pending).message);
+    }
+    return sent;
+};
+
+/**
+ * Дождаться, пока опустеет очередь микрозадач. Автоподхват при связи (watchOnlineStatus
+ * в localBackend.ts) запускает flushPending синхронно, но сама запись идёт через mutate() —
+ * то есть уже отложенно, микрозадачей (см. exclusive() в localBackend.ts: без настоящего
+ * navigator.locks там `Promise.resolve().then(run)`). Между концом конструктора бэкенда
+ * и следующей строкой проверки эта микрозадача ещё не успевает выполниться, и чтение
+ * состояния тут же после перезагрузки застало бы старое.
+ *
+ * Настоящий setTimeout, а не подложные часы окна: микрозадачи опустошаются дочиста
+ * перед всяким макрозаданием, даже нулевым таймером, — это правило цикла событий JS,
+ * а не везение.
+ */
+const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+
 beforeEach(() => {
     shelf.clear();
+    sessionShelf.clear();
     wires.clear();
     // Проверки идут в node, а бэкенд живёт в браузере: подставляем ему хранилище, часы
     // и провод. Больше ему от окна ничего не нужно — замка (`navigator.locks`) тут нет,
     // и он обходится без очереди, как и в старом браузере.
     (globalThis as unknown as { window: unknown }).window = {
         localStorage: fakeStorage,
+        sessionStorage: fakeSessionStorage,
         setTimeout: (run: () => void, ms: number) => setTimeout(run, ms),
     };
     (globalThis as unknown as { BroadcastChannel: unknown }).BroadcastChannel = TestBroadcastChannel;
@@ -137,6 +199,12 @@ beforeEach(() => {
 afterEach(() => {
     delete (globalThis as unknown as { window?: unknown }).window;
     delete (globalThis as unknown as { BroadcastChannel?: unknown }).BroadcastChannel;
+    // На случай проверки с подложным navigator (см. «статус отправки»): следующему тесту
+    // он нужен настоящим, а не оставшимся от предыдущего.
+    vi.unstubAllGlobals();
+    // На случай теста с подложными часами (см. «лента страницами»): следующему тесту
+    // настоящие часы нужны настоящими, а не оставшимися от предыдущего.
+    vi.useRealTimers();
 });
 
 describe('адрес канала', () => {
@@ -590,5 +658,304 @@ describe('две вкладки', () => {
 
         expect(await members(first, channelId)).toHaveLength(2);
         expect(one.member.place).not.toEqual(other.member.place);
+    });
+});
+
+describe('лента страницами', () => {
+    test('лента режется на страницы по MESSAGE_PAGE, а loadOlderMessages подряд восстанавливает её без потерь и дублей', async () => {
+        const backend = createLocalBackend();
+        const channelId = await freshChannel(backend, 'bolshaya-lenta');
+        const { member } = await backend.join({ channelId, member: draft('Связист', '007') });
+        const [joinNotice] = await messages(backend, channelId);
+
+        vi.useFakeTimers();
+        const sent = await sendMany(backend, channelId, member.memberId, MESSAGE_PAGE * 2 + 20);
+        vi.useRealTimers();
+
+        const tail = await messages(backend, channelId);
+        const tailHasMore = (await backend.getChannel({ channelId }))?.hasMoreMessages;
+        expect(tail).toHaveLength(MESSAGE_PAGE);
+        expect(tailHasMore).toBe(true);
+        expect(tail.map((message) => message.messageId)).toEqual(
+            sent.slice(-MESSAGE_PAGE).map((message) => message.messageId)
+        );
+
+        // Поднимаемся страницами до самого верха, каждый раз подставляя новую страницу
+        // перед уже собранным: так же, как это будет делать интерфейс.
+        let older: Message[] = [];
+        let before = tail[0].messageId;
+        let hasMore = tailHasMore ?? false;
+        let guard = 0;
+        while (hasMore) {
+            guard += 1;
+            // Строк отправлено ровно на три страницы — если цикл не остановился на третьей,
+            // это уже не пагинация, а зацикливание.
+            expect(guard).toBeLessThan(10);
+            // eslint-disable-next-line no-await-in-loop -- страницы поднимаются по цепочке: следующий before известен только из ответа на предыдущую
+            const page = await backend.loadOlderMessages({ channelId, before: { messageId: before } });
+            older = [...page.messages, ...older];
+            before = page.messages[0].messageId;
+            hasMore = page.hasMore;
+        }
+
+        const full = [...older, ...tail];
+        expect(full.map((message) => message.messageId)).toEqual([
+            joinNotice.messageId,
+            ...sent.map((message) => message.messageId),
+        ]);
+        expect(new Set(full.map((message) => message.messageId)).size).toBe(full.length);
+    }, 15000);
+
+    test('канал короче страницы — hasMoreMessages ложно что у getChannel, что у getChannelBySlug', async () => {
+        const backend = createLocalBackend();
+        const channelId = await freshChannel(backend, 'malenkaya-lenta');
+        const { member } = await backend.join({ channelId, member: draft('Альбатрос', '317') });
+        await backend.sendMessage({ channelId, memberId: member.memberId, message: { text: 'Раз' } });
+        await backend.sendMessage({ channelId, memberId: member.memberId, message: { text: 'Два' } });
+
+        expect((await backend.getChannel({ channelId }))?.hasMoreMessages).toBe(false);
+        expect((await backend.getChannelBySlug({ slug: 'malenkaya-lenta' }))?.hasMoreMessages).toBe(false);
+    });
+
+    test('loadOlderMessages: before не найден в ленте — пустая страница, а не отказ', async () => {
+        const backend = createLocalBackend();
+        const channelId = await freshChannel(backend, 'bez-etogo-soobshcheniya');
+        await backend.join({ channelId, member: draft('Альбатрос', '317') });
+
+        const page = await backend.loadOlderMessages({ channelId, before: { messageId: 'net-takogo-soobshcheniya' } });
+        expect(page).toEqual({ messages: [], hasMore: false });
+    });
+
+    test('loadOlderMessages: limit задаёт размер одной страницы, а не всей ленты', async () => {
+        const backend = createLocalBackend();
+        const channelId = await freshChannel(backend, 'svoy-limit');
+        const { member } = await backend.join({ channelId, member: draft('Альбатрос', '317') });
+        const sent: Message[] = [];
+        for (let i = 0; i < 10; i += 1) {
+            // eslint-disable-next-line no-await-in-loop -- десяток сообщений: без подложных часов проще ждать по одному
+            const { message } = await backend.sendMessage({
+                channelId,
+                memberId: member.memberId,
+                message: { text: `m${i}` },
+            });
+            sent.push(message);
+        }
+
+        const all = await messages(backend, channelId);
+        const before = all[all.length - 1]; // последнее из десяти отправленных
+        const page = await backend.loadOlderMessages({ channelId, before: { messageId: before.messageId }, limit: 3 });
+
+        expect(page.messages).toHaveLength(3);
+        expect(page.hasMore).toBe(true);
+        expect(page.messages.map((message) => message.messageId)).toEqual(
+            sent.slice(-4, -1).map((message) => message.messageId)
+        );
+    });
+});
+
+describe('статус отправки', () => {
+    test('нет связи — сообщение остаётся в ленте со значком (!), а соседняя вкладка о нём не узнаёт', async () => {
+        const backend = createLocalBackend();
+        const channelId = await freshChannel(backend, 'bez-svyazi');
+        const { member } = await backend.join({ channelId, member: draft('Тральщик', '221') });
+
+        const otherTab = createLocalBackend();
+        const seenByOther = watch(otherTab, channelId);
+
+        vi.stubGlobal('navigator', { onLine: false });
+        const { message } = await backend.sendMessage({
+            channelId,
+            memberId: member.memberId,
+            message: { text: 'Ушёл ли ты' },
+        });
+
+        // Код проверяем, текст — нет: текст — дело интерфейса (см. failsWith выше).
+        expect(message.delivery?.status).toBe('failed');
+        expect(message.delivery?.error?.code).toBe('offline');
+        expect((await messages(backend, channelId)).some((item) => item.messageId === message.messageId)).toBe(true);
+        expect(
+            seenByOther.some((event) => event.type === 'message-added' && event.message.messageId === message.messageId)
+        ).toBe(false);
+    });
+
+    test('офлайн-отправка не трогает общее состояние: текст переживает «перезагрузку вкладки»', async () => {
+        const backend = createLocalBackend();
+        const channelId = await freshChannel(backend, 'perezhivaet-perezagruzku');
+        const { member } = await backend.join({ channelId, member: draft('Буксир', '512') });
+
+        vi.stubGlobal('navigator', { onLine: false });
+        const { message } = await backend.sendMessage({
+            channelId,
+            memberId: member.memberId,
+            message: { text: 'До связи' },
+        });
+        expect(message.delivery?.status).toBe('failed');
+
+        // Новый бэкенд над тем же (подложным) хранилищем — как вкладка после перезагрузки.
+        const reloadedOffline = createLocalBackend();
+        const stillThere = (await messages(reloadedOffline, channelId)).find(
+            (item) => item.messageId === message.messageId
+        );
+        expect(stillThere?.delivery?.status).toBe('failed');
+    });
+
+    test('связь вернулась к моменту «перезагрузки» — неотправленное досылается само, без клика', async () => {
+        const backend = createLocalBackend();
+        const channelId = await freshChannel(backend, 'svyaz-k-perezagruzke');
+        const { member } = await backend.join({ channelId, member: draft('Ледокол', '901') });
+
+        vi.stubGlobal('navigator', { onLine: false });
+        const { message } = await backend.sendMessage({
+            channelId,
+            memberId: member.memberId,
+            message: { text: 'Два' },
+        });
+
+        // К моменту «перезагрузки» связь уже вернулась — новый бэкенд подхватывает
+        // осевшее в ящике сам, конструктором, без клика по значку.
+        vi.stubGlobal('navigator', { onLine: true });
+        const reloaded = createLocalBackend();
+        await settle();
+
+        const after = await messages(reloaded, channelId);
+        const found = after.find((item) => item.messageId === message.messageId);
+        expect(found).toBeDefined();
+        expect(found?.delivery).toBeUndefined();
+    });
+
+    test('связь вернулась прямо во время открытой вкладки, без перезагрузки, — тоже досылается сама', async () => {
+        vi.stubGlobal('navigator', { onLine: false });
+        // Своё окно для этой проверки, не общее из beforeEach: там window нарочно без
+        // addEventListener (см. connection.test.ts), а здесь нужно настоящее событие online.
+        const target = Object.assign(new EventTarget(), {
+            localStorage: fakeStorage,
+            sessionStorage: fakeSessionStorage,
+            setTimeout: (run: () => void, ms: number) => setTimeout(run, ms),
+        });
+        (globalThis as unknown as { window: unknown }).window = target;
+
+        const backend = createLocalBackend();
+        const channelId = await freshChannel(backend, 'vernulas-pryamo-seychas');
+        const { member } = await backend.join({ channelId, member: draft('Корвет', '333') });
+        const { message } = await backend.sendMessage({
+            channelId,
+            memberId: member.memberId,
+            message: { text: 'Жду' },
+        });
+        expect(message.delivery?.status).toBe('failed');
+
+        vi.stubGlobal('navigator', { onLine: true });
+        target.dispatchEvent(new Event('online'));
+        await settle();
+
+        const after = await messages(backend, channelId);
+        const found = after.find((item) => item.messageId === message.messageId);
+        expect(found).toBeDefined();
+        expect(found?.delivery).toBeUndefined();
+    });
+
+    test('повтор без связи — то же самое неотправленное, без изменений и без второй копии', async () => {
+        const backend = createLocalBackend();
+        const channelId = await freshChannel(backend, 'povtor-bez-svyazi');
+        const { member } = await backend.join({ channelId, member: draft('Землечерпалка', '804') });
+
+        vi.stubGlobal('navigator', { onLine: false });
+        const { message } = await backend.sendMessage({
+            channelId,
+            memberId: member.memberId,
+            message: { text: 'Раз' },
+        });
+
+        const { message: retried } = await backend.retryMessage({
+            channelId,
+            memberId: member.memberId,
+            message: { messageId: message.messageId },
+        });
+
+        expect(retried).toEqual(message);
+        expect(
+            (await messages(backend, channelId)).filter((item) => item.messageId === message.messageId)
+        ).toHaveLength(1);
+    });
+
+    test('повтор, когда связь уже есть, — сообщение уходит; два клика подряд не плодят двойника', async () => {
+        const backend = createLocalBackend();
+        const channelId = await freshChannel(backend, 'povtor-so-svyazyu');
+        const { member } = await backend.join({ channelId, member: draft('Ледокол', '552') });
+
+        vi.stubGlobal('navigator', { onLine: false });
+        const { message } = await backend.sendMessage({
+            channelId,
+            memberId: member.memberId,
+            message: { text: 'Два' },
+        });
+
+        vi.stubGlobal('navigator', { onLine: true });
+        const request = { channelId, memberId: member.memberId, message: { messageId: message.messageId } };
+        // Не дожидаясь друг друга нарочно: тот самый двойной клик, для которого и нужна
+        // проверка «уже записано» внутри mutate() (см. flushPending в localBackend.ts).
+        const [firstResult, secondResult] = await Promise.all([
+            backend.retryMessage(request),
+            backend.retryMessage(request),
+        ]);
+
+        expect(firstResult.message.delivery).toBeUndefined();
+        expect(secondResult.message.delivery).toBeUndefined();
+        const stored = await messages(backend, channelId);
+        expect(stored.filter((item) => item.messageId === message.messageId)).toHaveLength(1);
+    });
+
+    test('retryMessage для незнакомого сообщения — отказ unknown, а не выдумка', async () => {
+        const backend = createLocalBackend();
+        const channelId = await freshChannel(backend, 'net-v-yashchike');
+        const { member } = await backend.join({ channelId, member: draft('Шлюп', '446') });
+
+        await failsWith(
+            () =>
+                backend.retryMessage({
+                    channelId,
+                    memberId: member.memberId,
+                    message: { messageId: 'net-takogo-soobshcheniya' },
+                }),
+            'unknown'
+        );
+    });
+
+    test('discardMessage выбрасывает неотправленное из ленты и из ящика — насовсем', async () => {
+        const backend = createLocalBackend();
+        const channelId = await freshChannel(backend, 'peredumal');
+        const { member } = await backend.join({ channelId, member: draft('Сейнер', '117') });
+
+        vi.stubGlobal('navigator', { onLine: false });
+        const { message } = await backend.sendMessage({
+            channelId,
+            memberId: member.memberId,
+            message: { text: 'Не надо' },
+        });
+        expect((await messages(backend, channelId)).some((item) => item.messageId === message.messageId)).toBe(true);
+
+        await backend.discardMessage({ channelId, message: { messageId: message.messageId } });
+        expect((await messages(backend, channelId)).some((item) => item.messageId === message.messageId)).toBe(false);
+
+        // Выброшенное не воскресает и связью: раз человек передумал, повторной попытки
+        // больше нет, даже когда автоподхват мог бы её найти.
+        vi.stubGlobal('navigator', { onLine: true });
+        const reloaded = createLocalBackend();
+        await settle();
+        expect((await messages(reloaded, channelId)).some((item) => item.messageId === message.messageId)).toBe(false);
+    });
+
+    test('онлайновая отправка уважает messageId черновика — тот же приём, что и у Firebase-бэкенда', async () => {
+        const backend = createLocalBackend();
+        const channelId = await freshChannel(backend, 'svoy-messageid');
+        const { member } = await backend.join({ channelId, member: draft('Фрегат', '733') });
+
+        const { message } = await backend.sendMessage({
+            channelId,
+            memberId: member.memberId,
+            message: { text: 'Раз', messageId: 'svoy-id-42' },
+        });
+
+        expect(message.messageId).toBe('svoy-id-42');
     });
 });

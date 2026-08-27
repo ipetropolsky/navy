@@ -9,29 +9,23 @@ import Input from '@/components/ui/Input';
 import Panel from '@/components/ui/Panel';
 import { useSnackbar } from '@/components/ui/Snackbar';
 import { HAIL_SIGNAL } from '@/hooks/morse';
+import { Press, isTap, startPress } from '@/utils/tap';
+import { isTouch } from '@/utils/viewport';
 import {
     HULL_NUMBER_LENGTH,
     MEMBER_COLORS,
     Member,
     MorseFeed,
+    NAME_MAX_LENGTH,
     SHIP_KINDS,
     SHIP_KIND_LABELS,
     ShipKind,
     Side,
     isValidHullNumber,
-} from '@/types/channel';
-import { limitMessage, overLimit } from '@/utils/limit';
-import { Press, isTap, startPress } from '@/utils/tap';
-import { isTouch } from '@/utils/viewport';
+} from '@shared/types/channel';
+import { limitMessage, overLimit } from '@shared/utils/limit';
 
 import styles from './MemberForm.module.less';
-
-/**
- * Предел длины позывного. Он стоит над репликой в ленте и подписью у корабля в кадре,
- * и длинный расползся бы на всю строку. Мягкий, как и все пределы: набранное сверх него
- * не обрезается, а поле краснеет и отвечает снекбаром (см. `@/utils/limit`).
- */
-const NAME_MAX_LENGTH = 20;
 
 interface MemberFormProps {
     /** Вход в канал или переоснащение уже стоящего в строю корабля. */
@@ -193,7 +187,7 @@ export default function MemberForm({
             return;
         }
         // Перебор длины кнопку не гасит: недоступная кнопка молчит, а тут надо сказать,
-        // насколько перебрали. Правило и слова общие со строкой сообщения (`@/utils/limit`).
+        // насколько перебрали. Правило и слова общие со строкой сообщения (`@shared/utils/limit`).
         if (overLimit(name, NAME_MAX_LENGTH)) {
             notify(limitMessage(name, NAME_MAX_LENGTH));
             return;

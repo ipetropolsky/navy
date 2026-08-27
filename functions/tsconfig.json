@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "module": "NodeNext",
+    "esModuleInterop": true,
+    "moduleResolution": "nodenext",
+    "noImplicitReturns": true,
+    "noUnusedLocals": true,
+    "outDir": "lib",
+    "rootDir": "..",
+    "sourceMap": true,
+    "strict": true,
+    "target": "es2017",
+    // За es2017 в правилах рейда (shared/placement.ts) идёт Object.fromEntries и flatMap —
+    // оба из ES2019, а без явного lib он ограничен таргетом.
+    "lib": ["es2019"]
+  },
+  "compileOnSave": true,
+  // ../shared — общий каталог с functions/src: правила рейда общие для обоих конвейеров,
+  // и второй копии в functions заводить нельзя. Проверки (*.test.ts) сюда не идут: они
+  // гоняются через vitest из корня, а не как часть функций.
+  "include": ["src", "../shared"],
+  "exclude": ["**/*.test.ts", "../shared/**/*.test.ts"]
+}

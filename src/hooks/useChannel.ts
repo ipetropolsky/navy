@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 
-import { ChannelEvent, ChannelSnapshot, MemberDraft, MessageDraft, backend } from '@/backend';
+import { ChannelError, ChannelEvent, ChannelSnapshot, MemberDraft, MessageDraft, backend } from '@/backend';
 import {
     Look,
     forgetMemberId,
@@ -10,7 +10,7 @@ import {
     rememberLastLook,
     rememberMemberId,
 } from '@/backend/identity';
-import { Member } from '@/types/channel';
+import { Member } from '@shared/types/channel';
 
 import useReception, { Reception } from '@/hooks/useReception';
 
@@ -27,6 +27,14 @@ import useReception, { Reception } from '@/hooks/useReception';
 export interface ChannelController {
     /** Пока не загрузились, показывать нечего: канал может быть, а может и не быть. */
     loading: boolean;
+    /**
+     * Открыть канал не вышло — не «канала нет» (это snapshot === null у channel, законный
+     * ответ), а сеть или сервер подвели. Текст уже человеческий, годится прямо в Panel.hint.
+     * null, если последняя попытка открылась, ещё грузится или канал и не спрашивали (!slug).
+     */
+    loadError: string | null;
+    /** Попробовать открыть канал заново после loadError — тем же адресом, что и был. */
+    retryLoad: () => void;
     channel: ChannelSnapshot | null;
     /** Кто эта вкладка. null — канал открыт, но корабль ещё не встал в строй. */
     myId: string | null;
@@ -49,10 +57,47 @@ export interface ChannelController {
     /** Высадить чужой корабль. Доступно только старшему на рейде — это проверяет бэкенд. */
     kick: (memberId: string) => Promise<void>;
     sendMessage: (draft: MessageDraft) => Promise<void>;
+    /**
+     * Отправить заново то, что не ушло, — тем же messageId (см. `Message.delivery`,
+     * `ChannelBackend.retryMessage`). Молча ничего не делает вне рейда: без своего места
+     * там нет и своего неотправленного, которое можно было бы повторить.
+     */
+    retryMessage: (messageId: string) => Promise<void>;
+    /** Выбросить неотправленное — человек передумал (см. `ChannelBackend.discardMessage`). */
+    discardMessage: (messageId: string) => Promise<void>;
+    /** Есть ли выше messages ещё лента — то же самое, что `ChannelSnapshot.hasMoreMessages`. */
+    hasMoreMessages: boolean;
+    /** Страница уже в пути: второй запрос до её прихода не нужен, а кнопку показать нечем. */
+    loadingOlder: boolean;
+    /** Догрузить ленту выше уже показанного — на один экран (см. `backend.loadOlderMessages`). */
+    loadOlder: () => Promise<void>;
 }
 
-export function useChannel(slug: string | null, memberIdFromUrl: string | null): ChannelController {
+/**
+ * Поставить участника в снимок канала: тот же memberId — заменить, новый — дописать.
+ *
+ * Не просто «дописать в конец», потому что один и тот же участник приходит сюда дважды.
+ * Первый раз — своим же входом (`join` ниже кладёт в снимок ответ сервера сразу, не дожидаясь
+ * подписки), второй — событием `member-joined`, когда подписка донесёт ту же запись обратно.
+ * Дописывай мы вслепую — на рейде стояло бы два своих корабля на одной точке.
+ */
+const withMember = (snapshot: ChannelSnapshot, member: Member): ChannelSnapshot => ({
+    ...snapshot,
+    members: snapshot.members.some((item) => item.memberId === member.memberId)
+        ? snapshot.members.map((item) => (item.memberId === member.memberId ? member : item))
+        : [...snapshot.members, member],
+});
+
+export function useChannel(
+    slug: string | null,
+    memberIdFromUrl: string | null,
+    userId: string | null
+): ChannelController {
     const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState<string | null>(null);
+    // Дёргает первый эффект заново тем же адресом — свой повод меняет зависимость эффекта,
+    // не трогая ни slug, ни адресную строку.
+    const [retryCount, setRetryCount] = useState(0);
     const [channel, setChannel] = useState<ChannelSnapshot | null>(null);
     const [myId, setMyId] = useState<string | null>(null);
     // Внешность держим состоянием, а не перечитыванием на каждом проходе: хранилище отвечает
@@ -66,6 +111,18 @@ export function useChannel(slug: string | null, memberIdFromUrl: string | null):
      */
     const myIdRef = useRef(myId);
     myIdRef.current = myId;
+    /**
+     * Что сейчас показано — для первого эффекта и для loadOlder. Ссылкой по той же причине,
+     * что и myId выше: обоим надо знать нынешний снимок, но пересобираться на каждую его
+     * перемену им незачем.
+     */
+    const shownRef = useRef(channel);
+    shownRef.current = channel;
+    const [loadingOlder, setLoadingOlder] = useState(false);
+    // Синхронный дублёр loadingOlder: React обновляет состояние не сразу, а прокрутка внутри
+    // одного кадра может позвать loadOlder дважды — вторая заявка должна увидеть первую
+    // раньше, чем до неё дойдёт отрисовка.
+    const loadingOlderRef = useRef(false);
 
     // Открыли канал: разбираем адрес из ссылки, спрашиваем состояние и решаем, кто мы в нём.
     // Ответ может прийти, когда вкладка уже ушла на другой канал, — тогда его надо выбросить,
@@ -76,10 +133,21 @@ export function useChannel(slug: string | null, memberIdFromUrl: string | null):
             setChannel(null);
             setMyId(null);
             setLoading(false);
+            setLoadError(null);
         } else {
             setLoading(true);
+            setLoadError(null);
+            // Спрашиваем другой канал — прежний снимок убираем сразу, не дожидаясь ответа:
+            // в адресе один рейд, и показывать вместо него другой нельзя, а при отказе
+            // за оставшимся снимком спрятался бы и сам отказ — «Канал не открылся»
+            // показывается, только когда показывать больше нечего. Повтор того же канала
+            // (retryLoad) снимок сохраняет: там на экране ровно то, что и должно быть.
+            if (shownRef.current && shownRef.current.channel.slug !== slug) {
+                setChannel(null);
+                setMyId(null);
+            }
             void backend
-                .getChannelBySlug({ slug })
+                .getChannelBySlug({ slug, userId: userId ?? undefined })
                 .then((snapshot) => {
                     if (!alive) {
                         return;
@@ -91,10 +159,26 @@ export function useChannel(slug: string | null, memberIdFromUrl: string | null):
                     }
                     // Адрес важнее сохранённого: так соседняя вкладка говорит за другой корабль.
                     // Личность привязана к channelId, а не к slug: адрес канала может смениться.
-                    const candidate = memberIdFromUrl ?? readMemberId(snapshot.channel.channelId);
+                    //
+                    // Третий кандидат — вошедший: на Firebase участие адресуется личностью
+                    // (memberId === userId), а sessionStorage свой у каждой вкладки, — без этого
+                    // вторая вкладка того же человека не узнавала бы свой корабль и предлагала
+                    // встать в строй заново, хотя он уже на рейде. Для локального бэкенда это
+                    // ничем не грозит: там userId один на всех ('local', см. backend/auth.ts),
+                    // а memberId устроен иначе (randomId('m'), см. backend/localBackend.ts) —
+                    // совпасть с настоящим участником такому кандидату нечем.
+                    const candidate = memberIdFromUrl ?? readMemberId(snapshot.channel.channelId) ?? userId;
                     const aboard = snapshot.members.some((member) => member.memberId === candidate);
                     // Корабль мог выйти из другой вкладки, пока эта была закрыта.
                     setMyId(aboard ? candidate : null);
+                })
+                .catch((failure: unknown) => {
+                    // Не «канала нет» (тот ответ — snapshot === null, и это ветка .then выше),
+                    // а сеть или сервер подвели: channel не трогаем, тут ещё есть что показать
+                    // при следующей удачной попытке — прежний снимок вместо пустого экрана.
+                    if (alive) {
+                        setLoadError(failure instanceof ChannelError ? failure.message : 'Канал не открылся');
+                    }
                 })
                 .finally(() => {
                     if (alive) {
@@ -105,7 +189,9 @@ export function useChannel(slug: string | null, memberIdFromUrl: string | null):
         return () => {
             alive = false;
         };
-    }, [slug, memberIdFromUrl]);
+    }, [slug, memberIdFromUrl, userId, retryCount]);
+
+    const retryLoad = useCallback(() => setRetryCount((count) => count + 1), []);
 
     // Дальше всё адресуется основным идентификатором канала, а не адресом из ссылки.
     const channelId = channel?.channel.channelId ?? null;
@@ -125,7 +211,7 @@ export function useChannel(slug: string | null, memberIdFromUrl: string | null):
                     case 'channel-updated':
                         return { ...current, channel: event.channel };
                     case 'member-joined':
-                        return { ...current, members: [...current.members, event.member] };
+                        return withMember(current, event.member);
                     case 'member-updated':
                         return {
                             ...current,
@@ -139,10 +225,40 @@ export function useChannel(slug: string | null, memberIdFromUrl: string | null):
                             members: current.members.filter((item) => item.memberId !== event.member.memberId),
                         };
                     case 'message-added':
-                        // Повтор возможен, если событие придёт дважды: по id и отсекаем.
-                        return current.messages.some((message) => message.messageId === event.message.messageId)
-                            ? current
-                            : { ...current, messages: [...current.messages, event.message] };
+                        // Тот же messageId уже показан — не обязательно повтор одного и того же
+                        // события: так приходит и отправленное заново тем же id, но с другим
+                        // статусом доставки (см. retryMessage, backend/localBackend.ts —
+                        // «автоподхват при восстановлении связи»). Заменяем запись по id вместо
+                        // прежней, а не отбрасываем и не заводим вторую.
+                        return {
+                            ...current,
+                            messages: current.messages.some((message) => message.messageId === event.message.messageId)
+                                ? current.messages.map((message) =>
+                                      message.messageId === event.message.messageId ? event.message : message
+                                  )
+                                : [...current.messages, event.message],
+                        };
+                    case 'message-updated':
+                        // Статус доставки сменился (сервер подтвердил или, наоборот, не дождались,
+                        // см. Message.delivery) — запись та же самая, по messageId. Не нашлась —
+                        // тихий нет-оп, тем же способом, что и member-updated выше: событие
+                        // не про то, что сейчас показано (например, страница ленты догружена
+                        // не до него).
+                        return {
+                            ...current,
+                            messages: current.messages.map((message) =>
+                                message.messageId === event.message.messageId ? event.message : message
+                            ),
+                        };
+                    case 'message-removed':
+                        // Неотправленное выбросили (см. discardMessage) — на сервере его и не
+                        // было, показывать больше нечего.
+                        return {
+                            ...current,
+                            messages: current.messages.filter(
+                                (message) => message.messageId !== event.message.messageId
+                            ),
+                        };
                     default:
                         return current;
                 }
@@ -151,6 +267,7 @@ export function useChannel(slug: string | null, memberIdFromUrl: string | null):
 
         return backend.subscribe({
             channelId,
+            userId: userId ?? undefined,
             onEvent: (event: ChannelEvent) => {
                 // Чужая реплика доехала — разыгрываем её приём: она печатается по буквам,
                 // а корабль отправителя мигает лампой (см. `useReception`). Своё не разыгрываем:
@@ -185,7 +302,7 @@ export function useChannel(slug: string | null, memberIdFromUrl: string | null):
                 }
             },
         });
-    }, [channelId, receive]);
+    }, [channelId, userId, receive]);
 
     // Корабль вышел (например, из другой вкладки) — эта вкладка возвращается к постановке в строй.
     useEffect(() => {
@@ -214,6 +331,20 @@ export function useChannel(slug: string | null, memberIdFromUrl: string | null):
             const { member } = await backend.join({ channelId, member: draft });
             rememberMemberId(channelId, member.memberId);
             keepLook(member);
+            // Свой корабль ставим в снимок сами, а не ждём, пока подписка пришлёт его обратно.
+            // Догадки тут нет: `member` — это ответ сервера, ровно та же запись, что придёт
+            // событием `member-joined` (и `withMember` её там не задвоит).
+            //
+            // Ждать нельзя. У местного бэкенда событие уходит до возврата из `join`, и обе
+            // правки состояния попадают в один проход React; у Firebase ответ приходит вызовом
+            // функции, а событие — отдельной задачей от подписки Firestore, уже после. В этом
+            // зазоре эффект «корабль вышел» (ниже) видел бы myId, которого нет среди участников,
+            // и молча сбрасывал бы его в null. Вход при этом проходил: корабль на рейде,
+            // на сервере запись, — а вкладка так и стояла с открытой формой постановки в строй,
+            // и своим корабль для неё уже не становился никогда. Замерено против эмулятора:
+            // joinChannel отвечал 200 с участником, корабль появлялся в кадре, а `shipMine`
+            // не появлялся вовсе (см. tests-firebase/e2e.spec.ts).
+            setChannel((current) => (current?.channel.channelId === channelId ? withMember(current, member) : current));
             setMyId(member.memberId);
         },
         [channelId, keepLook]
@@ -258,5 +389,74 @@ export function useChannel(slug: string | null, memberIdFromUrl: string | null):
         [channelId, myId]
     );
 
-    return { loading, channel, myId, reception, lastLook, join, updateMe, leave, kick, sendMessage };
+    const retryMessage = useCallback(
+        async (messageId: string) => {
+            if (channelId && myId) {
+                await backend.retryMessage({ channelId, memberId: myId, message: { messageId } });
+            }
+        },
+        [channelId, myId]
+    );
+
+    const discardMessage = useCallback(
+        async (messageId: string) => {
+            if (channelId) {
+                await backend.discardMessage({ channelId, message: { messageId } });
+            }
+        },
+        [channelId]
+    );
+
+    /**
+     * Догрузить страницу выше показанного. Читает канал и признак хвоста через shownRef,
+     * а не через channel/channelId из замыкания: тогда колбэк не пересобирается на каждый
+     * пришедший снимок, и ссылка на него в MessageList остаётся стабильной.
+     */
+    const loadOlder = useCallback(async () => {
+        const current = shownRef.current;
+        const oldest = current?.messages[0];
+        if (!current || !current.hasMoreMessages || !oldest || loadingOlderRef.current) {
+            return;
+        }
+        loadingOlderRef.current = true;
+        setLoadingOlder(true);
+        try {
+            const { messages: older, hasMore } = await backend.loadOlderMessages({
+                channelId: current.channel.channelId,
+                before: { messageId: oldest.messageId },
+            });
+            setChannel((state) =>
+                state?.channel.channelId === current.channel.channelId
+                    ? { ...state, messages: [...older, ...state.messages], hasMoreMessages: hasMore }
+                    : state
+            );
+        } catch {
+            // Отказ (нет связи, таймаут) отдельно не показываем: hasMoreMessages остаётся
+            // правдой, и следующая прокрутка к тому же краю запросит страницу заново —
+            // тот же приём, что и у retryLoad, только без отдельной кнопки.
+        } finally {
+            loadingOlderRef.current = false;
+            setLoadingOlder(false);
+        }
+    }, []);
+
+    return {
+        loading,
+        loadError,
+        retryLoad,
+        channel,
+        myId,
+        reception,
+        lastLook,
+        join,
+        updateMe,
+        leave,
+        kick,
+        sendMessage,
+        retryMessage,
+        discardMessage,
+        hasMoreMessages: channel?.hasMoreMessages ?? false,
+        loadingOlder,
+        loadOlder,
+    };
 }

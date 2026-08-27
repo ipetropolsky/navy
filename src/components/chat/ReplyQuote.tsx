@@ -1,7 +1,7 @@
 import { ReactNode } from 'react';
 
 import MemberName from '@/components/ships/MemberName';
-import { AuthorLook } from '@/types/channel';
+import { AuthorLook } from '@shared/types/channel';
 
 import styles from './ReplyQuote.module.less';
 

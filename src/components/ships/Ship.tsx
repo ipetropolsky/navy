@@ -1,7 +1,7 @@
 import { CSSProperties, useEffect } from 'react';
 
 import useMorseLamp from '@/hooks/useMorseLamp';
-import { MorseFeed, Side, ShipKind } from '@/types/channel';
+import { MorseFeed, Side, ShipKind } from '@shared/types/channel';
 
 import { SHIP_SPRITES, SpritePoint, hasTwoLights } from '@/components/ships/shipSprites';
 

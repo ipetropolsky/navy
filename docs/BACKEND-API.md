@@ -11,6 +11,10 @@ import { backend } from '@/backend';
 `BroadcastChannel`. Завтра там окажется Firebase, и поменяется одна строка в
 `src/backend/index.ts`. Всё остальное приложение останется как есть.
 
+Как именно устроен этот переезд — какие заводятся коллекции, что добавляется в контракт
+(статус отправки у сообщения, состояние связи, коды сетевых ошибок) и как себя ведёт
+приложение без сети — в [FIREBASE.md](./FIREBASE.md).
+
 ## Правила, которые задают форму API
 
 Общие правила проектирования контрактов — в [API-PRINCIPLES.md](./API-PRINCIPLES.md).
@@ -76,7 +80,8 @@ await backend.updateChannel({ channelId, channel: { slug: 'nord-ost-2', title } 
 interface ChannelSnapshot {
     channel: Channel;
     members: Member[];
-    messages: Message[];
+    messages: Message[]; // последняя страница ленты, не вся целиком — см. MESSAGE_PAGE
+    hasMoreMessages: boolean; // есть ли выше messages ещё лента — повод звать loadOlderMessages
 }
 
 interface Channel {
@@ -104,6 +109,9 @@ interface MessageBase {
     messageId: string;
     author: MemberRef; // кто отправил; у системной записи — тот, о ком она
     sentAt: number; // мс эпохи; как показать — дело интерфейса
+    // Статус отправки у этой вкладки; поля нет — сервер подтвердил. На сервере не хранится.
+    // Подробно — в FIREBASE.md, «Статус отправки».
+    delivery?: { status: 'pending' | 'failed'; error?: { code: ChannelErrorCode; message: string } };
 }
 
 interface ChatMessage extends MessageBase {
@@ -174,18 +182,23 @@ interface ShipSpec {
 
 ## Методы
 
-| Метод                                           | Что делает                           | Возвращает                |
-| ----------------------------------------------- | ------------------------------------ | ------------------------- |
-| `getChannel({ channelId })`                     | Состояние канала целиком             | `ChannelSnapshot \| null` |
-| `getChannelBySlug({ slug })`                    | Разбор адреса из ссылки              | `ChannelSnapshot \| null` |
-| `createChannel({ channel })`                    | Заводит канал без участников         | `{ channel }`             |
-| `updateChannel({ channelId, channel })`         | Меняет адрес и название канала       | `{ channel }`             |
-| `join({ channelId, member })`                   | Ставит корабль в строй               | `{ member }`              |
-| `updateMember({ channelId, memberId, member })` | Меняет позывной, номер, силуэт, цвет | `{ member }`              |
-| `leave({ channelId, memberId, course? })`       | Выводит корабль из канала            | —                         |
-| `kick({ channelId, memberId, member })`         | Высаживает чужой корабль             | —                         |
-| `sendMessage({ channelId, memberId, message })` | Отправляет сообщение                 | `{ message }`             |
-| `subscribe({ channelId, onEvent })`             | Подписка на события канала           | функция отписки           |
+| Метод                                              | Что делает                                           | Возвращает                |
+| -------------------------------------------------- | ---------------------------------------------------- | ------------------------- |
+| `getChannel({ channelId })`                        | Состояние канала целиком                             | `ChannelSnapshot \| null` |
+| `getChannelBySlug({ slug })`                       | Разбор адреса из ссылки                              | `ChannelSnapshot \| null` |
+| `createChannel({ channel })`                       | Заводит канал без участников                         | `{ channel }`             |
+| `updateChannel({ channelId, channel })`            | Меняет адрес и название канала                       | `{ channel }`             |
+| `join({ channelId, member })`                      | Ставит корабль в строй                               | `{ member }`              |
+| `updateMember({ channelId, memberId, member })`    | Меняет позывной, номер, силуэт, цвет                 | `{ member }`              |
+| `leave({ channelId, memberId, course? })`          | Выводит корабль из канала                            | —                         |
+| `kick({ channelId, memberId, member })`            | Высаживает чужой корабль                             | —                         |
+| `sendMessage({ channelId, memberId, message })`    | Отправляет сообщение                                 | `{ message }`             |
+| `retryMessage({ channelId, memberId, message })`   | Отправляет неотправленное заново, тем же `messageId` | `{ message }`             |
+| `discardMessage({ channelId, message })`           | Выбрасывает неотправленное из ящика                  | —                         |
+| `loadOlderMessages({ channelId, before, limit? })` | Страница ленты выше `before`                         | `{ messages, hasMore }`   |
+| `markSeen({ channelId, memberId, message })`       | Ставит отметку «дочитано досюда» в своё участие      | —                         |
+| `countUnread({ channelId, after })`                | Сколько в канале сообщений позже отметки             | `{ count }`               |
+| `subscribe({ channelId, onEvent })`                | Подписка на события канала                           | функция отписки           |
 
 ### Открыть канал и подписаться
 
@@ -226,7 +239,7 @@ const { channel } = await backend.createChannel({ channel: { slug: slugify(title
 два слота друг от друга. Левый коридор вдобавок закрыт для трёх дальних слотов —
 там остров, и корабль на нём выглядел бы выброшенным на берег. По той же причине на эти
 слоты корабль заходит только справа: слева он прошёл бы прямо по острову.
-Алгоритм — `src/backend/placement.ts`, а сколько и с какой скоростью кораблю идти,
+Алгоритм — `shared/placement.ts`, а сколько и с какой скоростью кораблю идти,
 считает `src/components/SeaScene/shipMotion.ts`.
 
 ### Место на рейде
@@ -240,7 +253,7 @@ await backend.join({ channelId, member: { ...draft, berth: { slot: 7, corridor: 
 ```
 
 Выбор — пожелание, а не приказ. Пока человек заполнял форму, на выбранное место мог встать
-кто-то другой; тогда бэкенд молча ставит корабль на случайное свободное — отказывать здесь
+кто-то другой; тогда бэкенд молча ставит корабль на ближайшее свободное — отказывать здесь
 не за что, человек ничего не нарушил. Поля `berth` нет вовсе — место выбирает бэкенд
 (при входе) или оно остаётся прежним (при переоснащении).
 
@@ -317,7 +330,7 @@ try {
 записи прежних уходов курса не знают, и им остаётся фраза с силуэтом — «Рейдовый тральщик
 снялся с рейда». Длину курса бэкенд проверяет своим правилом: больше `MAX_COURSE_LENGTH` = 100
 символов — отказ с кодом `course-too-long` и тем же текстом «Максимум 100 символов, у вас 101»
-(`@/utils/limit`), и корабль остаётся на рейде.
+(`@shared/utils/limit`), и корабль остаётся на рейде.
 
 Почему данными, а не готовой строкой: зашитая в хранилище фраза означала бы, что поправить
 формулировку (или сказать её на другом языке) можно только правкой уже записанного. Бэкенд
@@ -363,6 +376,33 @@ await backend.sendMessage({
 `message-too-long` и готовым текстом «Максимум 500 символов, у вас 505». Набранное при этом
 не обрезается: обрезать чужой текст нельзя.
 
+### Лента страницами
+
+`getChannel` и `getChannelBySlug` отдают не весь разговор, а его хвост — `MESSAGE_PAGE`
+последних сообщений (`src/config/network.ts`). Разговор в канале не ограничен, а держать его
+в памяти вкладки целиком незачем, пока видна только нижняя часть. `hasMoreMessages` в ответе
+говорит, есть ли выше ещё лента.
+
+```ts
+const snapshot = await backend.getChannel({ channelId });
+// snapshot.messages — последняя страница, snapshot.hasMoreMessages — есть ли ещё выше
+
+if (snapshot?.hasMoreMessages) {
+    const { messages, hasMore } = await backend.loadOlderMessages({
+        channelId,
+        before: { messageId: snapshot.messages[0].messageId },
+        limit: 50, // необязательно; по умолчанию MESSAGE_PAGE
+    });
+    // messages — следующая страница выше before, в естественном порядке (старые сверху)
+}
+```
+
+Курсор — ссылка на сообщение (`before`), а не число: у Firestore это снимок документа
+(`startAfter(snapshot)`), а не `sentAt` в лоб, — двум сообщениям случается совпасть по времени
+до миллисекунды, и числовой курсор потерял бы одно из них или прочитал дважды на соседних
+страницах. Раз загруженная страница живёт без подписки: подписка держит только новое, что
+приходит после точки открытия, а старое одной перезаписью и остаётся.
+
 ### Печать по проводу не идёт
 
 Пока человек набирает, наружу не уходит ничего. Метода на это в контракте нет, события тоже:
@@ -400,6 +440,8 @@ type ChannelEvent = { eventId: string; channelId: string; at: number } & (
     | { type: 'member-updated'; member: Member }
     | { type: 'member-left'; member: MemberRef }
     | { type: 'message-added'; message: Message }
+    | { type: 'message-updated'; message: Message }
+    | { type: 'message-removed'; message: MessageRef }
 );
 ```
 

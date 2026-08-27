@@ -1,4 +1,4 @@
-import { ShipKind, Side } from '@/types/channel';
+import { ShipKind, Side } from '@shared/types/channel';
 
 import { SHIP_SPRITES } from '@/components/ships/shipSprites';
 

@@ -5,7 +5,7 @@ import pr1258Url from '@/assets/scene/ship-pr1258.png';
 import pr1400Url from '@/assets/scene/ship-pr1400.png';
 import pr201Url from '@/assets/scene/ship-pr201.png';
 import pr205Url from '@/assets/scene/ship-pr205.png';
-import { SHIP_SPECS, ShipKind, shipSizeShare } from '@/types/channel';
+import { SHIP_SPECS, ShipKind, shipSizeShare } from '@shared/types/channel';
 
 /**
  * Точка на спрайте — пиксели от левого верхнего угла картинки, в её собственном размере.

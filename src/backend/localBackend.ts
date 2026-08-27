@@ -1,23 +1,44 @@
+import { MESSAGE_PAGE } from '@/config/network';
+import { isOnline, watchOnlineStatus } from '@/utils/connection';
+import { isValidSlug } from '@/utils/slug';
+import { localStore } from '@/utils/storage';
+import { refitNotices, shipTitle } from '@shared/notice';
+import { isBerthFree, placeShip } from '@shared/placement';
 import {
     Channel,
+    ChatMessage,
     MAX_COURSE_LENGTH,
     MAX_MESSAGE_LENGTH,
     Member,
     MemberRef,
     Message,
+    MessageDelivery,
     ShipNotice,
     isSameBerth,
     memberRef,
-} from '@/types/channel';
-import { limitMessage, overLimit } from '@/utils/limit';
-import { isValidSlug } from '@/utils/slug';
-import { localStore } from '@/utils/storage';
+} from '@shared/types/channel';
+import { limitMessage, overLimit } from '@shared/utils/limit';
 
-import { ServerState, archiveKey, restoreState } from '@/backend/migrate';
-import { refitNotices, shipTitle } from '@/backend/notice';
-import { isBerthFree, placeShip } from '@/backend/placement';
+import { LOCAL_ACCOUNT } from '@/backend/auth';
+import { ServerState, StoredChannel, archiveKey, restoreState } from '@/backend/migrate';
+import {
+    discardOutboxMessage,
+    listOutboxChannels,
+    mergeOutbox,
+    putOutboxMessage,
+    readOutbox,
+    removeOutboxMessage,
+} from '@/backend/outbox';
 import { DEMO_CHANNEL_ID, createDemoChannel } from '@/backend/seed';
-import { ChannelBackend, ChannelError, ChannelEvent, ChannelSnapshot, MemberDraft, Unsubscribe } from '@/backend/types';
+import {
+    ChannelBackend,
+    ChannelError,
+    ChannelEvent,
+    ChannelSnapshot,
+    MemberDraft,
+    MessageDraft,
+    Unsubscribe,
+} from '@/backend/types';
 
 /**
  * Эмулятор сервера: состояние лежит JSON-ом в localStorage, вкладки обмениваются событиями
@@ -150,7 +171,7 @@ const mutateState = <T>(change: (state: ServerState) => T): Promise<T> =>
     });
 
 /** То же самое, но про один канал: его отсутствие — общая для всех ошибка. */
-const mutate = <T>(channelId: string, change: (channel: ChannelSnapshot) => T): Promise<T> =>
+const mutate = <T>(channelId: string, change: (channel: StoredChannel) => T): Promise<T> =>
     mutateState((state) => {
         const channel = state.channels[channelId];
         if (!channel) {
@@ -158,6 +179,17 @@ const mutate = <T>(channelId: string, change: (channel: ChannelSnapshot) => T): 
         }
         return change(channel);
     });
+
+/**
+ * Хвост ленты в MESSAGE_PAGE сообщений — то же самое, что при чтении канала отдаёт
+ * настоящий бэкенд (см. firebaseBackend.ts, readChannel). Хранилище при этом не трогается:
+ * полный разговор остаётся в состоянии как есть, страницей режется только ответ.
+ */
+const paged = (snapshot: StoredChannel): ChannelSnapshot => {
+    const { messages } = snapshot;
+    const hasMoreMessages = messages.length > MESSAGE_PAGE;
+    return { ...snapshot, messages: hasMoreMessages ? messages.slice(-MESSAGE_PAGE) : messages, hasMoreMessages };
+};
 
 export function createLocalBackend(): ChannelBackend {
     // Чтение состояния при старте заодно кладёт демо-канал в хранилище, если его там нет.
@@ -188,6 +220,17 @@ export function createLocalBackend(): ChannelBackend {
     };
 
     /**
+     * То же самое, но только этой вкладке — без провода наружу. Оффлайновая отправка
+     * (см. sendOffline) и смена статуса неотправленного (retryMessage, discardMessage)
+     * не должны показываться соседней вкладке: сервер их не видел, а лента у него одна
+     * на всех. Настоящий провод узнает об этом сообщении, только когда оно и правда уйдёт
+     * (см. flushPending) — тогда оно попадёт в состояние и разойдётся уже обычным emit.
+     */
+    const emitLocal = (channelId: string, payload: ChannelEventPayload): void => {
+        deliver({ ...payload, eventId: randomId('e'), channelId, at: Date.now() } as ChannelEvent);
+    };
+
+    /**
      * Записать в ленту запись от самого канала и разослать её как обычное сообщение.
      *
      * Автор приходит ссылкой, а не одним id, потому что снимок к ней прикладывает тот, кто
@@ -206,7 +249,7 @@ export function createLocalBackend(): ChannelBackend {
     };
 
     /** Позывной и бортовой номер должны быть свободны: иначе в ленте не различить, кто говорит. */
-    const checkDraftIsFree = (snapshot: ChannelSnapshot, draft: MemberDraft, exceptId?: string): void => {
+    const checkDraftIsFree = (snapshot: StoredChannel, draft: MemberDraft, exceptId?: string): void => {
         const others = snapshot.members.filter((member) => member.memberId !== exceptId);
         if (others.some((member) => member.name.toLowerCase() === draft.name.trim().toLowerCase())) {
             throw new ChannelError('name-taken', 'Корабль с таким позывным уже на связи');
@@ -234,7 +277,7 @@ export function createLocalBackend(): ChannelBackend {
     const dropMember = async (
         channelId: string,
         memberId: string,
-        check?: (snapshot: ChannelSnapshot) => void,
+        check?: (snapshot: StoredChannel) => void,
         nextOwnerId?: string
     ): Promise<Member | null> => {
         const { gone, channel } = await mutate(channelId, (snapshot) => {
@@ -256,11 +299,100 @@ export function createLocalBackend(): ChannelBackend {
         return gone;
     };
 
-    return {
-        getChannel: ({ channelId }) => delay(readState().channels[channelId] ?? null),
+    /**
+     * Отправка, когда на этот миг связи нет, — sendMessage решает так одним синхронным
+     * вопросом (isOnline), не дожидаясь ничего: у местного «сервера» неоткуда взяться
+     * настоящему таймауту, как у firebaseBackend.ts. Сообщение в общее состояние не
+     * попадает вовсе — иначе оно тут же всплыло бы в соседней вкладке, а localStorage
+     * (то есть «сервер») его не видел. Видна запись только у этой вкладки: через ящик
+     * неотправленного (см. backend/outbox.ts) и синтетическую рассылку emitLocal.
+     *
+     * Автор ищется тем же способом, что и в онлайновой ветке sendMessage, — самим
+     * состоянием, а не memberId в чистом виде: не нашёлся, значит вкладка знает о себе
+     * больше, чем канал, и запись остаётся со ссылкой без имени, как и там.
+     */
+    const sendOffline = (channelId: string, memberId: string, draft: MessageDraft): ChatMessage => {
+        const snapshot = readState().channels[channelId];
+        if (!snapshot) {
+            throw new ChannelError('channel-not-found', 'Канал не найден');
+        }
+        const author = snapshot.members.find((item) => item.memberId === memberId);
+        const delivery: MessageDelivery = {
+            status: 'failed',
+            error: { code: 'offline', message: 'Нет связи. Попробуйте, когда она появится' },
+        };
+        const message: ChatMessage = {
+            messageId: draft.messageId ?? randomId('msg'),
+            author: author ? memberRef(author) : { memberId },
+            text: draft.text,
+            thread: draft.thread,
+            sentAt: Date.now(),
+            delivery,
+        };
+        putOutboxMessage(LOCAL_ACCOUNT.userId, channelId, message);
+        emitLocal(channelId, { type: 'message-added', message });
+        return message;
+    };
 
-        getChannelBySlug: ({ slug }) =>
-            delay(Object.values(readState().channels).find((snapshot) => snapshot.channel.slug === slug) ?? null),
+    /**
+     * Настоящая запись того, что лежало в ящике неотправленного, — то же самое, что делает
+     * обычная (онлайновая) отправка: попадает в общее состояние и уходит проводом всем.
+     * Зовут её и клик по значку (!) (retryMessage), и автоподхват при восстановлении связи
+     * (см. подписку на watchOnlineStatus ниже) — оба могут прийти почти одновременно за одним
+     * и тем же сообщением, поэтому проверка «уже записано» стоит внутри mutate(), в одной
+     * очереди с самой записью, а не до неё: снаружи между вопросом и ответом успела бы
+     * протиснуться вторая попытка.
+     */
+    const flushPending = async (channelId: string, pending: ChatMessage): Promise<Message> => {
+        const { messageId, author, sentAt, text, thread } = pending;
+        const settled: Message = { messageId, author, sentAt, text, thread };
+        await mutate(channelId, (snapshot) => {
+            if (snapshot.messages.some((item) => item.messageId === messageId)) {
+                return;
+            }
+            snapshot.messages.push(settled);
+        });
+        removeOutboxMessage(LOCAL_ACCOUNT.userId, channelId, messageId);
+        emit(channelId, { type: 'message-added', message: settled });
+        return settled;
+    };
+
+    /**
+     * Автоподхват при восстановлении связи — то самое «повторно нажимать не нужно» из
+     * определения готовности (issue #69, docs/FIREBASE.md, «Ящик неотправленного»). Подписка
+     * одна на весь бэкенд и не привязана к одному каналу: неотправленное может лежать и там,
+     * где сейчас не открыто ни одной вкладки этого канала (см. listOutboxChannels).
+     *
+     * Первый вызов watchOnlineStatus приходит сразу, с состоянием на этот миг: вкладку могли
+     * перезагрузить уже после того, как связь вернулась, — и тогда дослать осевшее в ящике
+     * нужно сразу же, не дожидаясь ещё одной перемены online/offline.
+     */
+    watchOnlineStatus(({ status }) => {
+        if (status !== 'online') {
+            return;
+        }
+        for (const channelId of listOutboxChannels(LOCAL_ACCOUNT.userId)) {
+            for (const pending of readOutbox(LOCAL_ACCOUNT.userId, channelId)) {
+                flushPending(channelId, pending).catch(() => {
+                    // Не вышло и в этот раз — запись остаётся в ящике тем же messageId;
+                    // следующая перемена связи или клик по значку (!) попробуют снова.
+                });
+            }
+        }
+    });
+
+    return {
+        getChannel: ({ channelId }) => {
+            const snapshot = readState().channels[channelId];
+            return delay(snapshot ? mergeOutbox(paged(snapshot), LOCAL_ACCOUNT.userId, channelId) : null);
+        },
+
+        getChannelBySlug: ({ slug }) => {
+            const snapshot = Object.values(readState().channels).find((item) => item.channel.slug === slug);
+            return delay(
+                snapshot ? mergeOutbox(paged(snapshot), LOCAL_ACCOUNT.userId, snapshot.channel.channelId) : null
+            );
+        },
 
         createChannel: async ({ channel: { slug, title } }) => {
             if (!isValidSlug(slug)) {
@@ -462,13 +594,19 @@ export function createLocalBackend(): ChannelBackend {
             if (overLimit(draft.text, MAX_MESSAGE_LENGTH)) {
                 throw new ChannelError('message-too-long', limitMessage(draft.text, MAX_MESSAGE_LENGTH));
             }
+            // Связи нет — не пишем в общее состояние вовсе (см. sendOffline): дальше решает
+            // человек, значок (!) в ленте и retryMessage по нажатию, а восстановление связи
+            // подхватит его и само (см. подписку на watchOnlineStatus выше).
+            if (!isOnline()) {
+                return delay({ message: sendOffline(channelId, memberId, draft) });
+            }
             // Снимок автора складываем в той же очереди, в которой сообщение и записывается:
             // отправитель на этот миг ещё в составе, и другого случая спросить, как он тогда
             // выглядел, уже не будет — снимется с рейда, и в ленте останется одно сообщение.
             const message = await mutate(channelId, (snapshot) => {
                 const author = snapshot.members.find((item) => item.memberId === memberId);
                 const posted: Message = {
-                    messageId: randomId('msg'),
+                    messageId: draft.messageId ?? randomId('msg'),
                     author: author ? memberRef(author) : { memberId },
                     text: draft.text,
                     thread: draft.thread,
@@ -479,6 +617,83 @@ export function createLocalBackend(): ChannelBackend {
             });
             emit(channelId, { type: 'message-added', message });
             return delay({ message });
+        },
+
+        /**
+         * Тем же messageId, что и у неудачной попытки, — двойника не будет (см. комментарий
+         * над контрактом, types.ts). Текст берётся из ящика неотправленного, не из довода:
+         * retryMessage его не приносит, он там уже есть, с прошлой попытки.
+         *
+         * Связи всё ещё нет — то же самое неотправленное возвращается как есть, тем же
+         * messageId и тем же текстом: решение здесь одномоментное (isOnline, без ожидания),
+         * и показывать между одним отказом и другим промежуточное «в пути» нечего — в отличие
+         * от firebaseBackend.ts, где между кликом и ответом сервера проходит время.
+         */
+        retryMessage: async ({ channelId, message }) => {
+            const pending = readOutbox(LOCAL_ACCOUNT.userId, channelId).find(
+                (item) => item.messageId === message.messageId
+            );
+            if (!pending) {
+                throw new ChannelError('unknown', 'Сообщение уже не в ящике неотправленного');
+            }
+            if (!isOnline()) {
+                return delay({ message: pending });
+            }
+            const settled = await flushPending(channelId, pending);
+            return delay({ message: settled });
+        },
+
+        // Ни выждать, ни бросить исключение здесь неоткуда: убрать из ящика и разослать
+        // своей же вкладке — оба шага синхронные, и оборачивать их в задержку незачем,
+        // сервер тут и не спрашивали (сервер неотправленного и не видел, см. firestore.rules,
+        // allow update, delete: if false, — тот же довод, что и у firebaseBackend.ts).
+        discardMessage: ({ channelId, message }) => {
+            discardOutboxMessage(channelId, message.messageId);
+            emitLocal(channelId, { type: 'message-removed', message: { messageId: message.messageId } });
+            return Promise.resolve();
+        },
+
+        // Хранилище держит весь разговор массивом — догрузка здесь просто его срез.
+        // before не нашёлся (гипотетически: сообщений сегодня не удаляют) — курсору не
+        // от чего считать, и это тот же законный пустой ответ, что и у настоящего бэкенда.
+        loadOlderMessages: ({ channelId, before, limit: pageLimit }) => {
+            const snapshot = readState().channels[channelId];
+            const index = snapshot
+                ? snapshot.messages.findIndex((message) => message.messageId === before.messageId)
+                : -1;
+            if (!snapshot || index === -1) {
+                return delay({ messages: [], hasMore: false });
+            }
+            const pageSize = pageLimit ?? MESSAGE_PAGE;
+            const from = Math.max(0, index - pageSize);
+            return delay({ messages: snapshot.messages.slice(from, index), hasMore: from > 0 });
+        },
+
+        /** Тот же приём, что у updateMember: нашли участника в общем состоянии, поправили поле, разослали снимок целиком. */
+        markSeen: async ({ channelId, memberId, message }) => {
+            const updated = await mutate(channelId, (current) => {
+                const member = current.members.find((item) => item.memberId === memberId);
+                if (!member) {
+                    throw new ChannelError('member-not-found', 'Такого корабля в канале нет');
+                }
+                member.lastSeen = { messageId: message.messageId, at: message.sentAt };
+                return { ...member };
+            });
+            emit(channelId, { type: 'member-updated', member: updated });
+            return delay(undefined);
+        },
+
+        /**
+         * Хранилище держит разговор целиком, и точный подсчёт (с разбором своих и системных
+         * записей) был бы здесь не труднее, чем у ChannelSnapshot. Но счёт нарочно такой же
+         * простой и слепой к содержимому, как у firebaseBackend.ts (см. там же и в контракте,
+         * почему): держать два разных поведения по разные стороны одного контракта — плодить
+         * разницу, которую после придётся объяснять, а не саму возможность посчитать точнее.
+         */
+        countUnread: ({ channelId, after }) => {
+            const snapshot = readState().channels[channelId];
+            const count = snapshot ? snapshot.messages.filter((message) => message.sentAt > after).length : 0;
+            return delay({ count });
         },
 
         subscribe: ({ channelId, onEvent: listener }): Unsubscribe => {
@@ -492,5 +707,10 @@ export function createLocalBackend(): ChannelBackend {
                 }
             };
         },
+
+        // Настоящему серверу тут неоткуда взяться — соседняя вкладка не роняет связь, — и всё
+        // же слушаем navigator.onLine, а не отвечаем «на связи» всегда: иначе полоску «нет связи»
+        // (см. App.tsx) нечем было бы проверить браузерным прогоном (context.setOffline).
+        watchConnection: ({ onChange }) => watchOnlineStatus(onChange),
     };
 }

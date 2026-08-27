@@ -11,9 +11,12 @@ import {
     useState,
 } from 'react';
 
+import { Berth, Message, MorseFeed, ShipKind, Side, authorLook, isSameBerth, otherSide } from '@shared/types/channel';
+
 import { ChannelDraft, ChannelError, MemberDraft, backend, freeBerths, suggestBerth } from '@/backend';
 import { DEMO_CHANNEL_SLUG } from '@/backend/seed';
 import SeaScene, { BerthChoice } from '@/components/SeaScene/SeaScene';
+import SignIn from '@/components/auth/SignIn';
 import CreateChannel from '@/components/channel/CreateChannel';
 import LeaveRaid from '@/components/channel/LeaveRaid';
 import MemberForm from '@/components/channel/MemberForm';
@@ -32,14 +35,15 @@ import { LeaveIcon } from '@/components/ui/icons';
 import { GATE_PAD, SHEET_HANDLE, SHEET_TOP_GAP } from '@/config/layout';
 import { paced } from '@/config/time';
 import { HAIL_SIGNAL, morseDuration } from '@/hooks/morse';
+import { useAuth } from '@/hooks/useAuth';
 import { useChannel } from '@/hooks/useChannel';
+import { useConnection } from '@/hooks/useConnection';
 import { Layout, chatMagnets, useLayout } from '@/hooks/useLayout';
 import { useSlide } from '@/hooks/useSlide';
 import { useSwipe } from '@/hooks/useSwipe';
 import { useUnread } from '@/hooks/useUnread';
 import { channelLink, useRoute } from '@/routing';
 import { NOTHING_OPEN, reduce } from '@/state/layers';
-import { Berth, Message, MorseFeed, ShipKind, Side, authorLook, isSameBerth, otherSide } from '@/types/channel';
 import { copyText } from '@/utils/clipboard';
 import { Fling, rubberBand, settleMagnet, stepMagnet, trackFling } from '@/utils/magnet';
 import { plural } from '@/utils/plural';
@@ -109,8 +113,31 @@ const legalSize = (size: number, { floor, min }: Layout): number => {
  */
 export default function App() {
     const route = useRoute();
-    const channelState = useChannel(route.channel, route.memberId);
-    const { channel, myId, reception, lastLook, loading } = channelState;
+    const auth = useAuth();
+    const channelState = useChannel(route.channel, route.memberId, auth.account?.userId ?? null);
+    const {
+        channel,
+        myId,
+        reception,
+        lastLook,
+        loading,
+        loadError,
+        retryLoad,
+        hasMoreMessages,
+        loadingOlder,
+        loadOlder,
+    } = channelState;
+    const connection = useConnection();
+    /**
+     * Вошёл ли человек. Вход спрашивают не ради приличия: корабль принадлежит человеку,
+     * а не вкладке, и завести канал или встать на рейд, никем не назвавшись, теперь нельзя.
+     */
+    const signedIn = Boolean(auth.account);
+    /**
+     * Ждём ли ещё ответа — от канала или от входа. Второе не менее важно: вход отвечает
+     * не мгновенно, и без этого ожидания вошедший на миг видел бы приглашение войти.
+     */
+    const waiting = loading || !auth.known;
     const [replyTo, setReplyTo] = useState<Message | null>(null);
     /**
      * Что открыто поверх рейда: список кораблей, форма своего корабля, карточка чужого, прощание
@@ -331,16 +358,29 @@ export default function App() {
         }
     }, [inChat]);
 
+    // Форма постановки в строй во весь рост: её раскрывают кнопкой, и раскрыть её может только
+    // вошедший — гостю на этом месте стоит сам вход, а не форма.
+    const joinOpen = !waiting && Boolean(channel) && signedIn && !me && joining;
+
     /**
-     * Закрытая форма: канал открыт, а человек в нём ещё никто — и не начинал им становиться.
-     * Видно ему при этом только сам рейд: разговора нет (его и не с кем вести), списка кораблей
-     * нет, и корабли в кадре не нажимаются. Пока человек не встал в строй, канал о нём не знает
-     * ничего — и он о канале ровно столько же.
+     * У входа: канал открыт, а корабля на нём у человека нет — и форма, которой его заводят,
+     * не раскрыта. Видно ему при этом только сам рейд: разговора нет (его и не с кем вести),
+     * списка кораблей нет, и корабли в кадре не нажимаются. Пока человек не встал в строй,
+     * канал о нём не знает ничего — и он о канале ровно столько же.
+     *
+     * Про вход тут нарочно не спрашиваем. Не вошедший вовсе — тот же случай, только глубже:
+     * рейд по ссылке ему виден (правила чтения открыты, см. firestore.rules), а больше не
+     * положено ничего — и уж точно не карточки чужих кораблей. Стояло здесь `signedIn`, и
+     * гость выпадал из этого состояния целиком: `atGate` у него ложный, а значит нажатия
+     * по кораблям (см. `onShowShip` ниже) ему доставались наравне с теми, кто в строю.
+     * Проверено — карточка открывалась (tests-firebase/channel.spec.ts, «канал по ссылке
+     * без входа»); местный набор такого поймать не мог: там вкладка всегда «вошедшая»,
+     * см. `createLocalEntrance`.
+     *
+     * Заодно закрывается и выход из аккаунта с раскрытой формой: `joinOpen` без входа ложен,
+     * и вышедший оказывается ровно там же, где гость, — у входа.
      */
-    const atGate = !loading && Boolean(channel) && !me && !joining;
-    // Она же открытая: форма постановки в строй во весь рост. Второе состояние того же самого —
-    // третьего у входа нет.
-    const joinOpen = !loading && Boolean(channel) && !me && joining;
+    const atGate = !waiting && Boolean(channel) && !me && !joinOpen;
     // Форма своего корабля: выезжает снизу поверх разговора и уходит туда же. Пока едет —
     // остаётся на экране, см. useSlide.
     const formOpen = editing && inChat;
@@ -365,7 +405,7 @@ export default function App() {
     // на воду. На главной канала ещё нет, вставать некуда и не в чем — там рейд пустой
     // и ничего не предлагает. Закрытая форма мест тоже не показывает: выбирать их незачем,
     // пока не решено вставать.
-    const picking = joinOpen || (!loading && Boolean(channel) && editing);
+    const picking = joinOpen || (!waiting && Boolean(channel) && editing);
 
     // Какой корабль выбран в форме. Держим здесь, а не в самой форме: от размера зависит,
     // куда этот корабль вообще влезет, и точки свободных мест на воде обязаны это знать.
@@ -458,6 +498,12 @@ export default function App() {
     // поверх него (см. cover у Shade), и закрыв её, человек возвращается туда, откуда открыл.
     // Открытая из кадра, она ложится поверх пустого места — там закрывать и нечего.
     const handleShowShip = useCallback((memberId: string) => act({ type: 'show-ship', memberId }), []);
+
+    // Выход. Отказ здесь редкость, но молчать о нём нельзя: человек нажал и ждёт, что
+    // строчка с его именем пропадёт, — а она осталась.
+    const handleSignOut = () => {
+        void auth.signOut().catch(() => notify('Не вышло выйти. Попробуйте ещё раз'));
+    };
 
     const handleCreate = async (draft: ChannelDraft) => {
         const { channel: created } = await backend.createChannel({ channel: draft });
@@ -581,13 +627,41 @@ export default function App() {
     }, [channel, reception]);
 
     const handleSend = (text: string) => {
-        // Отказ показываем снекбаром: у бэкенда для него уже есть человеческий текст,
-        // а молча проглотить его нельзя — человек решит, что сообщение ушло.
+        // Ответ снимаем сразу, не дожидаясь бэкенда: сообщение уже видно в ленте — крутилкой
+        // или сразу значком (!), смотря по тому, есть ли связь (см. Message.delivery,
+        // MessageList) — и держать шторку ответа открытой до подтверждения сервера незачем.
+        setReplyTo(null);
+        // Снекбаром показываем только то, что бэкенд бросает исключением, — длину или подобную
+        // проверку до попытки записи. Отказ сети или сервера сюда больше не долетает: такое
+        // сообщение возвращается обычным ответом, просто со status: 'failed' в delivery,
+        // и в ленте у него свой значок (!) с повтором по клику, а не снекбар.
         void channelState
             .sendMessage({ text, thread: replyTo ? { messageId: replyTo.messageId } : undefined })
-            .then(() => setReplyTo(null))
             .catch((failure: unknown) =>
                 notify(failure instanceof ChannelError ? failure.message : 'Не вышло отправить')
+            );
+    };
+
+    // Клик по значку (!) в ленте — отправить снова тем же messageId (см. MessageList,
+    // Message.delivery). Отказ здесь редкий — почти всегда «дошло само» между значком и кликом
+    // (retryMessage это и проверяет), — но снекбаром, как и у всего остального, а не молча.
+    const handleRetryMessage = (messageId: string) => {
+        void channelState
+            .retryMessage(messageId)
+            .catch((failure: unknown) =>
+                notify(failure instanceof ChannelError ? failure.message : 'Не вышло отправить')
+            );
+    };
+
+    // Отказ снекбаром, а не молча: без него «высадить может только старший» видит один бэкенд,
+    // а старший на экране решает, что нажатие потерялось, и жмёт снова. Причина у ChannelError
+    // уже человеческая и своя на каждый код — «не старший» и «нет связи» читаются по-разному,
+    // это разбирает toChannelError, здесь остаётся её только показать.
+    const handleKick = (memberId: string) => {
+        void channelState
+            .kick(memberId)
+            .catch((failure: unknown) =>
+                notify(failure instanceof ChannelError ? failure.message : 'Не вышло высадить корабль')
             );
     };
 
@@ -671,13 +745,17 @@ export default function App() {
             // И сбоку, и у закрытой формы «Встать на рейд» — коробка стоит числом, которое
             // не про долю хода: сбоку это вся высота окна, у закрытой формы — сама кнопка
             // (см. `gated` ниже). Шагать по точкам разговора там нечем.
-            if (atSide || atGate) {
+            //
+            // Спрашиваем именно измеренную кнопку, а не `atGate` целиком: под ним стоит
+            // и не вошедший гость, а у того кнопки нет вовсе — на её месте плашка входа, —
+            // и коробка встаёт обычным размером. По такой шагать есть чем, как по разговору.
+            if (atSide || (atGate && gateButtonHeight > 0)) {
                 return;
             }
             chose();
             resize(stepMagnet(chatMagnets(layout, boxHasForm), layout.size, direction === 'up' ? 1 : -1), true);
         },
-        [atGate, atSide, boxHasForm, chose, layout, resize]
+        [atGate, atSide, boxHasForm, chose, gateButtonHeight, layout, resize]
     );
     useSwipe(sceneRef, stepChat);
 
@@ -717,6 +795,11 @@ export default function App() {
 
     const status = (): string => {
         if (!channel) {
+            if (loadError) {
+                // Не «канала нет» — открыть не вышло из-за сети или сервера, и это другая
+                // причина: полоска связи (см. ниже) говорит то же самое, а здесь — коротко.
+                return 'нет связи';
+            }
             // На главной канала нет и статусу неоткуда взяться — там строчка работает
             // подзаголовком сервиса.
             return route.channel ? 'канал не найден' : 'Ночной морской чат';
@@ -749,23 +832,46 @@ export default function App() {
     // не с кем. Форма своего корабля выезжает поверх и этот слой не разбирает.
     const baseContent = (
         <>
-            {loading && <div className={styles.waiting}>Выходим на связь…</div>}
+            {waiting && <div className={styles.waiting}>Выходим на связь…</div>}
+            {/* Открыть канал не вышло из-за сети или сервера — не то же самое, что «канала нет»
+                (та ветка ниже — законный ответ «такого адреса не существует»). Показываем
+                кнопку «Ещё раз», а не отправляем создавать канал заново: адрес мог быть верным,
+                просто спросить по нему не вышло. */}
+            {!waiting && route.channel && !channel && loadError && (
+                <Panel
+                    title="Канал не открылся"
+                    hint={loadError}
+                    actions={<Button onClick={retryLoad}>Ещё раз</Button>}
+                />
+            )}
             {/* Адрес в ссылке есть, а канала по нему нет: ссылка устарела или в ней опечатка.
                 Показывать здесь форму создания нельзя — человек шёл не создавать, а войти. */}
-            {!loading && route.channel && !channel && (
+            {!waiting && route.channel && !channel && !loadError && (
                 <Panel
                     title="Канала нет"
                     hint={`Канала по адресу «${route.channel}» нет: ссылка устарела или в ней опечатка.`}
                     actions={<Button onClick={route.openHome}>Создать свой канал</Button>}
                 />
             )}
-            {!loading && !route.channel && (
-                <CreateChannel
-                    onCreate={handleCreate}
-                    demoHref={`?channel=${DEMO_CHANNEL_SLUG}`}
-                    onOpenDemo={() => route.openChannel(DEMO_CHANNEL_SLUG)}
-                />
-            )}
+            {/* Главная. Гостю здесь показывать нечего, кроме входа: и свой канал, и демо —
+                действия, а действовать в чате может только тот, за кем стоит человек,
+                а не вкладка. */}
+            {!waiting &&
+                !route.channel &&
+                (signedIn ? (
+                    <CreateChannel
+                        onCreate={handleCreate}
+                        demoHref={`?channel=${DEMO_CHANNEL_SLUG}`}
+                        onOpenDemo={() => route.openChannel(DEMO_CHANNEL_SLUG)}
+                        account={auth.account}
+                        onSignOut={handleSignOut}
+                    />
+                ) : (
+                    <SignIn
+                        hint="Здесь заводят каналы связи и выходят в море под своим позывным. Войдите — и можно ставить корабль на рейд."
+                        onSignIn={auth.signIn}
+                    />
+                ))}
             {/* Форма постановки в строй — это и есть содержимое блока: разговора у того, кто
                 ещё не в строю, нет, и накрывать ей нечего. Переоснащение, наоборот, выезжает
                 поверх разговора — см. ниже.
@@ -775,7 +881,18 @@ export default function App() {
                 в двух видах, и набранное в ней закрытие переживает. Закрывается она «Отменой»
                 рядом с «Встать на рейд»: коробку тянут за ручку, и потяг этот про её размер,
                 а не про то, что в ней стоит. */}
-            {!loading && channel && !me && (
+            {/* Гость по ссылке: рейд ему виден как обычно — за ним по ссылке и идут, — а на
+                месте разговора стоит вход. Встать на рейд, не назвавшись, нельзя: корабль
+                остаётся за человеком, и завтра он вернётся к нему с другого устройства. */}
+            {!waiting && channel && !signedIn && (
+                <SignIn
+                    // Название канала не повторяем: оно стоит строкой выше, в шапке, — а вложенные
+                    // кавычки в «Рейд «Эскадра «Полночь»»» читаются как опечатка.
+                    hint="Рейд перед вами. Войдите, чтобы поставить на него свой корабль."
+                    onSignIn={auth.signIn}
+                />
+            )}
+            {!waiting && channel && signedIn && !me && (
                 <MemberForm
                     mode="join"
                     crew={members}
@@ -803,6 +920,10 @@ export default function App() {
                         myId={me.memberId}
                         onReply={setReplyTo}
                         onHail={handleHail}
+                        onRetry={handleRetryMessage}
+                        hasMoreMessages={hasMoreMessages}
+                        loadingOlder={loadingOlder}
+                        onLoadOlder={() => void loadOlder()}
                     />
                     <Composer
                         // Плашкой ввода меряется пол разговора: свёрнутый до упора, он стоит
@@ -813,7 +934,7 @@ export default function App() {
                         onCancelReply={() => setReplyTo(null)}
                         onSend={handleSend}
                         // Фразу об отказе складывает само поле по общей мерке длины
-                        // (`@/utils/limit`), нам остаётся её показать.
+                        // (`@shared/utils/limit`), нам остаётся её показать.
                         onTooLong={notify}
                         onTyped={handleTyped}
                     />
@@ -837,6 +958,10 @@ export default function App() {
      * Пока кнопка не измерена (первая отрисовка, `gateButtonHeight` ещё 0), коробка встаёт
      * обычным способом — тем же, каким встал бы разговор, — и подбирается под кнопку кадром
      * позже, как и пол разговора под свежую плашку ответа.
+     *
+     * Тем же нулём мерка сама собой обходит гостя, который тоже `atGate` (см. выше): кнопки
+     * у него нет вовсе — на её месте стоит вход, — и подгонять коробку не подо что. Она встаёт
+     * обычным размером, каким встал бы разговор, и вход в ней помещается целиком.
      */
     const gateHeight = gateButtonHeight > 0 ? gateButtonHeight + GATE_PAD * 2 : 0;
     const gated = atGate && !atSide && gateHeight > 0;
@@ -1086,8 +1211,9 @@ export default function App() {
                         // тут стоит дешевле, чем разбор, кто кого сейчас не пускает. Список
                         // кораблей закрывать не надо: он и так не открыт, пока открыта форма.
                         //
-                        // При закрытой форме нажатий нет вовсе: пришедший по ссылке смотрит
-                        // на рейд со стороны, и трогать чужие корабли ему нечем — как и им его.
+                        // У входа нажатий нет вовсе: пришедший по ссылке смотрит на рейд
+                        // со стороны, и трогать чужие корабли ему нечем — как и им его.
+                        // И тот, кто ещё не назвался, — тоже пришедший по ссылке (см. `atGate`).
                         onEditShip={atGate ? undefined : handleEditShip}
                         // А щелчок по чужому — его карточку: своим на рейде распоряжаются,
                         // чужой разглядывают.
@@ -1097,6 +1223,15 @@ export default function App() {
                 </div>
                 <div className={styles.headerBar} style={boxEdge} ref={measureHeader}>
                     <div className={styles.headerInfo}>
+                        {/* Нет связи — говорим один раз здесь, а не снекбаром на каждое действие
+                            (см. docs/FIREBASE.md, «Что видит человек»): повторённый пять раз
+                            подряд снекбар про отсутствие сети — шум, а не сообщение. Строчка
+                            видна и на главной, до открытия канала: связь нужна раньше, чем канал. */}
+                        {connection.status === 'offline' && (
+                            <div className={styles.connectionStrip} role="status">
+                                Связи нет. Ждём, когда вернётся
+                            </div>
+                        )}
                         {/* Название канала — это и кнопка «кто на связи»: по нажатию открывается
                             список кораблей. Значок стоит в конце названия, а не отдельной кнопкой
                             справа: список — это и есть «кто в этом канале», и спрашивают о нём,
@@ -1322,7 +1457,7 @@ export default function App() {
                         onEditMe={handleEditShip}
                         // Список остаётся открытым: высадив один корабль, старший чаще всего смотрит
                         // на список дальше, а не уходит из него.
-                        onKick={(memberId) => void channelState.kick(memberId)}
+                        onKick={handleKick}
                         onHail={handleHail}
                         // Карточка чужого корабля — та же, что и по щелчку по нему в кадре. Здесь
                         // она ложится поверх списка и закрывается обратно в него.

@@ -1,4 +1,7 @@
-import { Berth, Channel, Member, MemberRef, Message, MessageRef, ShipKind, Side } from '@/types/channel';
+// Реэкспортом, а не только импортом: интерфейс ниже (ChannelBackend) использует MemberDraft
+// напрямую, а `export type { X } from '…'` даёт лишь пересылку — локального имени она не заводит.
+import type { MemberDraft } from '@shared/types/calls';
+import { Channel, Member, MemberRef, Message, MessageRef } from '@shared/types/channel';
 
 /**
  * Контракт бэкенда. Фронтенд знает только его и ничего — про то, где лежат данные:
@@ -22,28 +25,21 @@ import { Berth, Channel, Member, MemberRef, Message, MessageRef, ShipKind, Side 
 export interface ChannelSnapshot {
     channel: Channel;
     members: Member[];
+    /**
+     * Лента — не вся, а последняя страница (см. `config/network.ts`, MESSAGE_PAGE):
+     * разговор в канале не ограничен, а держать его в памяти вкладки целиком незачем,
+     * пока видна только нижняя часть.
+     */
     messages: Message[];
+    /** Есть ли выше messages ещё лента. Правда — повод звать loadOlderMessages. */
+    hasMoreMessages: boolean;
 }
 
-/** Что участник о себе сообщает: и когда встаёт в строй, и когда переоснащает корабль. */
-export interface MemberDraft {
-    name: string;
-    hullNumber: string;
-    shipKind: ShipKind;
-    color: string;
-    /**
-     * Выбранное место на рейде. Пожелание, а не приказ: пока человек заполнял форму, туда мог
-     * встать кто-то другой, и тогда бэкенд поставит корабль на случайное свободное. Не указано —
-     * место выбирается целиком бэкендом; у стоящего в строю корабля оно при этом не меняется.
-     */
-    berth?: Berth;
-    /**
-     * Курс: куда смотрит нос, когда корабль встал на рейд. В отличие от места это не пожелание,
-     * а приказ — курс ничем не занят и отобрать его не у кого. Не указан — курс достаётся
-     * от стороны захода, как было до того, как его начали выбирать.
-     */
-    facing?: Side;
-}
+/**
+ * Что участник о себе сообщает: и когда встаёт в строй, и когда переоснащает корабль.
+ * Общая с сервером форма — оба конца провода должны разбирать один и тот же черновик.
+ */
+export type { MemberDraft };
 
 /** Что у канала можно задать и потом поменять: адрес и человеческое название. */
 export interface ChannelDraft {
@@ -60,6 +56,12 @@ export interface MessageDraft {
     text: string;
     /** Ответ: сообщение, к которому он привязан. */
     thread?: MessageRef;
+    /**
+     * Под каким идентификатором записать сообщение. Повторная отправка с тем же —
+     * не второе сообщение, а та же запись: так устроен повтор после обрыва
+     * (см. retryMessage). Не указан — назначает бэкенд, как и раньше.
+     */
+    messageId?: string;
 }
 
 /**
@@ -89,34 +91,31 @@ export type ChannelEvent = ChannelEventBase &
         | { type: 'member-updated'; member: Member }
         | { type: 'member-left'; member: MemberRef }
         | { type: 'message-added'; message: Message }
+        /** Статус доставки сменился — например, пришло подтверждение сервера. См. #69. */
+        | { type: 'message-updated'; message: Message }
+        /** Неотправленное выброшено (см. discardMessage) — в ленте его больше нет. */
+        | { type: 'message-removed'; message: MessageRef }
     );
 
 export type ChannelEventType = ChannelEvent['type'];
 
-/** Почему действие не вышло. Коды перечислены, чтобы UI мог показать внятный текст. */
-export type ChannelErrorCode =
-    | 'channel-not-found'
-    | 'channel-full'
-    | 'slug-taken'
-    | 'slug-invalid'
-    | 'name-taken'
-    | 'hull-taken'
-    | 'member-not-found'
-    | 'not-senior'
-    | 'message-too-long'
-    | 'course-too-long';
-
-export class ChannelError extends Error {
-    constructor(
-        readonly code: ChannelErrorCode,
-        message: string
-    ) {
-        super(message);
-        this.name = 'ChannelError';
-    }
-}
+/**
+ * Почему действие не вышло. Коды одни и те же у сервера и у клиента: сервер бросает
+ * `ChannelError` изнутри транзакции, а этот файл остаётся единственной дверью для фронтенда.
+ */
+export { ChannelError } from '@shared/errors';
+export type { ChannelErrorCode } from '@shared/errors';
 
 export type Unsubscribe = () => void;
+
+/** Есть ли связь с бэкендом прямо сейчас — и с какого момента она в этом состоянии. */
+export type ConnectionStatus = 'online' | 'offline';
+
+export interface Connection {
+    status: ConnectionStatus;
+    /** `Date.now()` того момента, с которого действует текущий статус. */
+    since: number;
+}
 
 /**
  * Адрес канала — во всех методах, кроме создания и разбора ссылки. Скаляром, а не объектом:
@@ -132,9 +131,14 @@ interface MemberAddress extends ChannelAddress {
 }
 
 export interface ChannelBackend {
-    getChannel(request: ChannelAddress): Promise<ChannelSnapshot | null>;
+    /**
+     * `userId` не обязателен, но нужен, чтобы подмешать в ленту своё же неотправленное
+     * (см. `backend/outbox.ts`): без него ящик не найти — ключ у него `<userId>.<channelId>`.
+     * Не передан — ответ тот же, что и раньше, без ящика.
+     */
+    getChannel(request: ChannelAddress & { userId?: string }): Promise<ChannelSnapshot | null>;
     /** Разбор адреса из ссылки: по slug находим канал и дальше работаем с его channelId. */
-    getChannelBySlug(request: { slug: string }): Promise<ChannelSnapshot | null>;
+    getChannelBySlug(request: { slug: string; userId?: string }): Promise<ChannelSnapshot | null>;
 
     createChannel(request: { channel: ChannelDraft }): Promise<{ channel: Channel }>;
     updateChannel(request: ChannelAddress & { channel: ChannelDraft }): Promise<{ channel: Channel }>;
@@ -168,9 +172,94 @@ export interface ChannelBackend {
     sendMessage(request: MemberAddress & { message: MessageDraft }): Promise<{ message: Message }>;
 
     /**
+     * Отправить заново то, что не ушло. Тем же `messageId`, что и у неудачной попытки, —
+     * поэтому двойника не будет: повтор попадает в ту же запись, а не заводит вторую
+     * (см. docs/FIREBASE.md, «Повтор без двойников»). Текст неотправленного отправитель
+     * не приносит заново — он берётся из ящика (`backend/outbox.ts`) по `message.messageId`.
+     */
+    retryMessage(request: MemberAddress & { message: MessageRef }): Promise<{ message: Message }>;
+
+    /**
+     * Выбросить неотправленное: человек передумал. Убирает запись из ящика и из ленты
+     * этой (и только этой) вкладки. `memberId` в адресе не нужен — ящик неотправленного
+     * общий у канала, а не у участника внутри него.
+     *
+     * Границу стоит знать: у настоящего бэкенда это отказ от ожидания, а не отмена записи.
+     * Отправка в офлайне уже легла в собственную очередь Firestore (кеш на диске, см.
+     * config/firebase.ts), отменять записи оттуда SDK не умеет вовсе, и когда связь
+     * вернётся, сообщение всё-таки уйдёт и вернётся в ленту обычным message-added. Отказаться
+     * от него насовсем можно, пока связи нет; у локального бэкенда, где очереди никакой нет,
+     * — всегда. Кнопки на это в интерфейсе пока и не заведено (issue #69: метод — в контракт,
+     * значок в ленте — только повтору).
+     */
+    discardMessage(request: ChannelAddress & { message: MessageRef }): Promise<void>;
+
+    /**
+     * Догрузить ленту выше уже показанного — на один экран, а не всю переписку разом
+     * (см. `ChannelSnapshot.hasMoreMessages`).
+     *
+     * `before` называет сообщение, выше которого читаем: само оно уже показано и в ответ
+     * не попадает. `limit` необязателен — умолчание то же, что и у первой страницы
+     * (MESSAGE_PAGE, `config/network.ts`); полем, а не отдельной константой здесь, потому
+     * что страница может понадобиться другого размера, даже если сегодня такого зовущего нет.
+     *
+     * Отвечает в естественном порядке чтения — старые сверху, — том же самом, в каком лежит
+     * messages: результат подставляется перед ним без переворота.
+     */
+    loadOlderMessages(
+        request: ChannelAddress & { before: MessageRef; limit?: number }
+    ): Promise<{ messages: Message[]; hasMore: boolean }>;
+
+    /**
+     * Докуда участник дочитал разговор — своими глазами. Пишет только он сам, о себе:
+     * `memberId` в адресе — это тот, чьё участие правится, и вызывающий обязан быть им же,
+     * иначе `firestore.rules` откажет (правило — там, а не здесь: контракт лишь передаёт вызов).
+     *
+     * Дело хука `hooks/useUnread`, а не каждого места, что дочитало сообщение, — придержать
+     * вызовы во времени: отметка не обязана поспевать за каждой репликой, а вот записывать
+     * документ на каждую подряд, пока человек сидит в канале и болтает, — дорогая привычка
+     * (см. `config/network.ts`, MARK_SEEN_THROTTLE).
+     *
+     * `sentAt` сообщения идёт сюда вместе с его номером и не выдумывается на месте: в отметку
+     * ложится метка самого сообщения, а не время, когда его прочли (`Member.lastSeen`
+     * объясняет, почему по-другому нельзя). Бэкенд её и сам бы не узнал, не сходив за
+     * документом, — а звать чтение ради записи, которая идёт раз в несколько секунд, незачем.
+     */
+    markSeen(request: MemberAddress & { message: MessageRef & { sentAt: number } }): Promise<void>;
+
+    /**
+     * Сколько в канале сообщений позже отметки. Не перебором ленты — та с #68 приходит
+     * страницей, а не разговором целиком, — а отдельным счётом на сервере (`getCountFromServer`
+     * по `sentAt > after`): одно чтение вместо чтения всей страницы ради длины среза.
+     *
+     * Счёт нарочно не разбирает, что за сообщение попалось — своё, чужое, системное:
+     * разбор по автору потребовал бы второго `!=`-условия в одном запросе с диапазоном
+     * по времени, а Firestore пускает не больше одного на запрос; разбор по системности —
+     * либо явного поля вместо нынешнего необязательного kind, либо составного индекса,
+     * которого в проекте сегодня нет. `hooks/useUnread` зовёт этот метод только тогда,
+     * когда сама отправка сообщений на экране недоступна (см. его комментарий), и там
+     * это не потеря: своё сообщение в такой счёт попасть не может при всём желании.
+     * Другому вызывающему, для которого это не так, отвечает он тем же, приблизительно.
+     */
+    countUnread(request: ChannelAddress & { after: number }): Promise<{ count: number }>;
+
+    /**
      * Подписка на всё, что происходит в канале. Возвращает функцию отписки.
      * События приходят и от чужих вкладок, и от собственных действий этой вкладки —
      * UI не должен угадывать, кто сделал изменение, чтобы применить его.
+     *
+     * `userId` не обязателен, но нужен, чтобы узнать в исходящем `message-updated`/
+     * `message-removed` свою же запись из ящика неотправленного, заведённую ещё до этого
+     * вызова, — например, отправленное перед самой перезагрузкой. Без него отказ и повтор
+     * такого сообщения подпиской замечены не будут (хотя в самой ленте, через getChannel,
+     * оно всё равно останется видно).
      */
-    subscribe(request: ChannelAddress & { onEvent: (event: ChannelEvent) => void }): Unsubscribe;
+    subscribe(request: ChannelAddress & { userId?: string; onEvent: (event: ChannelEvent) => void }): Unsubscribe;
+
+    /**
+     * Состояние связи с бэкендом — не с каналом, а с сервером вообще. Отдельно от подписки:
+     * подписки может не быть (канал ещё не открыт), а знать, есть ли связь, надо и тогда.
+     * Первый вызов `onChange` — сразу с текущим состоянием, дальше — по перемене.
+     */
+    watchConnection(request: { onChange: (connection: Connection) => void }): Unsubscribe;
 }
