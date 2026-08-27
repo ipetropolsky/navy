@@ -1,15 +1,15 @@
 import { GoogleAuthProvider, User, onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth';
-import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, limit, orderBy, query, serverTimestamp, setDoc } from 'firebase/firestore';
 
 import { firebaseAuth, firestore } from '@/config/firebase';
 import { sessionStore } from '@/utils/storage';
 import { paths } from '@shared/config/model';
+import { Look, ShipSetup } from '@shared/types/channel';
 
 import { ChannelError, Unsubscribe } from '@/backend/types';
 
 /**
- * Вход. Отсюда приложение узнаёт, кто перед ним, и здесь же кончается прежняя выдумка,
- * что личность заводит себе вкладка (см. `backend/identity.ts`).
+ * Вход. Отсюда приложение узнаёт, кто перед ним.
  *
  * Вход через аккаунт, а не анонимный: корабли и участия привязаны к человеку, а не к вкладке,
  * и человек, открывший чат на телефоне и на ноутбуке, должен встретить там свой корабль,
@@ -22,6 +22,8 @@ export interface Account {
     userId: string;
     name?: string;
     email?: string;
+    /** Каким кораблём и какого цвета ходили в прошлый раз. Нет — значит, ещё не выходили в море. */
+    look?: Look;
 }
 
 /**
@@ -35,6 +37,12 @@ export interface Entrance {
     watch(request: { onChange: (state: AuthState) => void }): Unsubscribe;
     signIn(): Promise<Account>;
     signOut(): Promise<void>;
+    /**
+     * Записать во флот корабль, которым встали в строй или переоснастились. Запись переживает
+     * и новую вкладку, и другое устройство; наружу из неё возвращается только внешность —
+     * тем же вызовом `watch`, полем `Account.look`.
+     */
+    rememberLook(ship: ShipSetup): Promise<void>;
 }
 
 const accountOf = (user: User): Account => ({
@@ -42,6 +50,15 @@ const accountOf = (user: User): Account => ({
     ...(user.displayName ? { name: user.displayName } : {}),
     ...(user.email ? { email: user.email } : {}),
 });
+
+/** Проверить и привести к Look: годится и для документа Firestore, и для JSON из sessionStorage. */
+const toLook = (raw: unknown): Look | undefined => {
+    if (!raw || typeof raw !== 'object') {
+        return undefined;
+    }
+    const { shipKind, color } = raw as Partial<Look>;
+    return typeof shipKind === 'string' && typeof color === 'string' ? { shipKind, color } : undefined;
+};
 
 /**
  * Человеческий текст на каждый отказ входа. Их три, и они про разное: окно закрыли сами,
@@ -89,13 +106,39 @@ const rememberUser = async (user: User): Promise<void> => {
     }
 };
 
+/**
+ * Внешность последнего заведённого корабля — та, что предложит следующая форма постановки
+ * в строй. Берётся не полем документа, а последней записью личной истории кораблей
+ * (`users/{userId}/ships`, см. docs/FIREBASE.md): сортировка по одному полю, составного индекса
+ * не требует. Отказ (сеть, ещё нет ни одного корабля) — не беда, просто нечего подставить.
+ */
+const lastShip = async (userId: string): Promise<Look | undefined> => {
+    try {
+        const found = await getDocs(
+            query(collection(firestore(), paths.userShips({ userId })), orderBy('createdAt', 'desc'), limit(1))
+        );
+        return toLook(found.docs[0]?.data());
+    } catch {
+        return undefined;
+    }
+};
+
 export function createFirebaseEntrance(): Entrance {
     return {
         watch: ({ onChange }) =>
             onAuthStateChanged(firebaseAuth(), (user) => {
                 if (user) {
-                    onChange({ status: 'signed', account: accountOf(user) });
+                    const account = accountOf(user);
+                    onChange({ status: 'signed', account });
                     void rememberUser(user);
+                    // Внешность — отдельным запросом и отдельным приходом: `watch` уже ответил
+                    // выше, не дожидаясь его, а appearance приезжает вторым вызовом того же
+                    // `onChange`, когда дойдёт до Firestore и обратно.
+                    void lastShip(user.uid).then((look) => {
+                        if (look) {
+                            onChange({ status: 'signed', account: { ...account, look } });
+                        }
+                    });
                 } else {
                     onChange({ status: 'guest' });
                 }
@@ -114,15 +157,80 @@ export function createFirebaseEntrance(): Entrance {
         },
 
         signOut: () => signOut(firebaseAuth()),
+
+        rememberLook: async (ship) => {
+            const user = firebaseAuth().currentUser;
+            if (!user) {
+                return;
+            }
+            try {
+                // Свой id, не channelId: тот же канал можно перенастроить дважды, и оба раза
+                // это новый корабль в списке, а не переписанный прежний (см. firestore.rules —
+                // history-запись и не переписывается).
+                const shipId = doc(collection(firestore(), paths.userShips({ userId: user.uid }))).id;
+                await setDoc(doc(firestore(), paths.userShip({ userId: user.uid, shipId })), {
+                    ...ship,
+                    createdAt: Date.now(),
+                    serverAt: serverTimestamp(),
+                });
+            } catch {
+                // Не записали корабль во флот — не беда: следующая форма просто не подставит его сама.
+            }
+        },
     };
 }
 
 /**
- * Кем эта вкладка входит, пока за бэкендом стоит эмулятор. Экспортирован: тот же userId
- * нужен и localBackend.ts — им, и только им, ключуется ящик неотправленного (см.
- * backend/outbox.ts), а memberId там у каждой вкладки свой и для этого ключа не годится.
+ * Ключ, под которым эта вкладка держит свой userId для входа понарошку.
+ *
+ * `sessionStorage`, а не `localStorage`: состояние «сервера» у localBackend.ts общее на весь
+ * браузер (`localStorage`), а два человека, представленных в разговоре, должны быть разными —
+ * иначе отвечать за вторую сторону оказалось бы некому.
  */
-export const LOCAL_ACCOUNT: Account = { userId: 'local', name: 'Местный' };
+const LOCAL_ACCOUNT_KEY = 'kilvater.entrance.local';
+
+const newLocalUserId = (): string => `local-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+/**
+ * Кем эта вкладка входит, пока за бэкендом стоит эмулятор: настоящего сервера нет, и спросить
+ * userId не у кого, поэтому вход заводит его сам, при первом обращении, и дальше не меняет.
+ *
+ * Экспортирован: тот же userId нужен и localBackend.ts, и `memberId === userId` там теперь
+ * действует так же, как у настоящего бэкенда (см. join в localBackend.ts). Возвращает
+ * облегчённый Account, без `look`: localBackend.ts зовёт эту функцию на каждый чих, и незачем
+ * на каждый такой вызов заодно поднимать ещё и внешность.
+ */
+export const localAccount = (): Account => {
+    const known = sessionStore.read(LOCAL_ACCOUNT_KEY);
+    if (known) {
+        return { userId: known, name: 'Местный' };
+    }
+    const userId = newLocalUserId();
+    sessionStore.write(LOCAL_ACCOUNT_KEY, userId);
+    return { userId, name: 'Местный' };
+};
+
+const LOCAL_LOOK_PREFIX = 'kilvater.entrance.look.';
+
+/** Чем этот userId выходил в море в последний раз. Никогда не выходил — undefined. */
+const readLocalLook = (userId: string): Look | undefined => {
+    const raw = sessionStore.read(LOCAL_LOOK_PREFIX + userId);
+    if (!raw) {
+        return undefined;
+    }
+    try {
+        return toLook(JSON.parse(raw));
+    } catch {
+        return undefined;
+    }
+};
+
+/** localAccount() с внешностью — нужна входу понарошку, а localBackend.ts она ни разу не нужна. */
+const localAccountWithLook = (): Account => {
+    const account = localAccount();
+    const look = readLocalLook(account.userId);
+    return look ? { ...account, look } : account;
+};
 
 /**
  * Вышел ли человек из входа понарошку. В памяти вкладки, а не в переменной модуля: настоящий
@@ -141,7 +249,7 @@ const LOCAL_GUEST_KEY = 'kilvater.entrance.guest';
 export function createLocalEntrance(): Entrance {
     let state: AuthState = sessionStore.read(LOCAL_GUEST_KEY)
         ? { status: 'guest' }
-        : { status: 'signed', account: LOCAL_ACCOUNT };
+        : { status: 'signed', account: localAccountWithLook() };
     const listeners = new Set<(state: AuthState) => void>();
     const settle = (next: AuthState): void => {
         state = next;
@@ -162,11 +270,19 @@ export function createLocalEntrance(): Entrance {
             };
         },
         signIn: () => {
-            settle({ status: 'signed', account: LOCAL_ACCOUNT });
-            return Promise.resolve(LOCAL_ACCOUNT);
+            const account = localAccountWithLook();
+            settle({ status: 'signed', account });
+            return Promise.resolve(account);
         },
         signOut: () => {
             settle({ status: 'guest' });
+            return Promise.resolve();
+        },
+        rememberLook: (ship) => {
+            // Флот здесь не заводим — эмулятору некуда: держим ровно то, что отдаём наружу,
+            // саму внешность, а не историю к ней.
+            const look: Look = { shipKind: ship.shipKind, color: ship.color };
+            sessionStore.write(LOCAL_LOOK_PREFIX + localAccount().userId, JSON.stringify(look));
             return Promise.resolve();
         },
     };

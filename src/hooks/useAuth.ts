@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { Account, AuthState, entrance } from '@/backend';
+import { Look, ShipSetup } from '@shared/types/channel';
 
 /**
  * Кто перед нами. Единственное место, где приложение разговаривает со входом; компоненты
@@ -18,15 +19,39 @@ export interface AuthController {
     account: Account | null;
     signIn: () => Promise<void>;
     signOut: () => Promise<void>;
+    /**
+     * Чем вошедший выходил в море в последний раз — силуэт и цвет. Ими открывается форма
+     * у того, кто в этом канале ещё не стоит: позывной с номером в новом канале свои,
+     * а корабль человек чаще берёт тот же. Ни разу не выходил — null.
+     */
+    lastLook: Look | null;
+    /** Записать во флот корабль, которым встали в строй или переоснастились (см. `entrance.rememberLook`). */
+    rememberLook: (ship: ShipSetup) => void;
 }
 
 export function useAuth(): AuthController {
     const [state, setState] = useState<AuthState>({ status: 'unknown' });
-
-    useEffect(() => entrance.watch({ onChange: setState }), []);
+    const [lastLook, setLastLook] = useState<Look | null>(null);
 
     // Состояние приезжает подпиской, а не из ответа: вход мог произойти и в другой вкладке,
     // и ветка «это сделал я» тут не нужна — ровно как с событиями канала.
+    //
+    // onChange зовётся на этот вход дважды: сперва без look (аккаунт уже известен, а внешность
+    // ещё не пришла из хранилища), потом ещё раз, когда она пришла, — так и должна вести себя
+    // подписка. Второй раз может не случиться вовсе, если вошедший ни разу не выходил в море.
+    useEffect(
+        () =>
+            entrance.watch({
+                onChange: (next) => {
+                    setState(next);
+                    if (next.status === 'signed' && next.account.look) {
+                        setLastLook(next.account.look);
+                    }
+                },
+            }),
+        []
+    );
+
     const signIn = useCallback(async () => {
         await entrance.signIn();
     }, []);
@@ -35,10 +60,20 @@ export function useAuth(): AuthController {
         await entrance.signOut();
     }, []);
 
+    // Своё состояние меняем сразу, не дожидаясь ответа: форма отдаёт выбор в ту же секунду,
+    // а не после того, как запись дойдёт до сервера (см. entrance.rememberLook — неудачную
+    // запись он проглатывает молча, не запомнить вкус не беда).
+    const rememberLook = useCallback((ship: ShipSetup) => {
+        setLastLook({ shipKind: ship.shipKind, color: ship.color });
+        void entrance.rememberLook(ship);
+    }, []);
+
     return {
         known: state.status !== 'unknown',
         account: state.status === 'signed' ? state.account : null,
         signIn,
         signOut,
+        lastLook,
+        rememberLook,
     };
 }

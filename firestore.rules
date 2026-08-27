@@ -23,6 +23,8 @@ service cloud.firestore {
         function maxText() { return 500; }
         function maxName() { return 20; }
         function maxHull() { return 3; }
+        // Цвет — «#8ecae6», семь символов; шестнадцати хватит с запасом.
+        function maxColor() { return 16; }
 
         function signedIn() { return request.auth != null; }
         function me() { return request.auth.uid; }
@@ -58,8 +60,7 @@ service cloud.firestore {
                 author.look.keys().hasOnly(['name', 'hullNumber', 'color'])
                 && author.look.get('name', '').size() <= maxName()
                 && author.look.get('hullNumber', '').size() <= maxHull()
-                // Цвет — «#8ecae6», семь символов; шестнадцати хватит с запасом.
-                && author.look.get('color', '').size() <= 16
+                && author.look.get('color', '').size() <= maxColor()
             );
         }
 
@@ -83,7 +84,7 @@ service cloud.firestore {
             allow get: if isMe(userId);
             allow list: if false;
             allow create, update: if isMe(userId)
-                && request.resource.data.keys().hasOnly(['createdAt', 'account', 'look', 'serverAt'])
+                && request.resource.data.keys().hasOnly(['createdAt', 'account', 'serverAt'])
                 && request.resource.data.createdAt is number
                 && request.resource.data.account.keys().hasOnly(['name', 'email'])
                 && stamped();
@@ -94,6 +95,28 @@ service cloud.firestore {
             match /channels/{channelId} {
                 allow read: if isMe(userId);
                 allow write: if false;
+            }
+
+            // Личная история кораблей: чем и в каком канале выходили. Пишет и читает только
+            // хозяин, а запись, попав сюда, остаётся как есть — переписывать в истории нечего,
+            // разве что завести новую.
+            match /ships/{shipId} {
+                allow read: if isMe(userId);
+                allow create: if isMe(userId)
+                    && request.resource.data.keys().hasOnly(
+                        ['name', 'hullNumber', 'shipKind', 'color', 'channelId', 'createdAt', 'serverAt']
+                    )
+                    && request.resource.data.name is string
+                    && request.resource.data.name.size() <= maxName()
+                    && request.resource.data.hullNumber is string
+                    && request.resource.data.hullNumber.size() <= maxHull()
+                    && request.resource.data.shipKind is string
+                    && request.resource.data.color is string
+                    && request.resource.data.color.size() <= maxColor()
+                    && request.resource.data.channelId is string
+                    && request.resource.data.createdAt is number
+                    && stamped();
+                allow update, delete: if false;
             }
         }
 

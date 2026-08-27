@@ -168,6 +168,24 @@ export const openChannel = async (page: Page, slug = DEMO, memberId?: string): P
 };
 
 /**
+ * Заставить вкладку забыть, кем она входила: следующий join() заведёт для неё новый userId
+ * (`localAccount()` в backend/auth.ts), как если бы за той же страницей теперь сидел кто-то
+ * другой. Сама вкладка не меняется, меняется только эта запись в её sessionStorage.
+ *
+ * Нужна там, где несколько кораблей заводятся подряд на одной странице (см. scene.spec.ts,
+ * `anchor`): без сброса очередной join() застаёт userId уже занятым предыдущим кораблём,
+ * а memberId === userId, так что вторая заявка распознаётся как повторный вход того же
+ * корабля (см. join в localBackend.ts, идемпотентность та же, что у joinChannel на сервере),
+ * а не как новый. У настоящих разных вкладок эта путаница невозможна: у каждой свой
+ * sessionStorage, и localAccount() заводит свой userId в каждой сам, один раз.
+ */
+export const forgetLocalTab = (page: Page): Promise<void> =>
+    page.evaluate(() => {
+        // eslint-disable-next-line no-restricted-syntax -- взгляд снаружи, а не код приложения
+        sessionStorage.removeItem('kilvater.entrance.local');
+    });
+
+/**
  * Завести свой канал и остаться в нём. Нужен там, где важен ровно один корабль в кадре
  * и он же — свой: в демо-канале на рейде уже стоит эскадра.
  */

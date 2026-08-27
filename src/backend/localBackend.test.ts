@@ -4,6 +4,7 @@ import { MAX_COURSE_LENGTH, MAX_MESSAGE_LENGTH, Member, Message, ShipNoticeMessa
 
 import { MESSAGE_PAGE } from '@/config/network';
 
+import * as auth from '@/backend/auth';
 import { createLocalBackend } from '@/backend/localBackend';
 import { ChannelBackend, ChannelError, ChannelEvent, MemberDraft } from '@/backend/types';
 
@@ -121,6 +122,28 @@ const freshChannel = async (backend: ChannelBackend, slug = 'proverka'): Promise
     return channel.channelId;
 };
 
+/**
+ * Бэкенд для проверки — тот же createLocalBackend(), но перед каждым join() сбрасывает
+ * запомненный userId вкладки (`kilvater.entrance.local`, см. backend/auth.ts).
+ *
+ * Настоящие вкладки не мешают друг другу: у каждой свой sessionStorage, и localAccount()
+ * заводит свой userId в каждой сам, один раз. Здесь же на весь файл одна карта на двоих
+ * (см. sessionShelf выше) — так и было задумано, ради проверок про две вкладки, — и без
+ * сброса второй join() в проверке заставал бы userId уже занятым первым, отчего два разных
+ * участника вставали бы одним и тем же кораблём. Сброс перед каждым join() и воспроизводит
+ * то, что у настоящих вкладок получается само: очередной вошедший — это всегда кто-то новый.
+ */
+const testBackend = (): ChannelBackend => {
+    const backend = createLocalBackend();
+    return {
+        ...backend,
+        join: (request) => {
+            sessionShelf.delete('kilvater.entrance.local');
+            return backend.join(request);
+        },
+    };
+};
+
 /** Записанные события канала: по ним видно, что вкладка узнала о случившемся. */
 const watch = (backend: ChannelBackend, channelId: string): ChannelEvent[] => {
     const seen: ChannelEvent[] = [];
@@ -205,11 +228,14 @@ afterEach(() => {
     // На случай теста с подложными часами (см. «лента страницами»): следующему тесту
     // настоящие часы нужны настоящими, а не оставшимися от предыдущего.
     vi.useRealTimers();
+    // На случай теста с подменённым localAccount (см. «две вкладки, вошедшие разом»):
+    // следующему тесту нужен настоящий, читающий sessionStorage, а не оставшийся от предыдущего.
+    vi.restoreAllMocks();
 });
 
 describe('адрес канала', () => {
     test('заводится по годному адресу и находится по нему же', async () => {
-        const backend = createLocalBackend();
+        const backend = testBackend();
         const { channel } = await backend.createChannel({ channel: { slug: 'eskadra', title: '  Эскадра  ' } });
 
         expect(channel.slug).toBe('eskadra');
@@ -219,14 +245,14 @@ describe('адрес канала', () => {
     });
 
     test('адрес не той формы не проходит', async () => {
-        const backend = createLocalBackend();
+        const backend = testBackend();
 
         await failsWith(() => backend.createChannel({ channel: { slug: '-', title: 'Полночь' } }), 'slug-invalid');
         await failsWith(() => backend.createChannel({ channel: { slug: 'Полночь', title: 'П' } }), 'slug-invalid');
     });
 
     test('занятый адрес не достаётся второму каналу, а себе самому не мешает', async () => {
-        const backend = createLocalBackend();
+        const backend = testBackend();
         const { channel } = await backend.createChannel({ channel: { slug: 'zanyato', title: 'Первый' } });
 
         await failsWith(() => backend.createChannel({ channel: { slug: 'zanyato', title: 'Второй' } }), 'slug-taken');
@@ -240,7 +266,7 @@ describe('адрес канала', () => {
     });
 
     test('канала по адресу нет — и в ответ пустота, а не выдуманный канал', async () => {
-        const backend = createLocalBackend();
+        const backend = testBackend();
 
         expect(await backend.getChannelBySlug({ slug: 'nesushchestvuyushchiy' })).toBeNull();
         expect(await backend.getChannel({ channelId: 'ch-net-takogo' })).toBeNull();
@@ -249,7 +275,7 @@ describe('адрес канала', () => {
 
 describe('вход на рейд', () => {
     test('позывной и бортовой номер заняты — отказ, а с исправленными вход проходит', async () => {
-        const backend = createLocalBackend();
+        const backend = testBackend();
         const channelId = await freshChannel(backend);
         await backend.join({ channelId, member: draft('Альбатрос', '317') });
 
@@ -268,7 +294,7 @@ describe('вход на рейд', () => {
         // ещё один корабль. Реальный предел кладёт расстановка (см. placement.test.ts,
         // «мест нет вовсе — расстановка отказывает») — здесь проверяется только то, что
         // здесь этого искусственного числа больше нет.
-        const backend = createLocalBackend();
+        const backend = testBackend();
         const channelId = await freshChannel(backend);
         await [...Array(6).keys()].reduce(async (before, index) => {
             await before;
@@ -279,7 +305,7 @@ describe('вход на рейд', () => {
     });
 
     test('вход отмечается в ленте, и позывной в записи — тот, с каким вошли', async () => {
-        const backend = createLocalBackend();
+        const backend = testBackend();
         const channelId = await freshChannel(backend);
         const { member } = await backend.join({ channelId, member: draft('Альбатрос', '317') });
 
@@ -292,8 +318,25 @@ describe('вход на рейд', () => {
         });
     });
 
-    test('место на рейде назначает канал, а не вкладка', async () => {
+    test('повторный вход тем же userId не заводит второй корабль', async () => {
+        // Без testBackend(): проверке нужна ровно та же личность на обоих вызовах, а её
+        // сброс перед каждым join() тут только бы мешал (см. testBackend выше).
         const backend = createLocalBackend();
+        const channelId = await freshChannel(backend);
+        const first = await backend.join({ channelId, member: draft('Алый', '001') });
+        const second = await backend.join({ channelId, member: draft('Синий', '999') });
+
+        // То же решение и по той же причине, что у joinChannel на настоящем бэкенде
+        // (functions/src/raid.ts): memberId === userId, а второго корабля с тем же
+        // memberId на одном рейде не бывает — второй вызов просто возвращает первый
+        // корабль, будто заявки и не было, и в ленте о ней нет ни следа.
+        expect(second.member).toEqual(first.member);
+        expect(await members(backend, channelId)).toHaveLength(1);
+        expect(await messages(backend, channelId)).toHaveLength(1);
+    });
+
+    test('место на рейде назначает канал, а не вкладка', async () => {
+        const backend = testBackend();
         const channelId = await freshChannel(backend);
 
         const { member } = await backend.join({ channelId, member: draft('Альбатрос', '317') });
@@ -308,7 +351,7 @@ describe('вход на рейд', () => {
 
 describe('старшинство на рейде', () => {
     test('первый вставший на рейд становится старшим', async () => {
-        const backend = createLocalBackend();
+        const backend = testBackend();
         const channelId = await freshChannel(backend);
 
         const { member: first } = await backend.join({ channelId, member: draft('Первый', '101') });
@@ -319,7 +362,7 @@ describe('старшинство на рейде', () => {
     });
 
     test('ушёл старший — старшинство достаётся тому, кто дольше всех на рейде', async () => {
-        const backend = createLocalBackend();
+        const backend = testBackend();
         const channelId = await freshChannel(backend);
         const { member: first } = await backend.join({ channelId, member: draft('Первый', '101') });
         const { member: second } = await backend.join({ channelId, member: draft('Второй', '102') });
@@ -334,7 +377,7 @@ describe('старшинство на рейде', () => {
     });
 
     test('старший называет преемника — старшинство достаётся ему, а не самому давнему', async () => {
-        const backend = createLocalBackend();
+        const backend = testBackend();
         const channelId = await freshChannel(backend);
         const { member: first } = await backend.join({ channelId, member: draft('Первый', '101') });
         const { member: second } = await backend.join({ channelId, member: draft('Второй', '102') });
@@ -347,7 +390,7 @@ describe('старшинство на рейде', () => {
     });
 
     test('названный преемник уже ушёл — старшинство достаётся тому, кто дольше всех на рейде', async () => {
-        const backend = createLocalBackend();
+        const backend = testBackend();
         const channelId = await freshChannel(backend);
         const { member: first } = await backend.join({ channelId, member: draft('Первый', '101') });
         const { member: second } = await backend.join({ channelId, member: draft('Второй', '102') });
@@ -358,7 +401,7 @@ describe('старшинство на рейде', () => {
     });
 
     test('ушли все — старшим станет следующий пришедший', async () => {
-        const backend = createLocalBackend();
+        const backend = testBackend();
         const channelId = await freshChannel(backend);
         const { member: alone } = await backend.join({ channelId, member: draft('Один', '101') });
 
@@ -370,7 +413,7 @@ describe('старшинство на рейде', () => {
     });
 
     test('высаживает только старший, и не себя', async () => {
-        const backend = createLocalBackend();
+        const backend = testBackend();
         const channelId = await freshChannel(backend);
         const { member: senior } = await backend.join({ channelId, member: draft('Старший', '101') });
         const { member: other } = await backend.join({ channelId, member: draft('Другой', '102') });
@@ -389,7 +432,7 @@ describe('старшинство на рейде', () => {
     });
 
     test('запись о высадке идёт от старшего, а о своём уходе — от ушедшего', async () => {
-        const backend = createLocalBackend();
+        const backend = testBackend();
         const channelId = await freshChannel(backend);
         const { member: senior } = await backend.join({ channelId, member: draft('Старший', '101') });
         const { member: other } = await backend.join({ channelId, member: draft('Другой', '102') });
@@ -410,7 +453,7 @@ describe('старшинство на рейде', () => {
     });
 
     test('уход без курса не оставляет в записи пустого поля', async () => {
-        const backend = createLocalBackend();
+        const backend = testBackend();
         const channelId = await freshChannel(backend);
         const { member } = await backend.join({ channelId, member: draft('Один', '101') });
 
@@ -423,7 +466,7 @@ describe('старшинство на рейде', () => {
 
 describe('переоснащение', () => {
     test('на каждую перемену своя запись, и обе стороны названы целиком', async () => {
-        const backend = createLocalBackend();
+        const backend = testBackend();
         const channelId = await freshChannel(backend);
         const { member } = await backend.join({ channelId, member: draft('Альбатрос', '317') });
 
@@ -444,7 +487,7 @@ describe('переоснащение', () => {
     });
 
     test('ничего не поменялось — и записи нет', async () => {
-        const backend = createLocalBackend();
+        const backend = testBackend();
         const channelId = await freshChannel(backend);
         const { member } = await backend.join({ channelId, member: draft('Альбатрос', '317') });
         const before = (await messages(backend, channelId)).length;
@@ -455,7 +498,7 @@ describe('переоснащение', () => {
     });
 
     test('оставшийся на своём месте с него не снимается', async () => {
-        const backend = createLocalBackend();
+        const backend = testBackend();
         const channelId = await freshChannel(backend);
         const { member } = await backend.join({ channelId, member: draft('Альбатрос', '317') });
 
@@ -469,7 +512,7 @@ describe('переоснащение', () => {
     });
 
     test('смена курса — тоже перемена места: корабль заходит заново', async () => {
-        const backend = createLocalBackend();
+        const backend = testBackend();
         const channelId = await freshChannel(backend);
         const { member } = await backend.join({ channelId, member: draft('Альбатрос', '317', { facing: 'left' }) });
 
@@ -484,7 +527,7 @@ describe('переоснащение', () => {
     });
 
     test('чужой позывной не занять и переоснащением, а свой оставить можно', async () => {
-        const backend = createLocalBackend();
+        const backend = testBackend();
         const channelId = await freshChannel(backend);
         const { member: first } = await backend.join({ channelId, member: draft('Альбатрос', '317') });
         await backend.join({ channelId, member: draft('Гроза', '777') });
@@ -504,7 +547,7 @@ describe('переоснащение', () => {
 
 describe('пределы длины', () => {
     test('слишком длинное сообщение не уходит', async () => {
-        const backend = createLocalBackend();
+        const backend = testBackend();
         const channelId = await freshChannel(backend);
         const { member } = await backend.join({ channelId, member: draft('Альбатрос', '317') });
         const before = (await messages(backend, channelId)).length;
@@ -526,7 +569,7 @@ describe('пределы длины', () => {
     });
 
     test('слишком длинный курс не уводит с рейда', async () => {
-        const backend = createLocalBackend();
+        const backend = testBackend();
         const channelId = await freshChannel(backend);
         const { member } = await backend.join({ channelId, member: draft('Альбатрос', '317') });
 
@@ -540,7 +583,7 @@ describe('пределы длины', () => {
     });
 
     test('ровно по пределу проходит', async () => {
-        const backend = createLocalBackend();
+        const backend = testBackend();
         const channelId = await freshChannel(backend);
         const { member } = await backend.join({ channelId, member: draft('Альбатрос', '317') });
 
@@ -555,8 +598,8 @@ describe('пределы длины', () => {
 
 describe('две вкладки', () => {
     test('сказанное в одной приходит в другую событием', async () => {
-        const first = createLocalBackend();
-        const second = createLocalBackend();
+        const first = testBackend();
+        const second = testBackend();
         const channelId = await freshChannel(first);
         const { member } = await first.join({ channelId, member: draft('Альбатрос', '317') });
 
@@ -569,8 +612,8 @@ describe('две вкладки', () => {
     });
 
     test('вошедший в одной вкладке появляется в другой, и старшинство видно обеим', async () => {
-        const first = createLocalBackend();
-        const second = createLocalBackend();
+        const first = testBackend();
+        const second = testBackend();
         const channelId = await freshChannel(first);
 
         const heard = watch(second, channelId);
@@ -587,8 +630,8 @@ describe('две вкладки', () => {
     });
 
     test('ушедший в одной пропадает и у другой', async () => {
-        const first = createLocalBackend();
-        const second = createLocalBackend();
+        const first = testBackend();
+        const second = testBackend();
         const channelId = await freshChannel(first);
         const { member } = await first.join({ channelId, member: draft('Альбатрос', '317') });
 
@@ -602,8 +645,8 @@ describe('две вкладки', () => {
     });
 
     test('свою же новость вкладка получает ровно один раз', async () => {
-        const first = createLocalBackend();
-        const second = createLocalBackend();
+        const first = testBackend();
+        const second = testBackend();
         const channelId = await freshChannel(first);
         const { member } = await first.join({ channelId, member: draft('Альбатрос', '317') });
 
@@ -617,8 +660,8 @@ describe('две вкладки', () => {
     });
 
     test('отписавшаяся вкладка новостей больше не слышит', async () => {
-        const first = createLocalBackend();
-        const second = createLocalBackend();
+        const first = testBackend();
+        const second = testBackend();
         const channelId = await freshChannel(first);
         const { member } = await first.join({ channelId, member: draft('Альбатрос', '317') });
 
@@ -631,8 +674,8 @@ describe('две вкладки', () => {
     });
 
     test('новости чужого канала своей вкладке не достаются', async () => {
-        const first = createLocalBackend();
-        const second = createLocalBackend();
+        const first = testBackend();
+        const second = testBackend();
         const ours = await freshChannel(first, 'nash');
         const theirs = await freshChannel(first, 'chuzhoy');
         const { member } = await first.join({ channelId: theirs, member: draft('Чужой', '317') });
@@ -651,6 +694,18 @@ describe('две вкладки', () => {
         // Не дожидаются друг друга нарочно: это и есть та гонка, из-за которой на рейде
         // появлялись два корабля на одной точке. Замка в проверках нет — очередь тут
         // держит однопоточность самого JS, и запись каждой вкладки ложится целиком.
+        //
+        // localAccount() здесь подложный, и не через testBackend(): у настоящих двух вкладок
+        // к началу гонки уже разные userId, каждый в своём sessionStorage, а сброс перед
+        // join() (как в testBackend()) на такой гонке только мешает — оба сброса происходят
+        // синхронно, раньше, чем join() успевает дочитаться до самого localAccount(), и оба
+        // вызова заводят себе один и тот же новый userId. Подложный localAccount() отвечает
+        // ровно как два разных, уже вошедших человека — join() читает его по одному разу
+        // на вызов, и очередь мутаций (mutate) не даёт этим чтениям перепутаться местами.
+        const asTab = vi.spyOn(auth, 'localAccount');
+        asTab.mockReturnValueOnce({ userId: 'pervaya-vkladka', name: 'Местный' });
+        asTab.mockReturnValueOnce({ userId: 'vtoraya-vkladka', name: 'Местный' });
+
         const [one, other] = await Promise.all([
             first.join({ channelId, member: draft('Первый', '101') }),
             second.join({ channelId, member: draft('Второй', '102') }),
@@ -663,7 +718,7 @@ describe('две вкладки', () => {
 
 describe('лента страницами', () => {
     test('лента режется на страницы по MESSAGE_PAGE, а loadOlderMessages подряд восстанавливает её без потерь и дублей', async () => {
-        const backend = createLocalBackend();
+        const backend = testBackend();
         const channelId = await freshChannel(backend, 'bolshaya-lenta');
         const { member } = await backend.join({ channelId, member: draft('Связист', '007') });
         const [joinNotice] = await messages(backend, channelId);
@@ -707,7 +762,7 @@ describe('лента страницами', () => {
     }, 15000);
 
     test('канал короче страницы — hasMoreMessages ложно что у getChannel, что у getChannelBySlug', async () => {
-        const backend = createLocalBackend();
+        const backend = testBackend();
         const channelId = await freshChannel(backend, 'malenkaya-lenta');
         const { member } = await backend.join({ channelId, member: draft('Альбатрос', '317') });
         await backend.sendMessage({ channelId, memberId: member.memberId, message: { text: 'Раз' } });
@@ -718,7 +773,7 @@ describe('лента страницами', () => {
     });
 
     test('loadOlderMessages: before не найден в ленте — пустая страница, а не отказ', async () => {
-        const backend = createLocalBackend();
+        const backend = testBackend();
         const channelId = await freshChannel(backend, 'bez-etogo-soobshcheniya');
         await backend.join({ channelId, member: draft('Альбатрос', '317') });
 
@@ -727,7 +782,7 @@ describe('лента страницами', () => {
     });
 
     test('loadOlderMessages: limit задаёт размер одной страницы, а не всей ленты', async () => {
-        const backend = createLocalBackend();
+        const backend = testBackend();
         const channelId = await freshChannel(backend, 'svoy-limit');
         const { member } = await backend.join({ channelId, member: draft('Альбатрос', '317') });
         const sent: Message[] = [];
@@ -755,11 +810,11 @@ describe('лента страницами', () => {
 
 describe('статус отправки', () => {
     test('нет связи — сообщение остаётся в ленте со значком (!), а соседняя вкладка о нём не узнаёт', async () => {
-        const backend = createLocalBackend();
+        const backend = testBackend();
         const channelId = await freshChannel(backend, 'bez-svyazi');
         const { member } = await backend.join({ channelId, member: draft('Тральщик', '221') });
 
-        const otherTab = createLocalBackend();
+        const otherTab = testBackend();
         const seenByOther = watch(otherTab, channelId);
 
         vi.stubGlobal('navigator', { onLine: false });
@@ -779,7 +834,7 @@ describe('статус отправки', () => {
     });
 
     test('офлайн-отправка не трогает общее состояние: текст переживает «перезагрузку вкладки»', async () => {
-        const backend = createLocalBackend();
+        const backend = testBackend();
         const channelId = await freshChannel(backend, 'perezhivaet-perezagruzku');
         const { member } = await backend.join({ channelId, member: draft('Буксир', '512') });
 
@@ -792,7 +847,7 @@ describe('статус отправки', () => {
         expect(message.delivery?.status).toBe('failed');
 
         // Новый бэкенд над тем же (подложным) хранилищем — как вкладка после перезагрузки.
-        const reloadedOffline = createLocalBackend();
+        const reloadedOffline = testBackend();
         const stillThere = (await messages(reloadedOffline, channelId)).find(
             (item) => item.messageId === message.messageId
         );
@@ -800,7 +855,7 @@ describe('статус отправки', () => {
     });
 
     test('связь вернулась к моменту «перезагрузки» — неотправленное досылается само, без клика', async () => {
-        const backend = createLocalBackend();
+        const backend = testBackend();
         const channelId = await freshChannel(backend, 'svyaz-k-perezagruzke');
         const { member } = await backend.join({ channelId, member: draft('Ледокол', '901') });
 
@@ -814,7 +869,7 @@ describe('статус отправки', () => {
         // К моменту «перезагрузки» связь уже вернулась — новый бэкенд подхватывает
         // осевшее в ящике сам, конструктором, без клика по значку.
         vi.stubGlobal('navigator', { onLine: true });
-        const reloaded = createLocalBackend();
+        const reloaded = testBackend();
         await settle();
 
         const after = await messages(reloaded, channelId);
@@ -834,7 +889,7 @@ describe('статус отправки', () => {
         });
         (globalThis as unknown as { window: unknown }).window = target;
 
-        const backend = createLocalBackend();
+        const backend = testBackend();
         const channelId = await freshChannel(backend, 'vernulas-pryamo-seychas');
         const { member } = await backend.join({ channelId, member: draft('Корвет', '333') });
         const { message } = await backend.sendMessage({
@@ -855,7 +910,7 @@ describe('статус отправки', () => {
     });
 
     test('повтор без связи — то же самое неотправленное, без изменений и без второй копии', async () => {
-        const backend = createLocalBackend();
+        const backend = testBackend();
         const channelId = await freshChannel(backend, 'povtor-bez-svyazi');
         const { member } = await backend.join({ channelId, member: draft('Землечерпалка', '804') });
 
@@ -879,7 +934,7 @@ describe('статус отправки', () => {
     });
 
     test('повтор, когда связь уже есть, — сообщение уходит; два клика подряд не плодят двойника', async () => {
-        const backend = createLocalBackend();
+        const backend = testBackend();
         const channelId = await freshChannel(backend, 'povtor-so-svyazyu');
         const { member } = await backend.join({ channelId, member: draft('Ледокол', '552') });
 
@@ -906,7 +961,7 @@ describe('статус отправки', () => {
     });
 
     test('retryMessage для незнакомого сообщения — отказ unknown, а не выдумка', async () => {
-        const backend = createLocalBackend();
+        const backend = testBackend();
         const channelId = await freshChannel(backend, 'net-v-yashchike');
         const { member } = await backend.join({ channelId, member: draft('Шлюп', '446') });
 
@@ -922,7 +977,7 @@ describe('статус отправки', () => {
     });
 
     test('discardMessage выбрасывает неотправленное из ленты и из ящика — насовсем', async () => {
-        const backend = createLocalBackend();
+        const backend = testBackend();
         const channelId = await freshChannel(backend, 'peredumal');
         const { member } = await backend.join({ channelId, member: draft('Сейнер', '117') });
 
@@ -940,13 +995,13 @@ describe('статус отправки', () => {
         // Выброшенное не воскресает и связью: раз человек передумал, повторной попытки
         // больше нет, даже когда автоподхват мог бы её найти.
         vi.stubGlobal('navigator', { onLine: true });
-        const reloaded = createLocalBackend();
+        const reloaded = testBackend();
         await settle();
         expect((await messages(reloaded, channelId)).some((item) => item.messageId === message.messageId)).toBe(false);
     });
 
     test('онлайновая отправка уважает messageId черновика — тот же приём, что и у Firebase-бэкенда', async () => {
-        const backend = createLocalBackend();
+        const backend = testBackend();
         const channelId = await freshChannel(backend, 'svoy-messageid');
         const { member } = await backend.join({ channelId, member: draft('Фрегат', '733') });
 

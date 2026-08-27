@@ -13,6 +13,7 @@ import {
     berths,
     bubbles,
     clickShip,
+    forgetLocalTab,
     hasten,
     join,
     leaveRaid,
@@ -218,6 +219,10 @@ test('на одной линии помещаются двое, и борта н
 
     // Возвращаемся тем, кого в канале нет: канал встречает закрытой формой, а сосед остаётся
     // стоять. Открываем форму — и всё, что нужно для выбора места, снова на воде.
+    //
+    // На той же странице второй раз не встать в строй тем же кораблём (см. forgetLocalTab) —
+    // без сброса join() ниже застал бы себя уже на месте «Малыша» и никуда бы не встал вторым.
+    await forgetLocalTab(page);
     await openChannel(page, 'para', 'gost');
     await openJoinForm(page);
     await page.getByText('Пограничный сторожевой катер', { exact: true }).click();
@@ -291,7 +296,11 @@ test('на стоянке корабль отходит от своей лини
     // по всей глубине: у дальних промежуток вчетверо теснее, чем у ближних, и отход обязан
     // укладываться в оба.
     await openNewChannel(page, 'stoyanka');
+    // Каждый anchor() — это на одной странице новый корабль, а значит и новая личность
+    // (см. forgetLocalTab): без сброса вторая и третья заявки застали бы себя уже стоящими
+    // на месте первой и никуда бы не встали.
     const anchor = async (memberId: string, name: string, hullNumber: string, berth: string): Promise<void> => {
+        await forgetLocalTab(page);
         await openChannel(page, 'stoyanka', memberId);
         await openJoinForm(page);
         await page.locator(`[data-berth="${berth}"]`).click();
