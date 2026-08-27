@@ -1,12 +1,10 @@
 import { fileURLToPath } from 'node:url';
 import { Browser, Locator, Page, expect, test as base } from '@playwright/test';
 import * as esbuild from 'esbuild';
-import { initializeApp } from 'firebase-admin/app';
-import { getAuth as getAdminAuth } from 'firebase-admin/auth';
 
 import { WRITE_TIMEOUT } from '@/config/network';
 
-import { AUTH_EMULATOR_URL, FIREBASE_API_KEY, FIREBASE_PROJECT_ID } from '@tests-firebase/env';
+import { AUTH_EMULATOR_URL, FIREBASE_API_KEY, FIREBASE_PROJECT_ID, GOOGLE_ID_TOKEN } from '@tests-firebase/env';
 
 /**
  * Общее для прогона поверх Firebase: как войти через эмулятор в обход всплывающего окна,
@@ -92,42 +90,44 @@ const authBridgeCode = async (): Promise<string> => {
 };
 
 /**
- * Admin-приложение для чеканки кастомных токенов — тем же способом, каким tools/seed-firestore.ts
- * говорит с эмулятором Firestore. Заводится один раз на процесс (`initializeApp` второй раз
- * для приложения по умолчанию падает), а не по вызову.
+ * Войти без всплывающего окна — и тем же провайдером, каким входит живое приложение.
+ *
+ * Настоящий вход (signInWithPopup в src/backend/auth.ts) под проверками недостижим: попапу
+ * нужен gapi с apis.google.com, и нужен всегда — эмулятор этой зависимости не снимает
+ * (подробнее в authBridge.ts). Подмена: собираем поддельный Google-токен (GOOGLE_ID_TOKEN
+ * в env.ts — эмулятор принимает вместо подписанного JWT обычный JSON) и вводим его
+ * signInWithCredential из отдельно собранной копии SDK (authBridge.ts), без единой правки
+ * в src/. Итог тот же, что и у настоящего входа: onAuthStateChanged приложения получает
+ * пользователя с `providerId: google.com` и не отличает, откуда тот пришёл.
+ *
+ * `sub` и `name` подставляются здесь: личность у каждой проверки своя, остальные поля общие.
+ *
+ * Ждём не сам факт входа, а его следствие на экране — форму создания канала: гостя, как
+ * и посетителя без канала в адресе, встречает именно она (см. App.tsx).
  */
-let adminReady = false;
-const adminAuth = () => {
+export const signIn = async (page: Page, uid: string, name: string): Promise<void> => {
+    // Переменную ставит `firebase emulators:exec`. Нет её — эмулятора рядом нет вовсе,
+    // и сказать об этом прямо внятнее, чем дать проверке упасть на отказе моста.
     if (!process.env.FIREBASE_AUTH_EMULATOR_HOST) {
         throw new Error(
             'FIREBASE_AUTH_EMULATOR_HOST не задан. Этот набор говорит только с эмулятором — ' +
                 'запускайте его через npm run test:e2e:firebase'
         );
     }
-    if (!adminReady) {
-        initializeApp({ projectId: FIREBASE_PROJECT_ID });
-        adminReady = true;
-    }
-    return getAdminAuth();
-};
 
-/**
- * Войти без всплывающего окна. Настоящий вход (signInWithPopup в src/backend/auth.ts) под
- * проверками недостижим: попапу нужен gapi с apis.google.com, и нужен всегда — эмулятор этой
- * зависимости не снимает (подробнее в authBridge.ts). Подмена: чеканим эмулятором подписанный
- * токен на имя uid (Admin SDK, как и seed-firestore.ts) и вводим его тем же
- * signInWithCustomToken, каким пользуется сам SDK, — из отдельно собранной копии (authBridge.ts),
- * без единой правки в src/. Итог тот же, что и у настоящего входа: onAuthStateChanged
- * приложения получает пользователя и не отличает, откуда тот пришёл.
- *
- * Ждём не сам факт входа, а его следствие на экране — форму создания канала: гостя, как
- * и посетителя без канала в адресе, встречает именно она (см. App.tsx).
- */
-export const signIn = async (page: Page, uid: string, name: string): Promise<void> => {
     await page.goto('/', { waitUntil: 'domcontentloaded' });
     await expect(page.getByRole('button', { name: 'Войти' }), 'экран входа не показался').toBeVisible();
 
-    const token = await adminAuth().createCustomToken(uid, { name });
+    // Почта собирается из uid, а не берётся общей на всех: Firebase сводит аккаунты по ней,
+    // и две вкладки с разными uid оказались бы одним человеком. Замерено на эмуляторе: два
+    // signInWithIdp с общей почтой отвечают одним и тем же localId, с разной — разными
+    // и isNewUser у обоих. Поймано не рассуждением, а падением — проверки на две вкладки
+    // не находили формы постановки в строй, потому что второй вкладке уже нечего было
+    // заполнять. Из общего токена остаётся только домен.
+    // Тип нарочно узкий: остальные поля токена нас тут не касаются и уезжают россыпью.
+    const claims = JSON.parse(GOOGLE_ID_TOKEN) as { email?: string };
+    const domain = (claims.email ?? '@example.com').split('@').pop();
+    const token = JSON.stringify({ ...claims, sub: uid, name, email: `${uid}@${domain}` });
     await page.evaluate(
         (input) => {
             window.__authBridgeInput = input;
