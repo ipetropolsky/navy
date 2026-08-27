@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { Account, AuthState, entrance } from '@/backend';
 import { Look, ShipSetup } from '@shared/types/channel';
@@ -32,6 +32,8 @@ export interface AuthController {
 export function useAuth(): AuthController {
     const [state, setState] = useState<AuthState>({ status: 'unknown' });
     const [lastLook, setLastLook] = useState<Look | null>(null);
+    /** Чей вкус сейчас в руках: флот принадлежит человеку, и чужой корабль подставлять нельзя. */
+    const lookOwner = useRef<string | null>(null);
 
     // Состояние приезжает подпиской, а не из ответа: вход мог произойти и в другой вкладке,
     // и ветка «это сделал я» тут не нужна — ровно как с событиями канала.
@@ -44,6 +46,15 @@ export function useAuth(): AuthController {
             entrance.watch({
                 onChange: (next) => {
                     setState(next);
+                    const userId = next.status === 'signed' ? next.account.userId : null;
+                    // Вошедший сменился (вышел или за той же вкладкой вошёл другой) — прежнюю
+                    // внешность выбрасываем сразу, не дожидаясь второго прихода: у нового
+                    // человека его может не случиться вовсе, и форма встретила бы его
+                    // чужим кораблём.
+                    if (userId !== lookOwner.current) {
+                        lookOwner.current = userId;
+                        setLastLook(null);
+                    }
                     if (next.status === 'signed' && next.account.look) {
                         setLastLook(next.account.look);
                     }
