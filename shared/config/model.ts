@@ -8,8 +8,9 @@ import { Corridor, CORRIDORS } from '../types/channel';
  * и правка модели начинается здесь.
  *
  * ```
- * users/{userId}                          личность: аккаунт, чем ходит
+ * users/{userId}                          личность: аккаунт
  *     channels/{channelId}                реестр: в каких каналах она стоит
+ *     ships/{shipId}                      флот: чем и когда выходили
  * channels/{channelId}                    канал: адрес, название, старший
  *     members/{memberId}                  корабль в этом канале
  *     messages/{messageId}                лента канала
@@ -29,6 +30,7 @@ import { Corridor, CORRIDORS } from '../types/channel';
 export const COLLECTIONS = {
     users: 'users',
     channels: 'channels',
+    ships: 'ships',
     members: 'members',
     messages: 'messages',
     berths: 'berths',
@@ -92,6 +94,9 @@ export const paths = {
     userChannels: ({ userId }: UserAddress): string => `${paths.user({ userId })}/${COLLECTIONS.channels}`,
     userChannel: ({ userId, channelId }: UserAddress & ChannelAddress): string =>
         `${paths.userChannels({ userId })}/${channelId}`,
+    userShips: ({ userId }: UserAddress): string => `${paths.user({ userId })}/${COLLECTIONS.ships}`,
+    userShip: ({ userId, shipId }: UserAddress & { shipId: string }): string =>
+        `${paths.userShips({ userId })}/${shipId}`,
 
     channels: (): string => COLLECTIONS.channels,
     channel: ({ channelId }: ChannelAddress): string => `${COLLECTIONS.channels}/${channelId}`,

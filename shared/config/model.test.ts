@@ -32,6 +32,12 @@ describe('пути к коллекциям', () => {
         expect(paths.userChannel({ userId, channelId })).toBe('users/u-1/channels/ch-1');
     });
 
+    test('флот растёт из личности, а не из канала', () => {
+        const userId = 'u-1';
+        expect(paths.userShips({ userId })).toBe(`${paths.user({ userId })}/${COLLECTIONS.ships}`);
+        expect(paths.userShip({ userId, shipId: 'sh-1' })).toBe(`${paths.userShips({ userId })}/sh-1`);
+    });
+
     test('у документа и его коллекции общее начало', () => {
         expect(paths.user({ userId: 'u-1' }).startsWith(`${paths.users()}/`)).toBe(true);
         expect(paths.slug({ slug: 'nord-ost' }).startsWith(`${paths.slugs()}/`)).toBe(true);

@@ -244,6 +244,104 @@ describe('firestore.rules: users/{userId}/channels/{channelId}', () => {
     });
 });
 
+describe('firestore.rules: users/{userId}/ships/{shipId}', () => {
+    // Корабль, каким его завели, — ровно то, что пишет rememberLook в src/backend/auth.ts.
+    const ship = { name: 'Дозорный', hullNumber: '007', shipKind: 'pr1234', color: '#8ecae6', channelId: 'ch-1' };
+
+    test('хозяин заводит корабль в своей истории — и читает её же, списком', async () => {
+        const userId = 'u-1';
+        const owner = testEnv.authenticatedContext(userId);
+
+        await assertSucceeds(
+            setDoc(doc(owner.firestore(), paths.userShip({ userId, shipId: 'sh-1' })), {
+                ...ship,
+                createdAt: Date.now(),
+                serverAt: serverTimestamp(),
+            })
+        );
+        await assertSucceeds(getDoc(doc(owner.firestore(), paths.userShip({ userId, shipId: 'sh-1' }))));
+        await assertSucceeds(getDocs(collection(owner.firestore(), paths.userShips({ userId }))));
+    });
+
+    test('в чужую историю кораблей не записаться', async () => {
+        const attacker = testEnv.authenticatedContext('u-1');
+
+        await assertFails(
+            setDoc(doc(attacker.firestore(), paths.userShip({ userId: 'u-2', shipId: 'sh-1' })), {
+                ...ship,
+                createdAt: Date.now(),
+                serverAt: serverTimestamp(),
+            })
+        );
+    });
+
+    test('чужую историю кораблей не прочитать — ни по одному, ни списком', async () => {
+        const userId = 'u-1';
+        await seedDoc(paths.userShip({ userId, shipId: 'sh-1' }), {
+            ...ship,
+            createdAt: 1,
+            serverAt: serverTimestamp(),
+        });
+
+        const stranger = testEnv.authenticatedContext('u-2');
+        await assertFails(getDoc(doc(stranger.firestore(), paths.userShip({ userId, shipId: 'sh-1' }))));
+        await assertFails(getDocs(collection(stranger.firestore(), paths.userShips({ userId }))));
+    });
+
+    test('лишнее поле в корабле (note) не проходит', async () => {
+        const userId = 'u-1';
+        const owner = testEnv.authenticatedContext(userId);
+
+        await assertFails(
+            setDoc(doc(owner.firestore(), paths.userShip({ userId, shipId: 'sh-1' })), {
+                ...ship,
+                createdAt: Date.now(),
+                serverAt: serverTimestamp(),
+                note: 'лишнее',
+            })
+        );
+    });
+
+    test('serverAt без serverTimestamp() не проходит', async () => {
+        const userId = 'u-1';
+        const owner = testEnv.authenticatedContext(userId);
+
+        await assertFails(
+            setDoc(doc(owner.firestore(), paths.userShip({ userId, shipId: 'sh-1' })), {
+                ...ship,
+                createdAt: Date.now(),
+                serverAt: Date.now(),
+            })
+        );
+    });
+
+    test('заведённый корабль не переписать', async () => {
+        const userId = 'u-1';
+        await seedDoc(paths.userShip({ userId, shipId: 'sh-1' }), {
+            ...ship,
+            createdAt: 1,
+            serverAt: serverTimestamp(),
+        });
+
+        const owner = testEnv.authenticatedContext(userId);
+        await assertFails(
+            updateDoc(doc(owner.firestore(), paths.userShip({ userId, shipId: 'sh-1' })), { color: '#000000' })
+        );
+    });
+
+    test('заведённый корабль не стереть', async () => {
+        const userId = 'u-1';
+        await seedDoc(paths.userShip({ userId, shipId: 'sh-1' }), {
+            ...ship,
+            createdAt: 1,
+            serverAt: serverTimestamp(),
+        });
+
+        const owner = testEnv.authenticatedContext(userId);
+        await assertFails(deleteDoc(doc(owner.firestore(), paths.userShip({ userId, shipId: 'sh-1' }))));
+    });
+});
+
 describe('firestore.rules: slugs/{slug}', () => {
     test('бронь адреса читается по ключу кем угодно, включая невошедшего', async () => {
         const slug = 'nord';

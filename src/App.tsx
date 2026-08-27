@@ -114,19 +114,10 @@ const legalSize = (size: number, { floor, min }: Layout): number => {
 export default function App() {
     const route = useRoute();
     const auth = useAuth();
-    const channelState = useChannel(route.channel, route.memberId, auth.account?.userId ?? null);
-    const {
-        channel,
-        myId,
-        reception,
-        lastLook,
-        loading,
-        loadError,
-        retryLoad,
-        hasMoreMessages,
-        loadingOlder,
-        loadOlder,
-    } = channelState;
+    const { lastLook, rememberLook } = auth;
+    const channelState = useChannel(route.channel, route.memberId, auth.account?.userId ?? null, rememberLook);
+    const { channel, myId, reception, loading, loadError, retryLoad, hasMoreMessages, loadingOlder, loadOlder } =
+        channelState;
     const connection = useConnection();
     /**
      * Вошёл ли человек. Вход спрашивают не ради приличия: корабль принадлежит человеку,

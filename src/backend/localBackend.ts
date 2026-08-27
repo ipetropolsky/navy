@@ -19,7 +19,7 @@ import {
 } from '@shared/types/channel';
 import { limitMessage, overLimit } from '@shared/utils/limit';
 
-import { LOCAL_ACCOUNT } from '@/backend/auth';
+import { localAccount } from '@/backend/auth';
 import { ServerState, StoredChannel, archiveKey, restoreState } from '@/backend/migrate';
 import {
     discardOutboxMessage,
@@ -329,7 +329,7 @@ export function createLocalBackend(): ChannelBackend {
             sentAt: Date.now(),
             delivery,
         };
-        putOutboxMessage(LOCAL_ACCOUNT.userId, channelId, message);
+        putOutboxMessage(localAccount().userId, channelId, message);
         emitLocal(channelId, { type: 'message-added', message });
         return message;
     };
@@ -352,7 +352,7 @@ export function createLocalBackend(): ChannelBackend {
             }
             snapshot.messages.push(settled);
         });
-        removeOutboxMessage(LOCAL_ACCOUNT.userId, channelId, messageId);
+        removeOutboxMessage(localAccount().userId, channelId, messageId);
         emit(channelId, { type: 'message-added', message: settled });
         return settled;
     };
@@ -371,8 +371,8 @@ export function createLocalBackend(): ChannelBackend {
         if (status !== 'online') {
             return;
         }
-        for (const channelId of listOutboxChannels(LOCAL_ACCOUNT.userId)) {
-            for (const pending of readOutbox(LOCAL_ACCOUNT.userId, channelId)) {
+        for (const channelId of listOutboxChannels(localAccount().userId)) {
+            for (const pending of readOutbox(localAccount().userId, channelId)) {
                 flushPending(channelId, pending).catch(() => {
                     // Не вышло и в этот раз — запись остаётся в ящике тем же messageId;
                     // следующая перемена связи или клик по значку (!) попробуют снова.
@@ -384,13 +384,13 @@ export function createLocalBackend(): ChannelBackend {
     return {
         getChannel: ({ channelId }) => {
             const snapshot = readState().channels[channelId];
-            return delay(snapshot ? mergeOutbox(paged(snapshot), LOCAL_ACCOUNT.userId, channelId) : null);
+            return delay(snapshot ? mergeOutbox(paged(snapshot), localAccount().userId, channelId) : null);
         },
 
         getChannelBySlug: ({ slug }) => {
             const snapshot = Object.values(readState().channels).find((item) => item.channel.slug === slug);
             return delay(
-                snapshot ? mergeOutbox(paged(snapshot), LOCAL_ACCOUNT.userId, snapshot.channel.channelId) : null
+                snapshot ? mergeOutbox(paged(snapshot), localAccount().userId, snapshot.channel.channelId) : null
             );
         },
 
@@ -441,7 +441,15 @@ export function createLocalBackend(): ChannelBackend {
             // Всё решение целиком — в одной очереди: и сколько кораблей в канале, и свободен ли
             // позывной, и какое место достанется. Спрошенное до очереди устаревает к записи,
             // и на рейде от этого появлялись два корабля на одной точке.
-            const { member, channel } = await mutate(channelId, (current) => {
+            const { member, channel, already } = await mutate(channelId, (current) => {
+                const userId = localAccount().userId;
+                // Повторный вызов той же личностью второй корабль не заводит: memberId ===
+                // userId, а второго корабля с тем же memberId на одном рейде не бывает —
+                // то же самое решение и по той же причине, что в joinChannel (functions/src/raid.ts).
+                const existing = current.members.find((item) => item.memberId === userId);
+                if (existing) {
+                    return { member: existing, channel: null, already: true as const };
+                }
                 checkDraftIsFree(current, draft);
                 // Место на рейде назначаем здесь, а не в сцене: тогда оно уедет вместе
                 // с участником во все вкладки, и корабль у всех окажется в одном и том же месте.
@@ -453,7 +461,7 @@ export function createLocalBackend(): ChannelBackend {
                     throw new ChannelError('channel-full', 'На рейде не осталось свободного места');
                 }
                 const joined: Member = {
-                    memberId: randomId('m'),
+                    memberId: userId,
                     name: draft.name.trim(),
                     hullNumber: draft.hullNumber.trim(),
                     shipKind: draft.shipKind,
@@ -465,11 +473,14 @@ export function createLocalBackend(): ChannelBackend {
                 // Первый вставший на рейд становится старшим: канал заводят пустым, и до этого
                 // мига отвечать за него некому.
                 if (current.channel.owner) {
-                    return { member: joined, channel: null };
+                    return { member: joined, channel: null, already: false as const };
                 }
                 current.channel.owner = { memberId: joined.memberId };
-                return { member: joined, channel: { ...current.channel } };
+                return { member: joined, channel: { ...current.channel }, already: false as const };
             });
+            if (already) {
+                return delay({ member });
+            }
             emit(channelId, { type: 'member-joined', member });
             if (channel) {
                 emit(channelId, { type: 'channel-updated', channel });
@@ -630,7 +641,7 @@ export function createLocalBackend(): ChannelBackend {
          * от firebaseBackend.ts, где между кликом и ответом сервера проходит время.
          */
         retryMessage: async ({ channelId, message }) => {
-            const pending = readOutbox(LOCAL_ACCOUNT.userId, channelId).find(
+            const pending = readOutbox(localAccount().userId, channelId).find(
                 (item) => item.messageId === message.messageId
             );
             if (!pending) {

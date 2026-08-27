@@ -2,15 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 
 import { ChannelError, ChannelEvent, ChannelSnapshot, MemberDraft, MessageDraft, backend } from '@/backend';
-import {
-    Look,
-    forgetMemberId,
-    readLastLook,
-    readMemberId,
-    rememberLastLook,
-    rememberMemberId,
-} from '@/backend/identity';
-import { Member } from '@shared/types/channel';
+import { Member, ShipSetup } from '@shared/types/channel';
 
 import useReception, { Reception } from '@/hooks/useReception';
 
@@ -40,12 +32,6 @@ export interface ChannelController {
     myId: string | null;
     /** Что печатается прямо сейчас: пришедшая чужая реплика (см. `useReception`). */
     reception: Reception | null;
-    /**
-     * Чем эта личность выходила в море в последний раз — силуэт и цвет. Ими открывается форма
-     * у того, кто в этом канале ещё не стоит: позывной с номером в новом канале свои,
-     * а корабль человек чаще берёт тот же. Ни разу не выходила — null.
-     */
-    lastLook: Look | null;
     join: (draft: MemberDraft) => Promise<void>;
     updateMe: (draft: MemberDraft) => Promise<void>;
     /**
@@ -91,7 +77,8 @@ const withMember = (snapshot: ChannelSnapshot, member: Member): ChannelSnapshot 
 export function useChannel(
     slug: string | null,
     memberIdFromUrl: string | null,
-    userId: string | null
+    userId: string | null,
+    rememberLook: (ship: ShipSetup) => void
 ): ChannelController {
     const [loading, setLoading] = useState(true);
     const [loadError, setLoadError] = useState<string | null>(null);
@@ -100,9 +87,6 @@ export function useChannel(
     const [retryCount, setRetryCount] = useState(0);
     const [channel, setChannel] = useState<ChannelSnapshot | null>(null);
     const [myId, setMyId] = useState<string | null>(null);
-    // Внешность держим состоянием, а не перечитыванием на каждом проходе: хранилище отвечает
-    // синхронно, а проходов у приложения много — по одному на всякое движение шторки.
-    const [lastLook, setLastLook] = useState<Look | null>(readLastLook);
     const { reception, receive } = useReception();
     /**
      * Кто мы — для подписки. Подписка заведена на канал и переживает постановку в строй,
@@ -157,17 +141,16 @@ export function useChannel(
                         setMyId(null);
                         return;
                     }
-                    // Адрес важнее сохранённого: так соседняя вкладка говорит за другой корабль.
-                    // Личность привязана к channelId, а не к slug: адрес канала может смениться.
+                    // Адрес важнее вошедшего: так соседняя вкладка говорит за другой корабль,
+                    // даже когда обе открыты тем же человеком.
                     //
-                    // Третий кандидат — вошедший: на Firebase участие адресуется личностью
-                    // (memberId === userId), а sessionStorage свой у каждой вкладки, — без этого
-                    // вторая вкладка того же человека не узнавала бы свой корабль и предлагала
-                    // встать в строй заново, хотя он уже на рейде. Для локального бэкенда это
-                    // ничем не грозит: там userId один на всех ('local', см. backend/auth.ts),
-                    // а memberId устроен иначе (randomId('m'), см. backend/localBackend.ts) —
-                    // совпасть с настоящим участником такому кандидату нечем.
-                    const candidate = memberIdFromUrl ?? readMemberId(snapshot.channel.channelId) ?? userId;
+                    // Второй кандидат — вошедший, и это не частный случай, а правило:
+                    // memberId === userId на обоих бэкендах (см. join в functions/src/raid.ts
+                    // и в localBackend.ts), участие адресуется личностью напрямую, и своё
+                    // участие в канале видно прямо в списке участников, без отдельного запроса
+                    // к серверному реестру `users/{userId}/channels` — тот существует ради
+                    // обратного (по личности найти её каналы), а не ради этого.
+                    const candidate = memberIdFromUrl ?? userId;
                     const aboard = snapshot.members.some((member) => member.memberId === candidate);
                     // Корабль мог выйти из другой вкладки, пока эта была закрыта.
                     setMyId(aboard ? candidate : null);
@@ -307,21 +290,30 @@ export function useChannel(
     // Корабль вышел (например, из другой вкладки) — эта вкладка возвращается к постановке в строй.
     useEffect(() => {
         if (channel && myId && !channel.members.some((member) => member.memberId === myId)) {
-            forgetMemberId(channel.channel.channelId);
             setMyId(null);
         }
     }, [channel, myId]);
 
     /**
-     * Запомнить, чем человек вышел в море. Берём от бэкенда, а не из заявки: цвет он мог
-     * и переназначить, если выбранный оказался занят, а подставлять в следующий канал стоит
-     * то, чем корабль в итоге вышел.
+     * Записать во флот корабль, которым встали в строй или переоснастились. Берём от бэкенда,
+     * а не из заявки: цвет мог быть переназначен, если выбранный оказался занят, а во флоте
+     * должен остаться тот, с которым корабль в итоге вышел.
      */
-    const keepLook = useCallback((member: Member) => {
-        const look = { shipKind: member.shipKind, color: member.color };
-        rememberLastLook(look);
-        setLastLook(look);
-    }, []);
+    const keepLook = useCallback(
+        (member: Member) => {
+            if (!channelId) {
+                return;
+            }
+            rememberLook({
+                name: member.name,
+                hullNumber: member.hullNumber,
+                shipKind: member.shipKind,
+                color: member.color,
+                channelId,
+            });
+        },
+        [rememberLook, channelId]
+    );
 
     const join = useCallback(
         async (draft: MemberDraft) => {
@@ -329,7 +321,6 @@ export function useChannel(
                 return;
             }
             const { member } = await backend.join({ channelId, member: draft });
-            rememberMemberId(channelId, member.memberId);
             keepLook(member);
             // Свой корабль ставим в снимок сами, а не ждём, пока подписка пришлёт его обратно.
             // Догадки тут нет: `member` — это ответ сервера, ровно та же запись, что придёт
@@ -364,7 +355,6 @@ export function useChannel(
         async (course: string, nextOwnerId?: string) => {
             if (channelId && myId) {
                 await backend.leave({ channelId, memberId: myId, course, nextOwnerId });
-                forgetMemberId(channelId);
                 setMyId(null);
             }
         },
@@ -447,7 +437,6 @@ export function useChannel(
         channel,
         myId,
         reception,
-        lastLook,
         join,
         updateMe,
         leave,
