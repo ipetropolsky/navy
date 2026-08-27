@@ -46,20 +46,27 @@ jobs:
             - name: Build functions
               run: npm --prefix functions run build
 
-            # Настройки Firebase приезжают из переменных репозитория (Settings → Secrets and
-            # variables → Actions → Variables). Секретами они не назначены нарочно: эти значения
-            # всё равно уезжают в бандл к каждому, кто откроет страницу, и прятать их в CI —
-            # только делать вид. Переменных нет — сборка выходит на локальном бэкенде, как сейчас.
+            # Настройки Firebase приезжают из настроек репозитория: Settings → Secrets and
+            # variables → Actions. Страница одна, вкладки две, и заглядываем мы в обе —
+            # сначала в Variables, потом в Secrets: незаданная переменная в выражении пуста,
+            # а пустое `||` уходит вправо.
+            #
+            # Класть их правильно в Variables. Секрет тут ничего не прячет: всё, что начинается
+            # на VITE_, уезжает в бандл к каждому, кто откроет страницу, — секретность кончается
+            # ровно на логе сборки, где значения станут звёздочками и перестанут читаться глазами.
+            # Но перепутанная вкладка — не та ошибка, за которую стоит платить выкладкой:
+            # без ключей сборка теперь отказывает вовсе (assertBackend в vite.config.ts),
+            # и красная выкладка из-за соседней вкладки никому не нужна.
             - name: Build
               run: npm run build
               env:
-                  VITE_BACKEND: ${{ vars.VITE_BACKEND }}
-                  VITE_FIREBASE_API_KEY: ${{ vars.VITE_FIREBASE_API_KEY }}
-                  VITE_FIREBASE_AUTH_DOMAIN: ${{ vars.VITE_FIREBASE_AUTH_DOMAIN }}
-                  VITE_FIREBASE_PROJECT_ID: ${{ vars.VITE_FIREBASE_PROJECT_ID }}
-                  VITE_FIREBASE_STORAGE_BUCKET: ${{ vars.VITE_FIREBASE_STORAGE_BUCKET }}
-                  VITE_FIREBASE_MESSAGING_SENDER_ID: ${{ vars.VITE_FIREBASE_MESSAGING_SENDER_ID }}
-                  VITE_FIREBASE_APP_ID: ${{ vars.VITE_FIREBASE_APP_ID }}
+                  VITE_BACKEND: ${{ vars.VITE_BACKEND || secrets.VITE_BACKEND }}
+                  VITE_FIREBASE_API_KEY: ${{ vars.VITE_FIREBASE_API_KEY || secrets.VITE_FIREBASE_API_KEY }}
+                  VITE_FIREBASE_AUTH_DOMAIN: ${{ vars.VITE_FIREBASE_AUTH_DOMAIN || secrets.VITE_FIREBASE_AUTH_DOMAIN }}
+                  VITE_FIREBASE_PROJECT_ID: ${{ vars.VITE_FIREBASE_PROJECT_ID || secrets.VITE_FIREBASE_PROJECT_ID }}
+                  VITE_FIREBASE_STORAGE_BUCKET: ${{ vars.VITE_FIREBASE_STORAGE_BUCKET || secrets.VITE_FIREBASE_STORAGE_BUCKET }}
+                  VITE_FIREBASE_MESSAGING_SENDER_ID: ${{ vars.VITE_FIREBASE_MESSAGING_SENDER_ID || secrets.VITE_FIREBASE_MESSAGING_SENDER_ID }}
+                  VITE_FIREBASE_APP_ID: ${{ vars.VITE_FIREBASE_APP_ID || secrets.VITE_FIREBASE_APP_ID }}
 
             - name: Upload Pages artifact
               uses: actions/upload-pages-artifact@v4
