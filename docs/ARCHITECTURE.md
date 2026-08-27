@@ -7,8 +7,9 @@
 ## Стек
 
 Vite + React 19 + TypeScript, Less-модули. Линтер и форматтер — ESLint (@hh.ru/eslint-config)
-и Prettier, оба на pre-commit через lint-staged. Деплой — GitHub Pages командой `npm run deploy`
-с любой ветки: сборка уезжает в ветку `gh-pages`.
+и Prettier, оба на pre-commit через lint-staged. Деплой — GitHub Pages воркфлоу
+`.github/workflows/deploy.yml`: сам на пуш в `master`, с любой ветки — кнопкой Run workflow
+в Actions.
 
 ## Слои
 

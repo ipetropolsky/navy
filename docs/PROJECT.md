@@ -185,8 +185,8 @@
 ## Архитектура
 
 - **Стек**: Vite + React 19 + TypeScript, Less-модули. Стайлгайд — ESLint (@hh.ru/eslint-config) + Prettier,
-  pre-commit через lint-staged. Деплой — GitHub Pages командой `npm run deploy` с любой ветки
-  (сборка уезжает в ветку `gh-pages`).
+  pre-commit через lint-staged. Деплой — GitHub Pages воркфлоу `.github/workflows/deploy.yml`:
+  сам на пуш в `master`, с любой ветки — кнопкой Run workflow в Actions.
 - **Изоляция бэкенда**: фронтенд работает только с асинхронным интерфейсом `ChannelBackend`
   (`src/backend/types.ts`). Реализация MVP — `LocalBackend` на localStorage и BroadcastChannel;
   позже заменяется на `FirebaseBackend` правкой одной строки в `src/backend/index.ts`.
@@ -1931,6 +1931,12 @@
   у отказов есть выход, а не тупик. Весь набор проходит примерно за четыре с половиной минуты.
   Как гонять набор по одной проверке, смотреть на него глазами, отлаживать и разбирать
   упавшее — в [TESTING.md](./TESTING.md).
-- `npm run deploy` — сборка и выкладка на GitHub Pages (`gh-pages`), с любой ветки: показать
-  работу можно, не дожидаясь мержа в `master`. То же самое написано в [README](../README.md).
-  Отдельно на пуш в `master` то же самое делает и CI (`.github/workflows/deploy.yml`).
+- **Выкладка — только через Actions** (`.github/workflows/deploy.yml`): сама на пуш в `master`,
+  а с любой ветки — кнопкой Run workflow. Показать работу, не дожидаясь мержа, по-прежнему
+  можно: ветка выбирается там же, в интерфейсе.
+
+    Команды `npm run deploy` больше нет. Она клала сборку в ветку `gh-pages`, а Pages с тех пор
+    собирает выкладку из Actions — то есть команда исправно отрабатывала и ничего не выкладывала.
+    Дело не только в ветке: настройки Firebase лежат в переменных репозитория, и сборка с машины
+    брала бы их из чьего-то `.env.local` или не брала вовсе — ровно так на Pages однажды
+    и уехала версия на localStorage, без входа и без общей базы.
