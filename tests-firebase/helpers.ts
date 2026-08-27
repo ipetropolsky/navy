@@ -1,5 +1,5 @@
 import { fileURLToPath } from 'node:url';
-import { Browser, Page, expect, test as base } from '@playwright/test';
+import { Browser, Locator, Page, expect, test as base } from '@playwright/test';
 import * as esbuild from 'esbuild';
 import { initializeApp } from 'firebase-admin/app';
 import { getAuth as getAdminAuth } from 'firebase-admin/auth';
@@ -212,3 +212,57 @@ export const send = async (page: Page, text: string): Promise<void> => {
 
 /** Пузыри с репликами в ленте. */
 export const bubbles = (page: Page) => page.locator('[class*="bubble"]');
+
+/** Корабли в кадре. См. tests/helpers.ts — тот же локатор, тот же смысл. */
+export const ships = (page: Page) => page.locator('[class*="shipSlot"]');
+
+/** Системные строчки ленты: вход, переоснащение, уход. См. tests/helpers.ts. */
+export const systemLines = (page: Page) => page.locator('[class*="systemNote"]');
+
+/** Свободные места на рейде, видны только при открытой форме своего корабля. См. tests/helpers.ts. */
+export const berths = (page: Page) => page.locator('[data-berth]');
+
+/** Кнопка списка кораблей — она же название канала. См. tests/helpers.ts: `inChat` (App.tsx). */
+export const shipsButton = (page: Page) => page.locator('button[title="Корабли на связи"]');
+
+/**
+ * Ткнуть в корабль в кадре — тем же способом, что и в tests/helpers.ts: целимся в середину
+ * коробки, а не в locator.click(), потому что нажатие ловит вода поверх флота, а не сам корпус.
+ */
+export const clickShip = async (page: Page, ship: Locator): Promise<void> => {
+    const box = await ship.boundingBox();
+    if (!box) {
+        throw new Error('корабля нет в кадре');
+    }
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+};
+
+/** Значок «доставляется» у своей реплики — лоадер, встающий до всякого ответа сервера. */
+export const pendingIcon = (page: Page) => page.getByRole('status', { name: 'Отправляется', exact: true });
+
+/**
+ * Значок «не доставлено» у своей реплики, он же кнопка повтора. Общий локатор для проверок
+ * набора: и обрыва сети, и повтора без двойников — обеим нужен один и тот же значок.
+ */
+export const failedIcon = (page: Page) =>
+    page.getByRole('button', { name: 'Не отправлено. Нажмите, чтобы отправить снова', exact: true });
+
+/**
+ * Сменить адрес на другой канал без единого сетевого запроса — тем же способом, каким это
+ * делает сама вкладка при переходе вперёд-назад (`useRoute` в src/routing.ts): двигаем историю
+ * руками (`pushState`) и будим её же слушатель `popstate`, вместо вызова недоступного отсюда
+ * React-колбэка `openChannel`.
+ *
+ * Нужна ровно одной проверке — «нет связи, а не канала нет» (errors.spec.ts): там важно, чтобы
+ * приложение спросило канал офлайн, а `context.setOffline(true)` рвёт и вправду всякую сеть,
+ * включая переход по адресу (`page.goto` уходит в `net::ERR_INTERNET_DISCONNECTED`). Настоящей
+ * навигации тут и не нужно — адрес меняет один и тот же документ, а не грузит новый.
+ */
+export const pushRoute = async (page: Page, slug: string | null): Promise<void> => {
+    await page.evaluate((nextSlug) => {
+        const url = new URL(window.location.href);
+        url.search = nextSlug ? `?channel=${encodeURIComponent(nextSlug)}` : '';
+        window.history.pushState(null, '', url.toString());
+        window.dispatchEvent(new PopStateEvent('popstate'));
+    }, slug);
+};
