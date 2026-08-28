@@ -42,7 +42,7 @@ import { Layout, chatMagnets, useLayout } from '@/hooks/useLayout';
 import { useSlide } from '@/hooks/useSlide';
 import { useSwipe } from '@/hooks/useSwipe';
 import { useUnread } from '@/hooks/useUnread';
-import { channelLink, useRoute } from '@/routing';
+import { channelLink, homeLink, useRoute } from '@/routing';
 import { NOTHING_OPEN, reduce } from '@/state/layers';
 import { copyText } from '@/utils/clipboard';
 import { Fling, rubberBand, settleMagnet, stepMagnet, trackFling } from '@/utils/magnet';
@@ -827,12 +827,23 @@ export default function App() {
             {/* Открыть канал не вышло из-за сети или сервера — не то же самое, что «канала нет»
                 (та ветка ниже — законный ответ «такого адреса не существует»). Показываем
                 кнопку «Ещё раз», а не отправляем создавать канал заново: адрес мог быть верным,
-                просто спросить по нему не вышло. */}
+                просто спросить по нему не вышло.
+
+                Рядом с ней — выход на главную, и он тут обязателен: пока сервер молчит,
+                «Ещё раз» упирается в тот же отказ, и без второй кнопки человек заперт
+                на этом экране — уйти с него нечем, кроме правки адреса руками. */}
             {!waiting && route.channel && !channel && loadError && (
                 <Panel
                     title="Канал не открылся"
                     hint={loadError}
-                    actions={<Button onClick={retryLoad}>Ещё раз</Button>}
+                    actions={
+                        <>
+                            <Button onClick={retryLoad}>Ещё раз</Button>
+                            <Button variant="secondary" onClick={route.openHome}>
+                                На главную
+                            </Button>
+                        </>
+                    }
                 />
             )}
             {/* Адрес в ссылке есть, а канала по нему нет: ссылка устарела или в ней опечатка.
@@ -1271,7 +1282,38 @@ export default function App() {
                             </button>
                         ) : (
                             <>
-                                <div className={styles.chatTitle}>{channel?.channel.title ?? 'Кильватер'}</div>
+                                {/* Название сервиса уводит на главную, название канала — никуда.
+                                    Разница не в оформлении, а в том, что написано: «Кильватер» —
+                                    это имя всего чата, и вести ему положено на его первый экран,
+                                    а название канала — имя места, в котором человек уже стоит.
+
+                                    Ссылкой, а не кнопкой: это переход по адресу, и вести он должен
+                                    себя как всякий переход — открываться в новой вкладке средним
+                                    щелчком и показывать адрес в строке состояния. Нажатие при этом
+                                    перехватываем, чтобы страница не перезагружалась целиком
+                                    (навигация тут через pushState, см. routing.ts). */}
+                                {!channel && route.channel ? (
+                                    <a
+                                        className={styles.chatTitleHome}
+                                        href={homeLink()}
+                                        onClick={(event) => {
+                                            if (
+                                                event.metaKey ||
+                                                event.ctrlKey ||
+                                                event.shiftKey ||
+                                                event.button !== 0
+                                            ) {
+                                                return;
+                                            }
+                                            event.preventDefault();
+                                            route.openHome();
+                                        }}
+                                    >
+                                        Кильватер
+                                    </a>
+                                ) : (
+                                    <div className={styles.chatTitle}>{channel?.channel.title ?? 'Кильватер'}</div>
+                                )}
                                 <div className={styles.chatStatus}>{loading ? 'связь…' : status()}</div>
                             </>
                         )}
