@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { Message, MessageRef } from '@shared/types/channel';
 
@@ -43,5 +43,41 @@ describe('createDemoChannel', () => {
                 expect(message.sentAt, `${message.messageId} отвечает раньше вопроса`).toBeGreaterThan(answered.sentAt);
             }
         });
+    });
+
+    /**
+     * Демо не должно оказаться в будущем, в какой бы час его ни открыли, — а вечер в нём
+     * поздний, и почти весь день он ещё впереди.
+     *
+     * Это не про красоту дат. Пока переписка датирована будущим, всё, что в канале напишут
+     * после, оказывается «раньше» уже написанного: счётчик непрочитанного считает от метки
+     * последнего виденного сообщения и потому молчит вовсе, а лента, выстроенная по времени,
+     * ставит новую реплику в середину разговора. Ровно так оно и было — поймано браузерной
+     * проверкой «убранная панель считает пришедшие реплики», которая падала весь день и
+     * проходила только поздним вечером.
+     *
+     * Проверяются все двадцать четыре часа, а не один: беда была именно в том, что днём
+     * всё иначе, чем ночью.
+     */
+    it('вся переписка лежит в прошлом, в какой бы час её ни открыли', () => {
+        vi.useFakeTimers();
+        try {
+            for (let hour = 0; hour < 24; hour += 1) {
+                vi.setSystemTime(new Date(2026, 7, 28, hour, 30, 0, 0));
+                const demo = createDemoChannel();
+                const now = Date.now();
+                expect(
+                    demo.messages.filter((message) => message.sentAt > now).map((message) => message.messageId),
+                    `в ${hour} часов эти сообщения оказались в будущем`
+                ).toEqual([]);
+                expect(demo.channel.createdAt, `в ${hour} часов канал заведён в будущем`).toBeLessThanOrEqual(now);
+                expect(
+                    demo.members.filter((member) => member.joinedAt > now).map((member) => member.memberId),
+                    `в ${hour} часов эти корабли встали в строй в будущем`
+                ).toEqual([]);
+            }
+        } finally {
+            vi.useRealTimers();
+        }
     });
 });
