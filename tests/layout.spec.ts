@@ -11,7 +11,6 @@ import {
     SCENE_MIN_WIDTH,
     SHEET_HANDLE,
     SHEET_INSET,
-    SHEET_TOP_GAP,
     SHEET_WIDTH,
     SIDE_MIN_WIDTH,
 } from '@/config/layout';
@@ -143,14 +142,33 @@ const LYING = { width: 1200, height: 900 };
 const STANDING = { width: 420, height: 900 };
 
 /**
- * Какого размера разговор в окне такой формы, пока его не трогали, px. Перевод доли в пиксели
- * тот же самый, что и в hooks/useLayout: сбоку доля от всей ширины, под кадром — от того,
- * что осталось под шапкой.
+ * Сколько шапка занимает на самом деле, px.
+ *
+ * Меряется по живой разметке, а не берётся числом, и это не осторожность, а единственный
+ * способ: рост шапки текучий — кегль и кнопки растут вместе с шириной окна (`.fluid()`
+ * в App.module.less), а без связи к ним прибавляется ещё строчка. Приложение меряет ровно
+ * этот же узел (`measureHeader` в App.tsx) и от замера считает и долю разговора, и потолок
+ * шторки. Проверка, взявшая вместо замера постоянное число, проверяла бы не приложение,
+ * а своё представление о нём — и расходилась бы с ним на каждой правке шапки.
+ *
+ * `SHEET_TOP_GAP` для этого не годится совсем: он запасной — то, чем открыт первый кадр,
+ * пока замер не дошёл до места (см. config/layout.ts).
  */
-const chatSize = (view: { width: number; height: number }): number =>
-    view.width > view.height
-        ? Math.round(view.width * CHAT_SHARE)
-        : Math.round((view.height - SHEET_TOP_GAP) * CHAT_SHARE);
+const headerHeight = (page: Page): Promise<number> =>
+    page.evaluate(() => document.querySelector('[class*="headerBar"]')!.getBoundingClientRect().height);
+
+/**
+ * Какого размера разговор, пока его не трогали, px. Перевод доли в пиксели тот же самый,
+ * что и в hooks/useLayout, — и помощников поэтому два, по числу раскладок: мерки у них
+ * разные, и шапка участвует только в одной.
+ */
+
+/** Сбоку: доля от всей ширины окна. Шапка тут ни при чём — разговор стоит рядом с ней, не под ней. */
+const chatBeside = (view: { width: number }): number => Math.round(view.width * CHAT_SHARE);
+
+/** Под кадром: доля от того, что осталось под шапкой, — а шапку меряем (см. `headerHeight`). */
+const chatUnder = async (page: Page, view: { height: number }): Promise<number> =>
+    Math.round((view.height - (await headerHeight(page))) * CHAT_SHARE);
 
 /**
  * Огонёк места на рейде: та самая точка, что горит на свободном месте, и она же — круг света,
@@ -192,6 +210,22 @@ const berthShapes = (page: Page): Promise<BerthShape[]> =>
 /** Навести указатель на место и дождаться, пока его точка вырастет в круг света. */
 const hoverBerth = async (page: Page, key: string): Promise<BerthShape> => {
     const light = page.locator(`[data-berth-light="${key}"]`);
+    // Сперва ждём, пока целиться станет во что: форма, открываясь, меняет высоту коробки,
+    // и сцена вместе с рейдом ещё едет вверх. Дальняя точка ростом в три пикселя, а уезжает
+    // рейд на полтора десятка — снятая на ходу отметка уводит указатель мимо неё, наведение
+    // достаётся воде, и круг, едва начав расти, гаснет обратно.
+    //
+    // Ждём «сдвинулось меньше чем на пиксель», а не «замерло совсем»: у переходов длинный
+    // хвост, и последние сотые доли точка перебирает ещё долго после того, как встала.
+    let seen = { x: -1, y: -1 };
+    await expect
+        .poll(async () => {
+            const box = (await light.boundingBox())!;
+            const still = Math.abs(box.x - seen.x) < 1 && Math.abs(box.y - seen.y) < 1;
+            seen = box;
+            return still;
+        }, `место ${key} не встало на место`)
+        .toBe(true);
     const dot = (await light.boundingBox())!;
     await page.mouse.move(dot.x + dot.width / 2, dot.y + dot.height / 2);
     // Растёт круг переходом, поэтому ждём — и ждём не «стало больше точки», а «перестало
@@ -744,7 +778,7 @@ test.describe('десктоп', () => {
         // чтобы между ними не открывалась щель ни в покое, ни на ходу. Прежде здесь стоял
         // потолок в ширину колонки: кадр держали узким, а по бокам оставляли фон. Колонка
         // осталась мерой для самого разговора, а кадру теперь достаётся всё остальное окно.
-        expect(view.scene.width, 'кадр взял не остаток окна').toBe(1200 - chatSize(LYING) + CHAT_OVERLAP);
+        expect(view.scene.width, 'кадр взял не остаток окна').toBe(1200 - chatBeside(LYING) + CHAT_OVERLAP);
         expect(view.scene.height, 'кадр не во весь рост окна').toBe(900);
         // Кадр на десктопе разделён раз и навсегда: 40% неба, 60% воды. Прежде здесь стояло
         // обратное — небу отдавали больше половины, — но тогда вода держалась своей пиксельной
@@ -1192,7 +1226,7 @@ test('раскладку выбирает форма окна: лежачее �
     await openChannel(page, DEMO, ALBATROS);
 
     const beside = await contentBox(page);
-    expect(beside.width, 'сбоку разговор встал не в свою долю ширины').toBe(chatSize(LYING));
+    expect(beside.width, 'сбоку разговор встал не в свою долю ширины').toBe(chatBeside(LYING));
     expect(beside.height, 'сбоку разговор не во всю высоту окна').toBe(LYING.height);
     expect(beside.left + beside.width, 'сбоку разговор не прижат к правой кромке окна').toBe(LYING.width);
     // Кадр — всё остальное и ещё полоска сверх: он заезжает под разговор, а не встаёт с ним встык.
@@ -1205,7 +1239,9 @@ test('раскладку выбирает форма окна: лежачее �
     await page.waitForTimeout(700);
 
     const under = await contentBox(page);
-    expect(under.height, 'под кадром разговор встал не в свою долю места под шапкой').toBe(chatSize(STANDING));
+    expect(under.height, 'под кадром разговор встал не в свою долю места под шапкой').toBe(
+        await chatUnder(page, STANDING)
+    );
     // Ширина — всё окно, от кромки до кромки. Разговор под кадром хоть и шторка, но самая
     // нижняя: полоски по бокам показывают, что под шторкой что-то лежит, а под этой лежит
     // только край экрана. Полоску отдают тем, кто ложится поверх (см. `--shade-steps`).
@@ -1338,8 +1374,8 @@ test('свайп по кадру ведёт разговор по ступень
     const phone = { width: MOBILE_MAX_WIDTH - 90, height: 844 };
     await page.setViewportSize(phone);
     await openChannel(page, DEMO, ALBATROS);
-    const room = phone.height - SHEET_TOP_GAP;
-    const chat = chatSize(phone);
+    const room = phone.height - (await headerHeight(page));
+    const chat = await chatUnder(page, phone);
     const floor = Math.round(await chatFloor(page));
     await expect
         .poll(async () => (await contentBox(page)).height, { message: 'разговор встал не в свою долю' })
@@ -1478,10 +1514,13 @@ test('свёртывание разговора растекается, а не 
  * Какой рост положен кадру в окне такой формы, px. Та же выкладка, что и в стилях: всё окно
  * без разговора, плюс полоска заезда под него, но не ниже наименьшего кадра и не выше окна.
  */
-const frameHeight = (view: { width: number; height: number }): number =>
+const frameHeight = async (page: Page, view: { width: number; height: number }): Promise<number> =>
     Math.min(
         view.height,
-        Math.max(Math.max(SCENE_MIN_HEIGHT, SCENE_MIN_SHARE * view.height), view.height - chatSize(view) + CHAT_OVERLAP)
+        Math.max(
+            Math.max(SCENE_MIN_HEIGHT, SCENE_MIN_SHARE * view.height),
+            view.height - (await chatUnder(page, view)) + CHAT_OVERLAP
+        )
     );
 
 /** Окно того же стоячего вида, но ниже: раскладка та же, а все мерки другие. */
@@ -1548,15 +1587,20 @@ test('кадр встаёт в новый рост вместе с окном, �
     // Допуск в пиксель — на дробную высоту и округление разметки, а не на движение: отставший
     // кадр расходился с новым окном на сотню с лишним.
     const off = (shot: { frame: number }, want: number): boolean => Math.abs(shot.frame - want) > 1;
-    expect(before.filter((shot) => off(shot, frameHeight(STANDING))).length, 'кадр не в своём росте до замера').toBe(0);
+    // Шапку меряем один раз на оба окна: они одной ширины, а рост шапки зависит от ширины.
+    const wasTall = await frameHeight(page, STANDING);
+    const nowTall = await frameHeight(page, SHRUNK);
+    expect(before.filter((shot) => off(shot, wasTall)).length, 'кадр не в своём росте до замера').toBe(0);
     expect(
-        after.filter((shot) => off(shot, frameHeight(SHRUNK))).map((shot) => Math.round(shot.frame)),
+        after.filter((shot) => off(shot, nowTall)).map((shot) => Math.round(shot.frame)),
         'кадр ехал к новому росту вслед за окном'
     ).toEqual([]);
 
     // Разговор при этом остался прежней долей нового окна: окно урезало кадр, а выбора не
     // тронуло.
-    expect((await contentBox(page)).height, 'разговор не пересчитался под новое окно').toBe(chatSize(SHRUNK));
+    expect((await contentBox(page)).height, 'разговор не пересчитался под новое окно').toBe(
+        await chatUnder(page, SHRUNK)
+    );
 
     const moving = await page.evaluate(async () => {
         const taken: number[] = [];
@@ -1775,12 +1819,14 @@ test('в свёрнутый разговор форма выезжает сни�
     await openNewChannel(page, 'gruz-form');
     await join(page, 'Гроза', '317');
 
+    const third = await chatUnder(page, PHONE);
+
     await foldChat(page);
     // Ждём конца свёртывания и только потом запоминаем: снятая на ходу коробка — это кадр
     // движения, и сверять с ним то, что будет стоять на месте, значит сверять с чем попало.
     await expect
         .poll(async () => (await contentBox(page)).height, { message: 'разговор не свернулся до пола' })
-        .toBeLessThan(chatSize(PHONE) / 2);
+        .toBeLessThan(third / 2);
     const folded = (await contentBox(page)).height;
 
     // Открываем форму на почти голом кадре — нажатием по своему кораблю.
@@ -1791,7 +1837,7 @@ test('в свёрнутый разговор форма выезжает сни�
     await atRealSpeed(page);
 
     // Путь формы — весь её рост: снизу, из-за кромки окна, до верха развёрнутой коробки.
-    const run = chatSize(PHONE) - SHEET_HANDLE;
+    const run = third - SHEET_HANDLE;
     const opening = rideOf(page, '[class*="form_"]');
     await clickShip(page, page.locator('[class*="shipMine"]'));
     const out = await opening;
@@ -1804,7 +1850,7 @@ test('в свёрнутый разговор форма выезжает сни�
     const form = await boxOf(page, '[class*="form_"]');
     expect(form.height, 'форма выехала не в размер развёрнутой панели').toBe(run);
     expect(form.top + form.height, 'форма не дошла до нижней кромки окна').toBe(PHONE.height);
-    expect((await contentBox(page)).height, 'разговор под формой остался свёрнутым').toBe(chatSize(PHONE));
+    expect((await contentBox(page)).height, 'разговор под формой остался свёрнутым').toBe(third);
     await expect(page.getByRole('button', { name: 'Готово' }), 'в форме не видно кнопки готовности').toBeVisible();
 
     // И работает она целиком: место на рейде выбирается прямо отсюда.
@@ -1862,7 +1908,7 @@ test('в убранную сбоку панель форма выезжает с
     await page.waitForTimeout(600);
 
     const form = await boxOf(page, '[class*="form_"]');
-    expect(form.width, 'форма выехала не в ширину панели').toBe(chatSize(LYING));
+    expect(form.width, 'форма выехала не в ширину панели').toBe(chatBeside(LYING));
     expect(form.right, 'форма не дошла до правой кромки окна').toBe(LYING.width);
 
     // Закрыли — форма уезжает вниз, а панель за её спиной уходит обратно за кромку.
@@ -1896,7 +1942,7 @@ test('панель убирается вместе с открытой форм�
     // Форма встала в панель, кадр рядом с ней прежнего размера: место у формы то же, что
     // у разговора.
     const form = await boxOf(page, '[class*="form_"]');
-    expect(form.width, 'форма встала не в ширину панели').toBe(chatSize(LYING));
+    expect(form.width, 'форма встала не в ширину панели').toBe(chatBeside(LYING));
     expect((await boxOf(page, 'header')).width, 'кадр под открытой формой поменял размер').toBe(before.width);
 
     // Убираем панель. Кнопка на месте — прятать её не за что.
@@ -2056,9 +2102,12 @@ test('шторка ростом по содержимому и не выше о�
     await openCard(page);
 
     const window = page.viewportSize()!;
+    // Потолок — окно без шапки, и шапку меряем: тем же замером её отдаёт шторке и приложение
+    // (переменная `--header-height`, см. Shade.module.less).
+    const ceiling = Math.round(window.height - (await headerHeight(page)));
     const short = await shadeBox(page);
     expect(short.top + short.height, 'шторка не дошла до нижней кромки окна').toBe(window.height);
-    expect(short.height, 'короткая карточка растянула шторку до потолка').toBeLessThan(window.height - SHEET_TOP_GAP);
+    expect(short.height, 'короткая карточка растянула шторку до потолка').toBeLessThan(ceiling);
     const band = (await page.locator('[class*="shade_"] [class*="actions_"]').boundingBox())!;
     expect(short.top + short.height - (band.y + band.height), 'под карточкой осталось пустое поле').toBeLessThan(8);
     // Последняя строка содержимого — характеристики корабля под силуэтом.
@@ -2069,7 +2118,7 @@ test('шторка ростом по содержимому и не выше о�
     await growSheet(page);
     await expect
         .poll(async () => (await shadeBox(page)).height, { message: 'длинное содержимое не упёрлось в потолок' })
-        .toBe(window.height - SHEET_TOP_GAP);
+        .toBe(ceiling);
 });
 
 /**
@@ -2087,7 +2136,7 @@ test('шторка в просторном окне уже своей полос
 
     const window = page.viewportSize()!;
     // Полоса под шторку — всё, что не занял разговор: сбоку он отнимает у неё ширину справа.
-    const room = window.width - chatSize(window);
+    const room = window.width - chatBeside(window);
     const desk = await shadeBox(page);
     expect(desk.width, 'шторка в просторном окне взяла не свою ширину').toBe(SHEET_WIDTH);
     expect(desk.width, 'шторка не уже своей полосы').toBeLessThan(room);
@@ -3342,7 +3391,7 @@ test('в разговоре на треть экрана видно две по�
     await openChannel(page, DEMO, ALBATROS);
     await expect
         .poll(async () => (await contentBox(page)).height, { message: 'разговор встал не в свою треть' })
-        .toBe(chatSize(phone));
+        .toBe(await chatUnder(page, phone));
 
     await send(page, 'Есть право руля');
     await send(page, 'Ход двенадцать');
@@ -3616,7 +3665,7 @@ test('форма выезжает снизу целиком, а не встаё�
 const WIDE = { width: 1400, height: 900 };
 
 /** Какой разговор в этом окне открывается, px: та же треть, что и везде. */
-const SIDE_AT_WIDE = chatSize(WIDE);
+const SIDE_AT_WIDE = chatBeside(WIDE);
 
 /** Стоячее окно той же высоты: тот же экран, повёрнутый в руке. */
 const TURNED = { width: 700, height: 900 };
@@ -3736,7 +3785,7 @@ test('повёрнутое окно само уводит разговор по�
 
     const content = await boxOf(page, 'main');
     expect(content.width, 'разговор остался в боковой ширине').toBe(TURNED.width);
-    expect(content.height, 'под кадром разговор встал не в свою долю').toBe(chatSize(TURNED));
+    expect(content.height, 'под кадром разговор встал не в свою долю').toBe(await chatUnder(page, TURNED));
     expect(content.top + content.height, 'разговор не дошёл до нижней кромки окна').toBe(TURNED.height);
     await expect(
         page.getByRole('separator', { name: 'Высота разговора' }),
@@ -3802,8 +3851,14 @@ const since = <T>(frames: T[], started: (frame: T) => boolean): T[] => frames.sl
  *
  * Прежде он оказывался на новом месте первым же кадром и оттуда поджимался до нужной ширины
  * на глазах — замер на повороте: 390px схлопывались до 333 за те же полсекунды, что и всё
- * остальное движение. Промежуточных размеров не должно быть вовсе: ехать разговору положено
- * смещением, а размер брать готовым.
+ * остальное движение. Ехать разговору положено смещением, а размер брать готовым.
+ *
+ * «Готовым» — с точностью до пары пикселей, и вот откуда они берутся. Долю под кадром считают
+ * от настоящей высоты шапки, а её приложение узнаёт замером, и замер приходит кадром позже
+ * поворота (`measureHeader` в App.tsx): первые кадры переезда посчитаны ещё по прежней шапке,
+ * и за дорогу размер подбирается на эту разницу — на повороте 1400→700 это два пикселя.
+ * Поджатие, ради которого проверка написана, было другого порядка — шестьсот с лишним
+ * пикселей, — так что допуск его не пропустит.
  *
  * Заодно проверяется главное следствие: кадр отдаёт место ровно под приезжающую коробку,
  * и щели между ними не бывает ни на одном кадре. Первым кадром переезда всё считается так,
@@ -3814,14 +3869,21 @@ test('повёрнутое окно не поджимает разговор, а
     await openSide(page);
 
     // Сбоку → под кадр. Едет верх, стоит высота.
-    const down = since(await boxWhileTurning(page, TURNED), (frame) => frame.height === chatSize(TURNED));
+    //
+    // Допуск — только на догоняющий замер шапки (см. выше). Ширине он не нужен вовсе: доля
+    // сбоку считается от ширины окна, и шапка в ней не участвует, — поэтому ниже, на обратном
+    // повороте, размер сверяется по-прежнему в упор.
+    const settling = (frame: { height: number }, want: number): boolean => Math.abs(frame.height - want) <= 3;
+    const film = await boxWhileTurning(page, TURNED);
+    const under = await chatUnder(page, TURNED);
+    const down = since(film, (frame) => settling(frame, under));
     expect(
-        [...new Set(down.map((frame) => frame.height))],
+        down.filter((frame) => !settling(frame, under)).map((frame) => frame.height),
         'разговор поджимался по высоте, вместо того чтобы приехать'
-    ).toEqual([chatSize(TURNED)]);
+    ).toEqual([]);
     const tops = down.map((frame) => frame.top);
     expect(Math.max(...tops), 'разговор не начал переезд из-за нижней кромки окна').toBe(TURNED.height);
-    expect(Math.min(...tops), 'разговор не доехал до своего места').toBe(TURNED.height - chatSize(TURNED));
+    expect(Math.min(...tops), 'разговор не доехал до своего места').toBe(TURNED.height - under);
     down.forEach((frame) => {
         expect(frame.edge, 'между кадром и приезжающим разговором открылась щель').toBeGreaterThanOrEqual(frame.top);
     });
@@ -3906,8 +3968,9 @@ test('на смене раскладки кадр не прыгает ни вы�
     rode([wasSide.width, ...narrow.map((frame) => frame.sceneWidth)], 'сужение, ширина кадра');
     rode([wasSide.height, ...narrow.map((frame) => frame.sceneHeight)], 'сужение, высота кадра');
     // Разговор считаем от нижней кромки окна: он приезжает из-за неё, и первое его место — там.
+    const under = await chatUnder(page, SEAM_UNDER);
     rode(
-        [SEAM_UNDER.height, ...since(narrow, (frame) => frame.height === chatSize(SEAM_UNDER)).map((f) => f.top)],
+        [SEAM_UNDER.height, ...since(narrow, (frame) => frame.height === under).map((f) => f.top)],
         'сужение, разговор'
     );
 
@@ -4067,7 +4130,9 @@ test('ширина сбоку помнится отдельно от высот�
     // Поворот: под кадром разговор открывается своей долей, а не натянутой сбоку.
     await page.setViewportSize(TURNED);
     await page.waitForTimeout(400);
-    expect((await boxOf(page, 'main')).height, 'под кадром разговор взял натянутую сбоку мерку').toBe(chatSize(TURNED));
+    expect((await boxOf(page, 'main')).height, 'под кадром разговор взял натянутую сбоку мерку').toBe(
+        await chatUnder(page, TURNED)
+    );
 
     await page.setViewportSize(WIDE);
     await page.waitForTimeout(400);
@@ -4097,13 +4162,15 @@ test('пустая вкладка открывает разговор в тре�
     const wider = { width: 1800, height: 900 };
     await page.setViewportSize(wider);
     await page.waitForTimeout(400);
-    expect(await sideWidth(page), 'разговор не потянулся за окном').toBe(chatSize(wider));
+    expect(await sideWidth(page), 'разговор не потянулся за окном').toBe(chatBeside(wider));
 
     // Телефон: то же самое, только высотой.
     const phone = { width: MOBILE_MAX_WIDTH - 90, height: 844 };
     await page.setViewportSize(phone);
     await page.waitForTimeout(400);
-    expect((await boxOf(page, 'main')).height, 'на телефоне разговор открылся не в треть').toBe(chatSize(phone));
+    expect((await boxOf(page, 'main')).height, 'на телефоне разговор открылся не в треть').toBe(
+        await chatUnder(page, phone)
+    );
 });
 
 /**
@@ -4119,7 +4186,9 @@ test('на главной, где канала ещё нет, раскладка
 
     await page.setViewportSize(TURNED);
     await page.waitForTimeout(700);
-    expect((await boxOf(page, 'main')).height, 'на главной разговор не переехал под кадр').toBe(chatSize(TURNED));
+    expect((await boxOf(page, 'main')).height, 'на главной разговор не переехал под кадр').toBe(
+        await chatUnder(page, TURNED)
+    );
 });
 
 /**
@@ -4379,8 +4448,16 @@ test('шторка уходит с экрана и там, где переход
  * а промежуток между двумя точками — дорога.
  */
 
-/** Весь ход разговора под кадром в этом окне, px: всё, что осталось под шапкой. */
-const chatRoom = (view: { width: number; height: number }): number => view.height - SHEET_TOP_GAP;
+/**
+ * Весь ход разговора под кадром в этом окне, px: всё, что осталось под шапкой (её меряем).
+ *
+ * Округляется до целого, как и доля в `chatUnder`, и по той же причине: настоящая шапка
+ * дробная, а помощники, которыми коробку меряют (`boxOf`, `contentBox`, `regionBox`), отдают
+ * целые пиксели. Сравнивать целое с дробным — значит расходиться на десятые доли пикселя там,
+ * где расхождения нет вовсе.
+ */
+const chatRoom = async (page: Page, view: { height: number }): Promise<number> =>
+    Math.round(view.height - (await headerHeight(page)));
 
 /** Высота разговора под кадром, px. */
 const chatHeight = async (page: Page): Promise<number> => (await boxOf(page, 'main')).height;
@@ -4483,7 +4560,7 @@ test('разговор берётся за всю полосу хвата — о
     takes(4);
     await page.setViewportSize(PHONE);
     await openChannel(page, DEMO, ALBATROS);
-    const two = Math.round(chatRoom(PHONE) * 2 * CHAT_SHARE);
+    const two = Math.round((await chatRoom(page, PHONE)) * 2 * CHAT_SHARE);
 
     // От верхней кромки коридора: выше стыка, на воде.
     const grip = await boxOf(page, '[role="separator"]');
@@ -4494,7 +4571,7 @@ test('разговор берётся за всю полосу хвата — о
     // только что подрос, и стык вместе с ручкой уехал вверх.
     const handle = await boxOf(page, '[class*="sheetHandle"]');
     await leadFrom(page, handle.left + handle.width / 2, handle.top + handle.height - 1, -150);
-    expect(await chatHeight(page), 'за низ ручки разговор не взялся').toBe(chatSize(PHONE));
+    expect(await chatHeight(page), 'за низ ручки разговор не взялся').toBe(await chatUnder(page, PHONE));
 });
 
 /**
@@ -4526,9 +4603,9 @@ test('разговор под кадром встаёт только на сво
     takes(5);
     await page.setViewportSize(PHONE);
     await openChannel(page, DEMO, ALBATROS);
-    const room = chatRoom(PHONE);
+    const room = await chatRoom(page, PHONE);
     const two = Math.round(room * 2 * CHAT_SHARE);
-    expect(await chatHeight(page), 'разговор открылся не в свою треть').toBe(chatSize(PHONE));
+    expect(await chatHeight(page), 'разговор открылся не в свою треть').toBe(await chatUnder(page, PHONE));
 
     // Довели до середины между третью и двумя третями — и он ушёл к двум третям: доля пути,
     // за которой точка перестаёт держать, пройдена (MAGNET_ESCAPE).
@@ -4580,7 +4657,7 @@ test('короткий сильный свайп вниз сворачивает
 test('плашка ввода не уходит под кромку, пока разговор сминается', async ({ page }) => {
     await page.setViewportSize(PHONE);
     await openChannel(page, DEMO, ALBATROS);
-    await leadChat(page, chatSize(PHONE));
+    await leadChat(page, await chatUnder(page, PHONE));
 
     // Самое низкое место плашки за всё падение — относительно нижней кромки коробки.
     const watch = page.evaluate(
@@ -4618,7 +4695,7 @@ test('подведённая к нижней кромке кромка тоже 
     await openChannel(page, DEMO, ALBATROS);
     const floor = await chatFloor(page);
 
-    await leadChat(page, -chatSize(PHONE) + 20);
+    await leadChat(page, -(await chatUnder(page, PHONE)) + 20);
     expect(await chatHeight(page), 'разговор свернулся не до пола').toBeCloseTo(floor, 0);
 });
 
@@ -4635,7 +4712,7 @@ test('лента растёт вместе с разговором, а не по
     await page.setViewportSize(PHONE);
     await openChannel(page, DEMO, ALBATROS);
 
-    await leadChat(page, -chatSize(PHONE));
+    await leadChat(page, -(await chatUnder(page, PHONE)));
     const floor = await chatHeight(page);
     expect(await feedShown(page), 'у свёрнутого до пола разговора осталась лента').toBe(false);
 
@@ -4663,7 +4740,7 @@ test('плашка ввода стоит на месте, пока свёрну�
     await page.setViewportSize(PHONE);
     await openChannel(page, DEMO, ALBATROS);
 
-    await leadChat(page, -chatSize(PHONE));
+    await leadChat(page, -(await chatUnder(page, PHONE)));
     const composerTop = async () => (await boxOf(page, '[class*="composer"]')).top;
     const stood = await composerTop();
     // Пиксель допуска — на сетку браузера: высота коробки едет дробными числами, и верхняя
@@ -4782,7 +4859,7 @@ test('кадр берёт остаток окна с заездом, а ниже
     expect(stood.overlap, 'кадр заехал под разговор не на свою полоску').toBeCloseTo(CHAT_OVERLAP, 0);
 
     // Подняли разговор на ступеньку — кадр отдал ровно столько же и не пиксели сверх того.
-    const step = Math.round(chatRoom(PHONE) * 2 * CHAT_SHARE) - chatSize(PHONE);
+    const step = Math.round((await chatRoom(page, PHONE)) * 2 * CHAT_SHARE) - (await chatUnder(page, PHONE));
     await leadChat(page, step);
     const raised = await stack(page);
     expect(raised.chat, 'разговор не встал на следующую точку').toBeCloseTo(stood.chat + step, 0);
@@ -4793,7 +4870,7 @@ test('кадр берёт остаток окна с заездом, а ниже
     // встал на свою мерку, а разговор пошёл поверх.
     await leadChat(page, 500);
     const covered = await stack(page);
-    expect(covered.chat, 'разговор поднялся не во весь рост').toBe(chatRoom(PHONE));
+    expect(covered.chat, 'разговор поднялся не во весь рост').toBe(await chatRoom(page, PHONE));
     expect(covered.scene, 'кадр сжался ниже своей мерки').toBeCloseTo(sceneMin(PHONE), 0);
     expect(covered.overlap, 'разговор не пошёл поверх кадра').toBeGreaterThan(CHAT_OVERLAP);
 });
@@ -4819,7 +4896,8 @@ test('приезд разговора к точке раздаёт кадр бе
     const { x, y } = await gripSpot(page);
     await page.mouse.move(x, y);
     await page.mouse.down();
-    await page.mouse.move(x, y - (Math.round(chatRoom(PHONE) * 2 * CHAT_SHARE) - chatSize(PHONE) - 20), { steps: 8 });
+    const step = Math.round((await chatRoom(page, PHONE)) * 2 * CHAT_SHARE) - (await chatUnder(page, PHONE));
+    await page.mouse.move(x, y - (step - 20), { steps: 8 });
     await page.waitForTimeout(FLING_MS * 3);
 
     // Замер идёт покадрово и изнутри страницы: снаружи каждый заход стоит миллисекунд, и весь
@@ -4871,7 +4949,7 @@ test('приезд разговора к точке раздаёт кадр бе
         'кадр ехал с возвратом'
     ).toBe(true);
     expect(frames[frames.length - 1].chat, 'разговор не приехал к двум третям').toBeCloseTo(
-        Math.round(chatRoom(PHONE) * 2 * CHAT_SHARE),
+        Math.round((await chatRoom(page, PHONE)) * 2 * CHAT_SHARE),
         0
     );
 });
@@ -5018,8 +5096,8 @@ test('коробку с формой тянут за ручку в обе сто
     await page.getByRole('button', { name: 'Настроить корабль' }).click();
     await page.waitForTimeout(600);
 
-    const third = chatSize(PHONE);
-    const two = Math.round(chatRoom(PHONE) * 2 * CHAT_SHARE);
+    const third = await chatUnder(page, PHONE);
+    const two = Math.round((await chatRoom(page, PHONE)) * 2 * CHAT_SHARE);
     const stood = await boxOf(page, '[class*="form_"]');
     const sceneStood = (await boxOf(page, 'header')).height;
     const spanStood = await berthSpan(page);
@@ -5089,7 +5167,7 @@ test('коробку со слоем не утапливают ниже её т�
     await openChannel(page, DEMO, ALBATROS);
     await openSheet(page);
 
-    const third = chatSize(PHONE);
+    const third = await chatUnder(page, PHONE);
     expect(await chatHeight(page), 'список открылся не в свою треть').toBe(third);
 
     // Ведём далеко за упор и меряем, не отпуская: сотни точек хватает, чтобы прежняя коробка
@@ -5166,7 +5244,7 @@ test('форму постановки в строй закрывает «Отм�
     // Ждём конца дороги обратно: отпущенная на ходу коробка едет к своей точке переходом.
     await expect
         .poll(() => chatHeight(page), { message: 'коробку с формой в строй смяли до пола' })
-        .toBe(chatSize(PHONE));
+        .toBe(await chatUnder(page, PHONE));
     await expect(page.getByPlaceholder('Гром'), 'форму в строй закрыл свайп').toBeVisible();
 
     await page.getByRole('button', { name: 'Отмена' }).click();
