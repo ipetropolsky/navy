@@ -32,6 +32,8 @@ import {
     LeaveChannelRequest,
     MemberDraft,
     MemberResponse,
+    PreviewChannelRequest,
+    PreviewChannelResponse,
     UpdateMemberRequest,
 } from '@shared/types/calls';
 import {
@@ -206,8 +208,14 @@ export const toChannelError = (failure: unknown): ChannelError => {
             return new ChannelError('unavailable', 'Сервер сейчас недоступен. Попробуйте ещё раз');
         case 'deadline-exceeded':
             return new ChannelError('timeout', 'Сервер долго не отвечает. Попробуйте ещё раз');
-        case 'permission-denied':
+        // unauthenticated у вызова функции значит одно и только одно — не вошёл (см. callable
+        // в functions/src/index.ts, она бросает этот код только за это), и ответ на это
+        // не извинение, а кнопка входа. permission-denied — не про личность, а про то, что
+        // само правило не пустило (не старший, не участник), и здесь ему всё ещё нечем
+        // ответить точнее общего текста.
         case 'unauthenticated':
+            return new ChannelError('sign-in-required', 'Нужно войти, чтобы продолжить');
+        case 'permission-denied':
             return new ChannelError('permission-denied', 'Доступ к каналу изменился. Попробуйте ещё раз');
         default:
             return new ChannelError('unknown', 'Сервер не ответил. Попробуйте ещё раз');
@@ -338,6 +346,10 @@ export function createFirebaseBackend({
     const updateMemberCall = httpsCallable<UpdateMemberRequest, MemberResponse>(functions, 'updateMember');
     const leaveChannelCall = httpsCallable<LeaveChannelRequest, Record<string, never>>(functions, 'leaveChannel');
     const kickMemberCall = httpsCallable<KickMemberRequest, Record<string, never>>(functions, 'kickMember');
+    const previewChannelCall = httpsCallable<PreviewChannelRequest, PreviewChannelResponse>(
+        functions,
+        'previewChannel'
+    );
 
     /**
      * Состояние связи — одно на весь бэкенд, а не на каждую подписку: три подписки одного
@@ -458,11 +470,39 @@ export function createFirebaseBackend({
         };
     };
 
+    /**
+     * То же самое для того, кто не вошёл: правила закрывают участников и ленту от постороннего
+     * взгляда целиком (firestore.rules, allow read: if signedIn()) — различить в правиле,
+     * что показать, а что нет, нечем. Бортовые номера взамен позывных вместо этого отдаёт
+     * функция (previewChannel, см. functions/src/index.ts и preview.ts) — сама она уже
+     * читает Admin SDK, минуя правила. Лента не читается вовсе: до чата посторонний не
+     * доходит ни одной веткой App.tsx, и спрашивать её неоткого незачем.
+     */
+    const readChannelPreview = async (channelId: string): Promise<ChannelSnapshot | null> => {
+        const channelSnap = await getDoc(channelRef(channelId));
+        if (!channelSnap.exists()) {
+            return null;
+        }
+        const { data } = await previewChannelCall({ channelId });
+        return {
+            channel: toChannel(channelId, channelSnap.data() as ChannelDoc),
+            members: data.members,
+            messages: [],
+            hasMoreMessages: false,
+        };
+    };
+
     return {
         getChannel: async ({ channelId, userId }) => {
             try {
-                const snapshot = await withTimeout(() => readChannel(channelId), READ_TIMEOUT);
-                return snapshot && mergeOutbox(snapshot, userId, channelId);
+                // null — явно посторонний, ему превью (см. readChannelPreview). Не передан
+                // вовсе — вызвавшему сам факт входа не важен, и это разрешено (см. userId
+                // в types.ts, ChannelBackend.getChannel): читаем как обычно, чужой мимо кассы.
+                const snapshot = await withTimeout(
+                    () => (userId === null ? readChannelPreview(channelId) : readChannel(channelId)),
+                    READ_TIMEOUT
+                );
+                return snapshot && mergeOutbox(snapshot, userId ?? undefined, channelId);
             } catch (failure) {
                 throw toChannelError(failure);
             }
@@ -476,8 +516,8 @@ export function createFirebaseBackend({
                         return null;
                     }
                     const { channelId } = reserved.data() as { channelId: string };
-                    const snapshot = await readChannel(channelId);
-                    return snapshot && mergeOutbox(snapshot, userId, channelId);
+                    const snapshot = await (userId === null ? readChannelPreview(channelId) : readChannel(channelId));
+                    return snapshot && mergeOutbox(snapshot, userId ?? undefined, channelId);
                 }, READ_TIMEOUT);
             } catch (failure) {
                 throw toChannelError(failure);
@@ -933,6 +973,21 @@ export function createFirebaseBackend({
                     reportSnapshotFailure();
                 }
             );
+
+            // Участники и лента закрыты правилами для того, кто не вошёл (firestore.rules,
+            // allow read: if signedIn()) — заводить эти две подписки анониму незачем, они бы
+            // тут же и оборвались отказом. Подписка на канал при этом остаётся: документ канала
+            // публичен (allow get: if true), и именно в нём будущему признаку закрытого канала
+            // предстоит доходить до постороннего взгляда живьём, без перезагрузки страницы.
+            //
+            // null — явно посторонний. Не передан вовсе — сам факт входа вызвавшему не важен
+            // (см. userId в types.ts, ChannelBackend.subscribe), и обе подписки заводятся как
+            // обычно, только эхо своего неотправленного ниже не распознать — ключа нет.
+            if (userId === null) {
+                return () => {
+                    unsubscribeChannel();
+                };
+            }
 
             let firstMembers = true;
             const unsubscribeMembers = onSnapshot(

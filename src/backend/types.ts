@@ -132,13 +132,22 @@ interface MemberAddress extends ChannelAddress {
 
 export interface ChannelBackend {
     /**
-     * `userId` не обязателен, но нужен, чтобы подмешать в ленту своё же неотправленное
-     * (см. `backend/outbox.ts`): без него ящик не найти — ключ у него `<userId>.<channelId>`.
-     * Не передан — ответ тот же, что и раньше, без ящика.
+     * `userId` отвечает сразу за два: ключ своего же неотправленного в ящике (`backend/outbox.ts`:
+     * без него не найти, ключ там `<userId>.<channelId>`) и сам факт входа — отдельного поля
+     * для входа нет, потому что оно бы просто дублировало это же: кто не вошёл, у того userId
+     * и не бывает (см. App.tsx, `auth.account?.userId ?? null`).
+     *
+     * Поэтому у необязательности здесь два разных смысла, и оба нужны. `null` — вызвавший
+     * точно знает, что посторонний, и ответ соответствующий: участники без позывных, взамен
+     * бортовыми номерами (см. `redactMember`, `shared/types/channel.ts`), лента не читается
+     * вовсе — до чата посторонний не доходит ни одной веткой App.tsx. Не передан вовсе —
+     * вызвавшему сам факт входа не важен (так зовут не из App.tsx, а из проверок, которым
+     * нужно самое состояние, а не то, как его увидел бы кто-то конкретный): ответ как есть,
+     * только без подмешанного ящика.
      */
-    getChannel(request: ChannelAddress & { userId?: string }): Promise<ChannelSnapshot | null>;
+    getChannel(request: ChannelAddress & { userId?: string | null }): Promise<ChannelSnapshot | null>;
     /** Разбор адреса из ссылки: по slug находим канал и дальше работаем с его channelId. */
-    getChannelBySlug(request: { slug: string; userId?: string }): Promise<ChannelSnapshot | null>;
+    getChannelBySlug(request: { slug: string; userId?: string | null }): Promise<ChannelSnapshot | null>;
 
     createChannel(request: { channel: ChannelDraft }): Promise<{ channel: Channel }>;
     updateChannel(request: ChannelAddress & { channel: ChannelDraft }): Promise<{ channel: Channel }>;
@@ -248,13 +257,20 @@ export interface ChannelBackend {
      * События приходят и от чужих вкладок, и от собственных действий этой вкладки —
      * UI не должен угадывать, кто сделал изменение, чтобы применить его.
      *
-     * `userId` не обязателен, но нужен, чтобы узнать в исходящем `message-updated`/
-     * `message-removed` свою же запись из ящика неотправленного, заведённую ещё до этого
-     * вызова, — например, отправленное перед самой перезагрузкой. Без него отказ и повтор
-     * такого сообщения подпиской замечены не будут (хотя в самой ленте, через getChannel,
-     * оно всё равно останется видно).
+     * `userId` не обязателен, но нужен для двух вещей — и, как у getChannel, `null`
+     * и «не передан» здесь тоже не одно и то же. Первая вещь — узнать в исходящем
+     * `message-updated`/`message-removed` свою же запись из ящика неотправленного, заведённую
+     * ещё до этого вызова, — например, отправленное перед самой перезагрузкой; без реального
+     * id (что `null`, что «не передан») отказ и повтор такого сообщения подпиской замечены
+     * не будут (хотя в самой ленте, через getChannel, оно всё равно останется видно). Вторая —
+     * сам факт входа: только явный `null` значит «точно посторонний» и гасит подписки
+     * на участников и на ленту (см. firestore.rules, allow read: if signedIn()), оставляя
+     * живым только канал; не передан вовсе — обе подписки заводятся как обычно, это тот же
+     * «вход вызвавшему не важен», что и у getChannel.
      */
-    subscribe(request: ChannelAddress & { userId?: string; onEvent: (event: ChannelEvent) => void }): Unsubscribe;
+    subscribe(
+        request: ChannelAddress & { userId?: string | null; onEvent: (event: ChannelEvent) => void }
+    ): Unsubscribe;
 
     /**
      * Состояние связи с бэкендом — не с каналом, а с сервером вообще. Отдельно от подписки:

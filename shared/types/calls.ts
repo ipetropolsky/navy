@@ -51,3 +51,12 @@ export interface KickMemberRequest {
 export interface MemberResponse {
     member: Member;
 }
+
+export interface PreviewChannelRequest {
+    channelId: string;
+}
+
+/** Участники уже без позывных — см. redactMember в shared/types/channel.ts. */
+export interface PreviewChannelResponse {
+    members: Member[];
+}

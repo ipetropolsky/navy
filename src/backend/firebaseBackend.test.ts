@@ -44,7 +44,7 @@ describe('toChannelError', () => {
         ['unavailable', 'unavailable'],
         ['deadline-exceeded', 'timeout'],
         ['permission-denied', 'permission-denied'],
-        ['unauthenticated', 'permission-denied'],
+        ['unauthenticated', 'sign-in-required'],
     ])('чужая ошибка с code=%s распознаётся как %s', (foreignCode, expected) => {
         // FirestoreError сюда не подставить напрямую — у неё приватный конструктор
         // (см. комментарий над toChannelError), поэтому берём ту же форму объекта:

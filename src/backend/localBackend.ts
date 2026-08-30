@@ -16,6 +16,7 @@ import {
     ShipNotice,
     isSameBerth,
     memberRef,
+    redactMember,
 } from '@shared/types/channel';
 import { limitMessage, overLimit } from '@shared/utils/limit';
 
@@ -190,6 +191,20 @@ const paged = (snapshot: StoredChannel): ChannelSnapshot => {
     const hasMoreMessages = messages.length > MESSAGE_PAGE;
     return { ...snapshot, messages: hasMoreMessages ? messages.slice(-MESSAGE_PAGE) : messages, hasMoreMessages };
 };
+
+/**
+ * То же самое для того, кто не вошёл — той же общей политикой, что и у настоящего бэкенда
+ * (см. firebaseBackend.ts, readChannelPreview): участники без позывных, взамен бортовыми
+ * номерами (redactMember), лента не читается вовсе. У настоящего сервера это держат правила
+ * и отдельная функция, у localStorage правил нет вовсе — здесь эту же политику держит сама
+ * функция чтения, а не какой-то отдельный слой: подменять тут больше нечему.
+ */
+const previewOf = (snapshot: StoredChannel): ChannelSnapshot => ({
+    channel: snapshot.channel,
+    members: snapshot.members.map(redactMember),
+    messages: [],
+    hasMoreMessages: false,
+});
 
 export function createLocalBackend(): ChannelBackend {
     // Чтение состояния при старте заодно кладёт демо-канал в хранилище, если его там нет.
@@ -382,16 +397,30 @@ export function createLocalBackend(): ChannelBackend {
     });
 
     return {
-        getChannel: ({ channelId }) => {
+        getChannel: ({ channelId, userId }) => {
             const snapshot = readState().channels[channelId];
-            return delay(snapshot ? mergeOutbox(paged(snapshot), localAccount().userId, channelId) : null);
+            if (!snapshot) {
+                return delay(null);
+            }
+            // null — точно посторонний, ему превью. Не передан вовсе — вход вызвавшему
+            // не важен, и ящик тогда мешает тот же, что и раньше: свой, по вкладке
+            // (localAccount), а не по чьему-то конкретному userId.
+            if (userId === null) {
+                return delay(previewOf(snapshot));
+            }
+            return delay(mergeOutbox(paged(snapshot), userId ?? localAccount().userId, channelId));
         },
 
-        getChannelBySlug: ({ slug }) => {
+        getChannelBySlug: ({ slug, userId }) => {
             const snapshot = Object.values(readState().channels).find((item) => item.channel.slug === slug);
-            return delay(
-                snapshot ? mergeOutbox(paged(snapshot), localAccount().userId, snapshot.channel.channelId) : null
-            );
+            if (!snapshot) {
+                return delay(null);
+            }
+            const { channelId } = snapshot.channel;
+            if (userId === null) {
+                return delay(previewOf(snapshot));
+            }
+            return delay(mergeOutbox(paged(snapshot), userId ?? localAccount().userId, channelId));
         },
 
         createChannel: async ({ channel: { slug, title } }) => {
@@ -707,12 +736,26 @@ export function createLocalBackend(): ChannelBackend {
             return delay({ count });
         },
 
-        subscribe: ({ channelId, onEvent: listener }): Unsubscribe => {
+        subscribe: ({ channelId, userId, onEvent: listener }): Unsubscribe => {
+            // Тем, кто не вошёл, участники и лента не показываются вовсе — той же политикой,
+            // что и у настоящего бэкенда (см. firebaseBackend.ts, subscribe). Там для этого
+            // не заводят две из трёх подписок; здесь на весь канал одна общая, и тот же эффект
+            // даёт фильтр на уже готовом событии — до анонима долетает только канал, то, что
+            // ему и так открыто без входа. Гасит фильтр именно null: не передан вовсе — вход
+            // вызвавшему не важен (см. userId в types.ts), и события идут как есть.
+            const forward =
+                userId === null
+                    ? (event: ChannelEvent) => {
+                          if (event.type === 'channel-created' || event.type === 'channel-updated') {
+                              listener(event);
+                          }
+                      }
+                    : listener;
             const forChannel = listeners.get(channelId) ?? new Set();
-            forChannel.add(listener);
+            forChannel.add(forward);
             listeners.set(channelId, forChannel);
             return () => {
-                forChannel.delete(listener);
+                forChannel.delete(forward);
                 if (!forChannel.size) {
                     listeners.delete(channelId);
                 }

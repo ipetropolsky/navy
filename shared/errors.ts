@@ -26,6 +26,12 @@ export const CHANNEL_ERROR_CODES = [
     'timeout',
     'unavailable',
     'permission-denied',
+    // Не вошёл — не «правила не пустили»: код свой, потому что ответ на него не извинение,
+    // а кнопка входа (см. toChannelError в firebaseBackend.ts и разбор в App.tsx).
+    'sign-in-required',
+    // Канал закрыт для посторонних. Заводить эту возможность рано, а код — нет: он лежит
+    // здесь уже сейчас, чтобы будущей функции было куда бросить его, не трогая клиент.
+    'channel-closed',
     'sign-in-cancelled',
     'sign-in-blocked',
     'unknown',

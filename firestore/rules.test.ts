@@ -704,13 +704,22 @@ describe('firestore.rules: channels/{channelId}', () => {
 });
 
 describe('firestore.rules: channels/{channelId}/members/{memberId}', () => {
-    test('участники читаются кем угодно, и списком — по ним и собирают рейд', async () => {
+    test('участники читаются любым вошедшим, и списком — по ним и собирают рейд', async () => {
+        const channelId = 'ch-1';
+        await seedDoc(paths.member({ channelId, memberId: 'm-1' }), { name: 'Дозорный' });
+
+        const stranger = testEnv.authenticatedContext('m-2');
+        await assertSucceeds(getDoc(doc(stranger.firestore(), paths.member({ channelId, memberId: 'm-1' }))));
+        await assertSucceeds(getDocs(collection(stranger.firestore(), paths.members({ channelId }))));
+    });
+
+    test('невошедший участников не читает — ни одного, ни списком', async () => {
         const channelId = 'ch-1';
         await seedDoc(paths.member({ channelId, memberId: 'm-1' }), { name: 'Дозорный' });
 
         const unauthed = testEnv.unauthenticatedContext();
-        await assertSucceeds(getDoc(doc(unauthed.firestore(), paths.member({ channelId, memberId: 'm-1' }))));
-        await assertSucceeds(getDocs(collection(unauthed.firestore(), paths.members({ channelId }))));
+        await assertFails(getDoc(doc(unauthed.firestore(), paths.member({ channelId, memberId: 'm-1' }))));
+        await assertFails(getDocs(collection(unauthed.firestore(), paths.members({ channelId }))));
     });
 
     test('участие не заводит клиент — даже своё', async () => {
@@ -793,14 +802,22 @@ describe('firestore.rules: channels/{channelId}/members/{memberId}', () => {
 });
 
 describe('firestore.rules: channels/{channelId}/berths/{berthId}', () => {
-    test('брони мест читаются кем угодно', async () => {
+    test('брони мест читает любой вошедший', async () => {
+        const channelId = 'ch-1';
+        await seedDoc(paths.berth({ channelId, slot: 0, corridor: 'center' }), { memberId: 'm-1', takenAt: 1 });
+
+        const stranger = testEnv.authenticatedContext('m-2');
+        await assertSucceeds(
+            getDoc(doc(stranger.firestore(), paths.berth({ channelId, slot: 0, corridor: 'center' })))
+        );
+    });
+
+    test('невошедший брони мест не читает', async () => {
         const channelId = 'ch-1';
         await seedDoc(paths.berth({ channelId, slot: 0, corridor: 'center' }), { memberId: 'm-1', takenAt: 1 });
 
         const unauthed = testEnv.unauthenticatedContext();
-        await assertSucceeds(
-            getDoc(doc(unauthed.firestore(), paths.berth({ channelId, slot: 0, corridor: 'center' })))
-        );
+        await assertFails(getDoc(doc(unauthed.firestore(), paths.berth({ channelId, slot: 0, corridor: 'center' }))));
     });
 
     test('бронь места не заводит клиент — даже свою', async () => {
@@ -818,7 +835,20 @@ describe('firestore.rules: channels/{channelId}/berths/{berthId}', () => {
 });
 
 describe('firestore.rules: channels/{channelId}/messages/{messageId}', () => {
-    test('лента читается кем угодно, включая невошедшего, и списком', async () => {
+    test('лента читается любым вошедшим, и списком', async () => {
+        const channelId = 'ch-1';
+        await seedDoc(paths.message({ channelId, messageId: 'msg-1' }), {
+            author: { memberId: 'm-1' },
+            sentAt: 1,
+            text: 'Есть на связи',
+        });
+
+        const stranger = testEnv.authenticatedContext('m-2');
+        await assertSucceeds(getDoc(doc(stranger.firestore(), paths.message({ channelId, messageId: 'msg-1' }))));
+        await assertSucceeds(getDocs(collection(stranger.firestore(), paths.messages({ channelId }))));
+    });
+
+    test('невошедший ленту не читает — ни одно сообщение, ни списком', async () => {
         const channelId = 'ch-1';
         await seedDoc(paths.message({ channelId, messageId: 'msg-1' }), {
             author: { memberId: 'm-1' },
@@ -827,8 +857,8 @@ describe('firestore.rules: channels/{channelId}/messages/{messageId}', () => {
         });
 
         const unauthed = testEnv.unauthenticatedContext();
-        await assertSucceeds(getDoc(doc(unauthed.firestore(), paths.message({ channelId, messageId: 'msg-1' }))));
-        await assertSucceeds(getDocs(collection(unauthed.firestore(), paths.messages({ channelId }))));
+        await assertFails(getDoc(doc(unauthed.firestore(), paths.message({ channelId, messageId: 'msg-1' }))));
+        await assertFails(getDocs(collection(unauthed.firestore(), paths.messages({ channelId }))));
     });
 
     test('участник пишет сообщение от своего имени — можно', async () => {

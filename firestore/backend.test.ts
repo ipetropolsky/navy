@@ -683,6 +683,50 @@ describe('подписка на ленту', () => {
     }, 15000);
 });
 
+describe('подписка гостя (userId: null)', () => {
+    test('участников и ленту не слышит вовсе — только смену самого канала', async () => {
+        const ownerUid = 'owner-guest-sub';
+        const backend = backendAs(ownerUid);
+        const { channel } = await backend.createChannel({ channel: { slug: 'gost-podpiska', title: 'Гостю' } });
+        // Старшего дописываем в обход правил (см. header-комментарий выше) — он нужен ниже,
+        // чтобы updateChannel прошёл правило isOwner.
+        await seedOwner(channel.channelId, ownerUid);
+
+        // Соединение здесь настоящее, вошедшее (backendAs(ownerUid)) — правила бы и участников,
+        // и ленту ему пустили без вопроса. Раз они всё равно не доходят, значит их и не читают
+        // вовсе: гасит именно userId: null внутри subscribe (см. firebaseBackend.ts, комментарий
+        // над одноимённой веткой), а не отказ правил, — тот случай эмулятор функций не нужен,
+        // но подтверждает не то же самое, что и firestore/rules.test.ts.
+        const events: ChannelEvent[] = [];
+        const unsubscribe = backend.subscribe({
+            channelId: channel.channelId,
+            userId: null,
+            onEvent: (event) => events.push(event),
+        });
+        await sleep(400); // первый снимок канала — состояние, а не событие (см. выше)
+        expect(events).toHaveLength(0);
+
+        await seedMember(channel.channelId, 'm-new', 'Новичок', '001', 1000);
+        await seedMessage(channel.channelId, 'msg-1', 2000, 'Не для гостя');
+        await backend.updateChannel({
+            channelId: channel.channelId,
+            channel: { slug: 'gost-podpiska', title: 'Другое имя' },
+        });
+
+        // Дождаться можно только правки канала: будь участники или лента услышаны, счётчик
+        // сдвинулся бы раньше неё, а не одновременно с ней.
+        await expect.poll(() => events.length, { timeout: 5000, interval: 50 }).toBeGreaterThan(0);
+        await sleep(300);
+
+        expect(events).toHaveLength(1);
+        expect(events[0].type).toBe('channel-updated');
+        expect(events.some((event) => event.type === 'member-joined')).toBe(false);
+        expect(events.some((event) => event.type === 'message-added')).toBe(false);
+
+        unsubscribe();
+    }, 15000);
+});
+
 describe('sendMessage', () => {
     test('пишет документ со снимком автора и отвечает тем же сообщением', async () => {
         const memberId = 'u-send';

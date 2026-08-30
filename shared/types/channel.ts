@@ -320,6 +320,25 @@ export interface Member {
 }
 
 /**
+ * Тот же корабль для того, кто ещё не вошёл: позывного не знает, только номер, — и на месте
+ * имени встаёт он же. `lastSeen` пропадает вместе с позывным: докуда участник дочитал —
+ * его личное дело, а не то, что вправе знать посторонний.
+ *
+ * Общая точка для клиента и сервера: серверу она нужна в previewChannel (functions/src/preview.ts) —
+ * там, где настоящий Firestore, а клиенту — в localBackend.ts, где сервера нет вовсе и прятать
+ * позывной приходится самому, тем же способом, что и настоящему бэкенду.
+ */
+export const redactMember = (member: Member): Member => ({
+    memberId: member.memberId,
+    name: member.hullNumber,
+    hullNumber: member.hullNumber,
+    shipKind: member.shipKind,
+    color: member.color,
+    place: member.place,
+    joinedAt: member.joinedAt,
+});
+
+/**
  * Как корабль звали в тот момент, о котором речь: тип, позывной, бортовой номер.
  *
  * Снимок, а не ссылка на участника: канал пишет о том, что было, и написанное не должно

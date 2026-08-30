@@ -131,13 +131,23 @@ export function useChannel(
                 setMyId(null);
             }
             void backend
-                .getChannelBySlug({ slug, userId: userId ?? undefined })
+                .getChannelBySlug({ slug, userId })
                 .then((snapshot) => {
                     if (!alive) {
                         return;
                     }
                     setChannel(snapshot);
                     if (!snapshot) {
+                        setMyId(null);
+                        return;
+                    }
+                    // Не вошёл — значит, никто: memberIdFromUrl здесь не спасение, а лазейка.
+                    // Без входа, подобрав чужой memberId в адресной строке, можно было бы
+                    // назваться стоящим на рейде кораблём, хотя вход так и не пройден, —
+                    // App.tsx решает, что показать, по `me`, а не по `signedIn` напрямую,
+                    // и назначь мы candidate до входа, лента и форма ответа встали бы поверх
+                    // приглашения войти, а не вместо него.
+                    if (!userId) {
                         setMyId(null);
                         return;
                     }
@@ -250,7 +260,7 @@ export function useChannel(
 
         return backend.subscribe({
             channelId,
-            userId: userId ?? undefined,
+            userId,
             onEvent: (event: ChannelEvent) => {
                 // Чужая реплика доехала — разыгрываем её приём: она печатается по буквам,
                 // а корабль отправителя мигает лампой (см. `useReception`). Своё не разыгрываем:

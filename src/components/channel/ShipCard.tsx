@@ -117,7 +117,13 @@ export default function ShipCard({ member, senior }: ShipCardProps) {
             spread
             inset
         >
-            <div className={styles.hullNumber}>Бортовой номер {member.hullNumber}</div>
+            {/* Не вошедшему вместо позывного показывают его же бортовой номер (см. redactMember
+                в shared/types/channel.ts) — и тогда подпись ниже повторяла бы то же число
+                вторым числом, слово в слово. Прячем её в этом случае: два взгляда на одну
+                и ту же цифру ничего не добавляют, а читаются как сбой вёрстки. */}
+            {member.name !== member.hullNumber && (
+                <div className={styles.hullNumber}>Бортовой номер {member.hullNumber}</div>
+            )}
 
             {/* По умолчанию корабль на якоре — он и правда стоит на рейде, и огни у него
                 якорные. Ходовые зажигает кнопка внизу, и только на портрете.

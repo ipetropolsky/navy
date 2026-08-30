@@ -6,6 +6,7 @@ import {
     KickMemberRequest,
     LeaveChannelRequest,
     MemberDraft,
+    PreviewChannelRequest,
     UpdateMemberRequest,
 } from '../../shared/types/calls';
 import {
@@ -154,4 +155,9 @@ export const parseKickMemberRequest = (data: unknown): KickMemberRequest => {
         channelId: asId(body.channelId, 'channelId'),
         member: { memberId: asId(member.memberId, 'member.memberId') },
     };
+};
+
+export const parsePreviewChannelRequest = (data: unknown): PreviewChannelRequest => {
+    const body = asRecord(data, 'request');
+    return { channelId: asId(body.channelId, 'channelId') };
 };

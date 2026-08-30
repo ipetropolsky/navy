@@ -4,12 +4,15 @@ import { setGlobalOptions } from 'firebase-functions';
 import { CallableRequest, FunctionsErrorCode, HttpsError, onCall } from 'firebase-functions/v2/https';
 
 import { ChannelError, ChannelErrorCode } from '../../shared/errors';
+import { PreviewChannelResponse } from '../../shared/types/calls';
 import {
     parseJoinChannelRequest,
     parseKickMemberRequest,
     parseLeaveChannelRequest,
+    parsePreviewChannelRequest,
     parseUpdateMemberRequest,
 } from './parse';
+import { previewMembers } from './preview';
 import * as raid from './raid';
 
 /**
@@ -17,6 +20,10 @@ import * as raid from './raid';
  * (правила, транзакции) и parse.ts (форма запроса); здесь только обвязка, общая для всех
  * четырёх: проверить, что пришли вошедшим, разобрать тело и перевести ChannelError в HttpsError,
  * которую поймёт клиентский SDK.
+ *
+ * Пятая функция, previewChannel, в этот список не укладывается: её как раз и зовут без входа —
+ * это и есть ответ тому, кто не вошёл (см. preview.ts), — и обвязка у неё поэтому своя,
+ * без общей проверки request.auth.
  */
 
 initializeApp();
@@ -100,3 +107,15 @@ export const leaveChannel = callable(parseLeaveChannelRequest, (userId, request)
 export const kickMember = callable(parseKickMemberRequest, (userId, request) =>
     raid.kickMember({ db, channelId: request.channelId, userId, member: request.member })
 );
+
+/**
+ * Список кораблей для того, кто не вошёл: без входа проверять здесь нечего (см. комментарий
+ * над файлом), и звать эту функцию может кто угодно — сама она отдаёт уже без позывных
+ * (см. previewMembers). Отказа с ChannelError у неё не бывает: чужой или неверный channelId
+ * просто вернёт пустой список — отсутствие документов здесь такой же обычный ответ,
+ * как и везде в этой базе (см. shared/config/model.ts).
+ */
+export const previewChannel = onCall(async (request: CallableRequest<unknown>): Promise<PreviewChannelResponse> => {
+    const { channelId } = parsePreviewChannelRequest(request.data);
+    return { members: await previewMembers(db, channelId) };
+});
