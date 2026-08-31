@@ -1,12 +1,17 @@
 import { expect } from '@playwright/test';
 
+import { WRITE_TIMEOUT } from '@/config/network';
+
 import {
     berths,
+    bubbles,
     clickShip,
     createChannel,
     join,
     newTab,
     openChannel,
+    pendingIcon,
+    send,
     ships,
     shipsButton,
     signIn,
@@ -143,4 +148,100 @@ test('канал по ссылке без входа: рейд и корабли
 
     await owner.context().close();
     await guest.context().close();
+});
+
+/**
+ * У местного бэкенда «вошедший не с этого рейда» — это состояние вкладки (localBackend.test.ts,
+ * «вошедший не с этого рейда»); здесь же это состояние сервера. Второй настоящий аккаунт
+ * получает от Firestore ровно тот же отказ, что и вовсе не вошедший гость выше, — не сам факт
+ * входа решает, что видно (`isMember(channelId)` в firestore.rules), а участие именно в этом
+ * канале (см. docs/FIREBASE.md, «Кто ещё может прийти»).
+ *
+ * Отдельно проверяем две вещи, которых по одной только редактуре списка не увидеть: что отказ
+ * на участниках и ленте не путается с обрывом связи (строка «N на связи» жива, полоски «нет
+ * связи» нет — см. `firebaseBackend.ts`, комментарий у подписки на участников, и
+ * docs/FIREBASE.md, «Состояние связи»), и что «Встать на рейд» открывает весь рейд без
+ * перезагрузки страницы: настоящий позывной хозяина и реплику, написанную ещё до входа,
+ * донашивает не подписка (её первый снимок — это состояние, а не события), а отдельный запрос
+ * в `join()` (`hooks/useChannel.ts`).
+ */
+test('вошедший чужим аккаунтом видит рейд как гость, а встав в строй — как участник, без перезагрузки', async ({
+    browser,
+}) => {
+    // Замер — секунд двадцать: два настоящих входа, один настоящий заход в строй (WRITE_TIMEOUT
+    // + SAIL_TIMEOUT) и подтверждение записи сообщения сервером. Срок — поверх этой суммы,
+    // а не по общему замеру набора, по той же причине, что и у соседних проверок файла.
+    takes(45);
+
+    const slug = `stranger-in-${Date.now()}`;
+
+    const owner = await newTab(browser);
+    await signIn(owner, 'stranger-in-owner', 'Хозяин рейда');
+    await createChannel(owner, 'Не для чужого', slug);
+    await join(owner, 'Маяк', '404');
+
+    await send(owner, 'Есть кто на связи?');
+    // Ждём подтверждения с сервера, а не только своей отрисовки: сообщению предстоит доехать
+    // до вошедшего чужим аккаунтом через довыгрузку после входа в строй, а не через подписку
+    // (см. JSDoc выше), и эта довыгрузка должна найти его уже в настоящем Firestore.
+    await expect(pendingIcon(owner), 'сообщение хозяина так и не подтвердилось сервером').toHaveCount(0, {
+        timeout: WRITE_TIMEOUT + 5_000,
+    });
+
+    // Другой человек, настоящий вход — но не на этот рейд.
+    const stranger = await newTab(browser);
+    await signIn(stranger, 'stranger-in-uid', 'Не с этого рейда');
+    await openChannel(stranger, slug);
+
+    // Рейд виден, но обезличен — тем же самым способом, что и вовсе не вошедшему гостю выше.
+    await expect(ships(stranger), 'вошедшему чужим аккаунтом не показали рейд').toHaveCount(1);
+    await expect(
+        ships(stranger).first().getByRole('img'),
+        'вошедшему чужим аккаунтом достался настоящий позывной вместо бортового номера'
+    ).toHaveAttribute('alt', 'Корабль «404»');
+
+    // Строка связи жива и говорит о рейде, а не об обрыве: отказ Firestore на участниках
+    // и ленте (permission-denied) — не то же самое, что обрыв сети, и не должен читаться как он.
+    await expect(stranger.locator('[class*="chatStatus"]')).toHaveText('1 на связи');
+    await expect(
+        stranger.locator('[class*="connectionStrip"]'),
+        'отказ в чтении чужого рейда показали как обрыв связи'
+    ).toHaveCount(0);
+
+    // В отличие от вовсе не вошедшего гостя, входить второй раз не просят — сразу приглашение
+    // встать в строй: аккаунт уже есть, не хватает только участия в этом канале.
+    await expect(
+        stranger.getByRole('button', { name: 'Войти' }),
+        'уже вошедшему чужим аккаунтом предложили войти ещё раз'
+    ).toHaveCount(0);
+    await expect(
+        stranger.getByRole('button', { name: 'Встать на рейд' }),
+        'вошедшему чужим аккаунтом не предложили встать в строй'
+    ).toBeVisible();
+
+    // Разговора не видно вовсе: ни поля ввода, ни реплики, написанной до входа в этот строй.
+    await expect(
+        stranger.getByPlaceholder('Сообщение'),
+        'вошедшему чужим аккаунтом открыли разговор до входа на этот рейд'
+    ).toHaveCount(0);
+    await expect(bubbles(stranger), 'вошедшему чужим аккаунтом видна чужая лента').toHaveCount(0);
+    await expect(shipsButton(stranger), 'вошедшему чужим аккаунтом достался список кораблей чужого рейда').toHaveCount(
+        0
+    );
+
+    // Встаём в строй — и без перезагрузки страницы открывается всё как есть.
+    await join(stranger, 'Секстант', '512');
+
+    await expect(ships(stranger), 'после входа на рейд видны не все корабли').toHaveCount(2);
+    await expect(
+        stranger.locator('img[alt="Корабль «Маяк»"]'),
+        'после входа на рейд бортовой номер хозяина так и не сменился на настоящий позывной'
+    ).toBeVisible();
+    await expect(
+        bubbles(stranger).filter({ hasText: 'Есть кто на связи?' }),
+        'сообщение, написанное до входа на этот рейд, не подгрузилось после «Встать на рейд»'
+    ).toBeVisible();
+
+    await owner.context().close();
+    await stranger.context().close();
 });
