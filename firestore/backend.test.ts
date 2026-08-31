@@ -246,11 +246,15 @@ describe('чтение канала', () => {
     test('getChannelBySlug находит заведённый канал', async () => {
         const backend = backendAs('u-read');
         const { channel } = await backend.createChannel({ channel: { slug: 'naiden', title: 'Найден' } });
+        // Читающий должен быть участником — иначе isMember() в firestore.rules отправил бы
+        // ответ через previewChannel, а функциям в этом наборе взяться неоткуда (см.
+        // header-комментарий: поднят только эмулятор Firestore).
+        await seedMember(channel.channelId, 'u-read', 'Дозорный', '001', 100);
 
         const snapshot = await backend.getChannelBySlug({ slug: 'naiden' });
         expect(snapshot?.channel.channelId).toBe(channel.channelId);
         expect(snapshot?.channel.slug).toBe('naiden');
-        expect(snapshot?.members).toEqual([]);
+        expect(snapshot?.members.map((member) => member.memberId)).toEqual(['u-read']);
         expect(snapshot?.messages).toEqual([]);
     });
 
@@ -291,7 +295,10 @@ describe('чтение канала', () => {
             notice: { event: 'joined', before: { shipKind: 'pr1234', name: 'Старший', hullNumber: '001' } },
         });
 
-        const backend = backendAs('u-reader');
+        // Читает старший — он уже настоящий участник (seedMember выше); посторонний 'u-reader'
+        // здесь не подошёл бы: isMember() пустил бы его мимо, в previewChannel, а эмулятора
+        // функций в этом наборе нет (см. header-комментарий).
+        const backend = backendAs(ownerUid);
         const snapshot = await backend.getChannel({ channelId: 'ch-full' });
 
         expect(snapshot?.channel.owner?.memberId).toBe(ownerUid);
@@ -315,6 +322,9 @@ describe('loadOlderMessages', () => {
     test('страницы поднимаются по цепочке до начала разговора, hasMore ложно только на последней', async () => {
         const backend = backendAs('u-page');
         const { channel } = await backend.createChannel({ channel: { slug: 'stranitsy', title: 'Страницы' } });
+        // Читающий страницы должен быть участником — иначе isMember() в firestore.rules ленту
+        // не пустит вовсе.
+        await seedMember(channel.channelId, 'u-page', 'Дозорный', '001', 100);
         const base = 1_700_000_000_000;
         // sentAt строго по возрастанию индекса — порядок страниц предсказан заранее и сверяется
         // ниже поштучно, а не просто длиной ответа.
@@ -366,6 +376,7 @@ describe('loadOlderMessages', () => {
     test('before не нашёлся в базе — пустой ответ, а не отказ', async () => {
         const backend = backendAs('u-page-missing');
         const { channel } = await backend.createChannel({ channel: { slug: 'net-kursora', title: 'Нет курсора' } });
+        await seedMember(channel.channelId, 'u-page-missing', 'Дозорный', '001', 100);
 
         const page = await backend.loadOlderMessages({
             channelId: channel.channelId,
@@ -377,6 +388,7 @@ describe('loadOlderMessages', () => {
     test('курсор различает соседей с одинаковым sentAt до миллисекунды', async () => {
         const backend = backendAs('u-page-tie');
         const { channel } = await backend.createChannel({ channel: { slug: 'sovpadenie', title: 'Совпадение' } });
+        await seedMember(channel.channelId, 'u-page-tie', 'Дозорный', '001', 100);
         const tie = 1_700_000_000_000;
         // Оба совпадают по sentAt до миллисекунды — числовой startAfter не отличил бы их
         // друг от друга и потерял бы либо msg-tied-a, либо оба разом (см. комментарий
@@ -555,6 +567,10 @@ describe('подписка на участников', () => {
         const backend = backendAs('u-members-sub');
         const { channel } = await backend.createChannel({ channel: { slug: 'uchastniki', title: 'Участники' } });
 
+        // Сам подписчик — тоже участник: иначе isMember() в firestore.rules эту подписку
+        // (и подписку на ленту) вовсе не пустит.
+        await seedMember(channel.channelId, 'u-members-sub', 'Подписчик', '099', 400);
+
         // Уже стоящий на рейде корабль — чтобы в первом снимке подписки было что пропускать:
         // без него подписка и так начиналась бы с пустого списка, и «первый снимок молчит»
         // проверялось бы вырожденным случаем, а не настоящим пропуском состояния.
@@ -727,6 +743,62 @@ describe('подписка гостя (userId: null)', () => {
     }, 15000);
 });
 
+describe('подписка вошедшего не с этого рейда', () => {
+    test('участников и ленту не слышит, а канал — слышит, и соединение не рвётся', async () => {
+        const ownerUid = 'owner-stranger-sub';
+        const backend = backendAs(ownerUid);
+        const { channel } = await backend.createChannel({ channel: { slug: 'chuzhoy-rejd', title: 'Не для чужого' } });
+        await seedOwner(channel.channelId, ownerUid);
+
+        // Соединение вошедшего постороннего (backendAs(strangerUid)), а не гостя (userId: null):
+        // отказ здесь — правило isMember в firestore.rules, а не короткое замыкание внутри
+        // subscribe (см. описание выше, «подписка гостя»). Ровно этот отказ и должна молча
+        // проглотить subscribe (firebaseBackend.ts, комментарий у подписки на участников)
+        // вместо того, чтобы объявить обрыв связи через watchConnection.
+        const strangerUid = 'stranger-sub';
+        const strangerBackend = backendAs(strangerUid);
+
+        const connectionStatuses: string[] = [];
+        const unwatch = strangerBackend.watchConnection({
+            onChange: (connection) => connectionStatuses.push(connection.status),
+        });
+
+        const events: ChannelEvent[] = [];
+        const unsubscribe = strangerBackend.subscribe({
+            channelId: channel.channelId,
+            userId: strangerUid,
+            onEvent: (event) => events.push(event),
+        });
+        await sleep(400); // первый снимок канала — состояние, а не событие (см. выше)
+        expect(events).toHaveLength(0);
+
+        await seedMember(channel.channelId, 'm-new', 'Новичок', '001', 1000);
+        await seedMessage(channel.channelId, 'msg-1', 2000, 'Не для чужого');
+        await backend.updateChannel({
+            channelId: channel.channelId,
+            channel: { slug: 'chuzhoy-rejd', title: 'Другое имя' },
+        });
+
+        // Дождаться можно только правки канала: будь участники или лента услышаны, счётчик
+        // сдвинулся бы раньше неё, а не одновременно с ней.
+        await expect.poll(() => events.length, { timeout: 5000, interval: 50 }).toBeGreaterThan(0);
+        await sleep(300);
+
+        expect(events).toHaveLength(1);
+        expect(events[0].type).toBe('channel-updated');
+        expect(events.some((event) => event.type === 'member-joined')).toBe(false);
+        expect(events.some((event) => event.type === 'message-added')).toBe(false);
+
+        // permission-denied у участников и ленты не долетел до состояния связи: оно и не
+        // менялось вовсе (единственная запись — начальный снимок, выданный watchConnection
+        // сразу после подписки, ещё до первого отказа).
+        expect(connectionStatuses).toEqual(['online']);
+
+        unsubscribe();
+        unwatch();
+    }, 15000);
+});
+
 describe('sendMessage', () => {
     test('пишет документ со снимком автора и отвечает тем же сообщением', async () => {
         const memberId = 'u-send';
@@ -816,6 +888,9 @@ describe('задержка доставки', () => {
         const listener = backendAs(listenerId);
         const { channel } = await sender.createChannel({ channel: { slug: 'zaderzhka', title: 'Задержка' } });
         await seedMember(channel.channelId, senderId, 'Отправитель', '001', 100);
+        // И слушатель — тоже участник: иначе isMember() не пустит его подписку на ленту,
+        // и «доставка» здесь значила бы только собственное эхо отправителя.
+        await seedMember(channel.channelId, listenerId, 'Слушатель', '002', 200);
 
         // «Соседняя вкладка» — тот же канал, но своя подписка от другого uid: ровно то, чем
         // была бы вторая вкладка чужого человека в этом канале.
@@ -1264,6 +1339,9 @@ describe('countUnread', () => {
     test('считает сообщения позже отметки, границу не включает', async () => {
         const backend = backendAs('u-count-basic');
         const { channel } = await backend.createChannel({ channel: { slug: 'schet-prostoy', title: 'Счёт' } });
+        // Считающий должен быть участником — isMember() в firestore.rules стоит и на ленте,
+        // которую здесь пересчитывает getCountFromServer.
+        await seedMember(channel.channelId, 'u-count-basic', 'Дозорный', '001', 100);
         const base = 1_700_000_000_000;
         await Promise.all(
             [...Array(5).keys()].map((i) => seedMessage(channel.channelId, `msg-${i}`, base + i * 1000, `Реплика ${i}`))
@@ -1278,6 +1356,7 @@ describe('countUnread', () => {
     test('ничего не пришло позже отметки — ноль, а не отказ', async () => {
         const backend = backendAs('u-count-zero');
         const { channel } = await backend.createChannel({ channel: { slug: 'schet-nol', title: 'Ноль' } });
+        await seedMember(channel.channelId, 'u-count-zero', 'Дозорный', '001', 100);
         await seedMessage(channel.channelId, 'msg-only', 1_700_000_000_000, 'Одна реплика');
 
         const { count } = await backend.countUnread({ channelId: channel.channelId, after: 1_700_000_001_000 });
@@ -1287,6 +1366,7 @@ describe('countUnread', () => {
     test('канал без единого сообщения — ноль', async () => {
         const backend = backendAs('u-count-empty');
         const { channel } = await backend.createChannel({ channel: { slug: 'schet-pusto', title: 'Пусто' } });
+        await seedMember(channel.channelId, 'u-count-empty', 'Дозорный', '001', 100);
 
         const { count } = await backend.countUnread({ channelId: channel.channelId, after: 0 });
         expect(count).toBe(0);
@@ -1301,6 +1381,7 @@ describe('countUnread', () => {
         const { channel } = await backend.createChannel({
             channel: { slug: 'schet-za-stranitsu', title: 'За страницу' },
         });
+        await seedMember(channel.channelId, 'u-count-beyond-page', 'Дозорный', '001', 100);
         const base = 1_700_000_000_000;
         const total = 130;
         await Promise.all(

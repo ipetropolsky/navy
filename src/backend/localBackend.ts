@@ -206,6 +206,20 @@ const previewOf = (snapshot: StoredChannel): ChannelSnapshot => ({
     hasMoreMessages: false,
 });
 
+/**
+ * Показать превью вместо настоящего снимка — посторонний (`userId === null`) или вошедший,
+ * ещё не ставший участником именно этого канала: тот же случай, который у настоящего
+ * бэкенда решает `isMember(channelId)` в firestore.rules (см. firebaseBackend.ts,
+ * readChannelForUser). Здесь сверяться не с чем, кроме самого списка участников снимка, —
+ * оттого снимок и доводом: канала нет вовсе (`getChannel`/`getChannelBySlug` на такой случай
+ * отвечают `null` раньше, до этой функции) или он ещё не пришёл к моменту подписки — решать
+ * пока не по чему, и превью не нужно. Не передан вовсе (`undefined`) — вход вызвавшему
+ * не важен (см. `userId` в types.ts), и превью не нужно ни при каком снимке.
+ */
+const needsPreview = (snapshot: StoredChannel | undefined, userId: string | null | undefined): boolean =>
+    userId === null ||
+    (typeof userId === 'string' && !!snapshot && !snapshot.members.some((member) => member.memberId === userId));
+
 export function createLocalBackend(): ChannelBackend {
     // Чтение состояния при старте заодно кладёт демо-канал в хранилище, если его там нет.
     // Иначе мок появлялся бы только после того, как кто-то откроет канал.
@@ -402,10 +416,10 @@ export function createLocalBackend(): ChannelBackend {
             if (!snapshot) {
                 return delay(null);
             }
-            // null — точно посторонний, ему превью. Не передан вовсе — вход вызвавшему
-            // не важен, и ящик тогда мешает тот же, что и раньше: свой, по вкладке
-            // (localAccount), а не по чьему-то конкретному userId.
-            if (userId === null) {
+            // Посторонний или вошедший не с этого рейда — превью (см. needsPreview выше).
+            // Не передан вовсе — вход вызвавшему не важен, и ящик тогда мешает тот же, что
+            // и раньше: свой, по вкладке (localAccount), а не по чьему-то конкретному userId.
+            if (needsPreview(snapshot, userId)) {
                 return delay(previewOf(snapshot));
             }
             return delay(mergeOutbox(paged(snapshot), userId ?? localAccount().userId, channelId));
@@ -417,7 +431,7 @@ export function createLocalBackend(): ChannelBackend {
                 return delay(null);
             }
             const { channelId } = snapshot.channel;
-            if (userId === null) {
+            if (needsPreview(snapshot, userId)) {
                 return delay(previewOf(snapshot));
             }
             return delay(mergeOutbox(paged(snapshot), userId ?? localAccount().userId, channelId));
@@ -737,20 +751,21 @@ export function createLocalBackend(): ChannelBackend {
         },
 
         subscribe: ({ channelId, userId, onEvent: listener }): Unsubscribe => {
-            // Тем, кто не вошёл, участники и лента не показываются вовсе — той же политикой,
-            // что и у настоящего бэкенда (см. firebaseBackend.ts, subscribe). Там для этого
-            // не заводят две из трёх подписок; здесь на весь канал одна общая, и тот же эффект
-            // даёт фильтр на уже готовом событии — до анонима долетает только канал, то, что
-            // ему и так открыто без входа. Гасит фильтр именно null: не передан вовсе — вход
-            // вызвавшему не важен (см. userId в types.ts), и события идут как есть.
-            const forward =
-                userId === null
-                    ? (event: ChannelEvent) => {
-                          if (event.type === 'channel-created' || event.type === 'channel-updated') {
-                              listener(event);
-                          }
+            // Тем, кому положено превью (посторонний или вошедший не с этого рейда —
+            // см. needsPreview выше), участники и лента не показываются вовсе — той же
+            // политикой, что и у настоящего бэкенда (см. firebaseBackend.ts, subscribe). Там
+            // для этого не заводят две из трёх подписок; здесь на весь канал одна общая,
+            // и тот же эффект даёт фильтр на уже готовом событии — до такого слушателя долетает
+            // только канал, то, что ему и так открыто превью-снимком. Решаем один раз, на весь
+            // срок подписки, по снимку на этот миг: вступление в канал заводит новую подписку
+            // (см. useChannel.ts, переподписка по myId), а не оживляет старую.
+            const forward = needsPreview(readState().channels[channelId], userId)
+                ? (event: ChannelEvent) => {
+                      if (event.type === 'channel-created' || event.type === 'channel-updated') {
+                          listener(event);
                       }
-                    : listener;
+                  }
+                : listener;
             const forChannel = listeners.get(channelId) ?? new Set();
             forChannel.add(forward);
             listeners.set(channelId, forChannel);

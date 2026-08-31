@@ -704,13 +704,23 @@ describe('firestore.rules: channels/{channelId}', () => {
 });
 
 describe('firestore.rules: channels/{channelId}/members/{memberId}', () => {
-    test('участники читаются любым вошедшим, и списком — по ним и собирают рейд', async () => {
+    test('участник читает участников — и любого поодиночке, и списком весь рейд', async () => {
+        const channelId = 'ch-1';
+        await seedDoc(paths.member({ channelId, memberId: 'm-1' }), { name: 'Дозорный' });
+        await seedDoc(paths.member({ channelId, memberId: 'm-2' }), { name: 'Смотрящий' });
+
+        const sailor = testEnv.authenticatedContext('m-1');
+        await assertSucceeds(getDoc(doc(sailor.firestore(), paths.member({ channelId, memberId: 'm-2' }))));
+        await assertSucceeds(getDocs(collection(sailor.firestore(), paths.members({ channelId }))));
+    });
+
+    test('вошедший не с этого рейда участников не читает — ни одного, ни списком', async () => {
         const channelId = 'ch-1';
         await seedDoc(paths.member({ channelId, memberId: 'm-1' }), { name: 'Дозорный' });
 
         const stranger = testEnv.authenticatedContext('m-2');
-        await assertSucceeds(getDoc(doc(stranger.firestore(), paths.member({ channelId, memberId: 'm-1' }))));
-        await assertSucceeds(getDocs(collection(stranger.firestore(), paths.members({ channelId }))));
+        await assertFails(getDoc(doc(stranger.firestore(), paths.member({ channelId, memberId: 'm-1' }))));
+        await assertFails(getDocs(collection(stranger.firestore(), paths.members({ channelId }))));
     });
 
     test('невошедший участников не читает — ни одного, ни списком', async () => {
@@ -802,14 +812,21 @@ describe('firestore.rules: channels/{channelId}/members/{memberId}', () => {
 });
 
 describe('firestore.rules: channels/{channelId}/berths/{berthId}', () => {
-    test('брони мест читает любой вошедший', async () => {
+    test('участник читает брони мест', async () => {
+        const channelId = 'ch-1';
+        await seedDoc(paths.member({ channelId, memberId: 'm-1' }), { name: 'Дозорный' });
+        await seedDoc(paths.berth({ channelId, slot: 0, corridor: 'center' }), { memberId: 'm-1', takenAt: 1 });
+
+        const sailor = testEnv.authenticatedContext('m-1');
+        await assertSucceeds(getDoc(doc(sailor.firestore(), paths.berth({ channelId, slot: 0, corridor: 'center' }))));
+    });
+
+    test('вошедший не с этого рейда брони мест не читает', async () => {
         const channelId = 'ch-1';
         await seedDoc(paths.berth({ channelId, slot: 0, corridor: 'center' }), { memberId: 'm-1', takenAt: 1 });
 
         const stranger = testEnv.authenticatedContext('m-2');
-        await assertSucceeds(
-            getDoc(doc(stranger.firestore(), paths.berth({ channelId, slot: 0, corridor: 'center' })))
-        );
+        await assertFails(getDoc(doc(stranger.firestore(), paths.berth({ channelId, slot: 0, corridor: 'center' }))));
     });
 
     test('невошедший брони мест не читает', async () => {
@@ -835,7 +852,21 @@ describe('firestore.rules: channels/{channelId}/berths/{berthId}', () => {
 });
 
 describe('firestore.rules: channels/{channelId}/messages/{messageId}', () => {
-    test('лента читается любым вошедшим, и списком', async () => {
+    test('участник читает ленту — и сообщение, и списком', async () => {
+        const channelId = 'ch-1';
+        await seedDoc(paths.member({ channelId, memberId: 'm-1' }), { name: 'Дозорный' });
+        await seedDoc(paths.message({ channelId, messageId: 'msg-1' }), {
+            author: { memberId: 'm-1' },
+            sentAt: 1,
+            text: 'Есть на связи',
+        });
+
+        const sailor = testEnv.authenticatedContext('m-1');
+        await assertSucceeds(getDoc(doc(sailor.firestore(), paths.message({ channelId, messageId: 'msg-1' }))));
+        await assertSucceeds(getDocs(collection(sailor.firestore(), paths.messages({ channelId }))));
+    });
+
+    test('вошедший не с этого рейда ленту не читает — ни одно сообщение, ни списком', async () => {
         const channelId = 'ch-1';
         await seedDoc(paths.message({ channelId, messageId: 'msg-1' }), {
             author: { memberId: 'm-1' },
@@ -844,8 +875,8 @@ describe('firestore.rules: channels/{channelId}/messages/{messageId}', () => {
         });
 
         const stranger = testEnv.authenticatedContext('m-2');
-        await assertSucceeds(getDoc(doc(stranger.firestore(), paths.message({ channelId, messageId: 'msg-1' }))));
-        await assertSucceeds(getDocs(collection(stranger.firestore(), paths.messages({ channelId }))));
+        await assertFails(getDoc(doc(stranger.firestore(), paths.message({ channelId, messageId: 'msg-1' }))));
+        await assertFails(getDocs(collection(stranger.firestore(), paths.messages({ channelId }))));
     });
 
     test('невошедший ленту не читает — ни одно сообщение, ни списком', async () => {

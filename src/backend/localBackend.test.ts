@@ -1093,3 +1093,73 @@ describe('гость (userId: null)', () => {
         expect(heard.some((event) => event.type === 'message-added')).toBe(true);
     });
 });
+
+/**
+ * Вошедший по-настоящему (`userId` — не `null`), но не тот, кто стоит на этом рейде: та же
+ * редактура, что и у гостя выше, — needsPreview в localBackend.ts не различает, откуда взялась
+ * причина превью, лишь бы вызывающего не было среди участников снимка. У настоящего сервера
+ * этот же случай решает isMember(channelId) в firestore.rules (см. firebaseBackend.ts,
+ * readChannelForUser) — здесь сверяться не с чем, кроме самого списка участников, и делает это
+ * needsPreview напрямую.
+ */
+describe('вошедший не с этого рейда', () => {
+    test('getChannel отдаёт участников без позывных и без ленты вовсе — как и гостю', async () => {
+        const backend = testBackend();
+        const channelId = await freshChannel(backend, 'ne-s-etogo-rejda');
+        const { member } = await backend.join({ channelId, member: draft('Альбатрос', '317') });
+        await backend.sendMessage({ channelId, memberId: member.memberId, message: { text: 'Не для чужого' } });
+
+        // 'stranger-uid' — вошедший, но точно не member.memberId (тот — случайный userId
+        // подложной вкладки, см. localAccount() в auth.ts, testBackend() выше).
+        const snapshot = await backend.getChannel({ channelId, userId: 'stranger-uid' });
+
+        expect(snapshot?.members).toEqual([{ ...member, name: member.hullNumber }]);
+        expect(snapshot?.messages).toEqual([]);
+        expect(snapshot?.hasMoreMessages).toBe(false);
+    });
+
+    test('getChannelBySlug — та же редактура, по адресу вместо id', async () => {
+        const backend = testBackend();
+        const channelId = await freshChannel(backend, 'chuzhoy-po-adresu');
+        await backend.join({ channelId, member: draft('Буревестник', '404') });
+
+        const snapshot = await backend.getChannelBySlug({ slug: 'chuzhoy-po-adresu', userId: 'stranger-uid' });
+
+        expect(snapshot?.channel.channelId).toBe(channelId);
+        expect(snapshot?.members).toEqual([expect.objectContaining({ name: '404', hullNumber: '404' })]);
+        expect(snapshot?.messages).toEqual([]);
+    });
+
+    test('subscribe пропускает только смену самого канала — участников и ленту гасит', async () => {
+        const backend = testBackend();
+        const channelId = await freshChannel(backend, 'podpiska-chuzhogo');
+
+        const heard = watch(backend, channelId, 'stranger-uid');
+        const { member } = await backend.join({ channelId, member: draft('Клипер', '208') });
+        await backend.sendMessage({ channelId, memberId: member.memberId, message: { text: 'Тест' } });
+
+        expect(heard.some((event) => event.type === 'member-joined')).toBe(false);
+        expect(heard.some((event) => event.type === 'message-added')).toBe(false);
+        expect(heard.some((event) => event.type === 'channel-updated')).toBe(true);
+    });
+
+    test('свой же участник (userId === memberId) — превью не нужно, видно всё', async () => {
+        const backend = testBackend();
+        const channelId = await freshChannel(backend, 'svoy-uchastnik');
+        const { member } = await backend.join({ channelId, member: draft('Секстант', '512') });
+        await backend.sendMessage({ channelId, memberId: member.memberId, message: { text: 'Уже виднее' } });
+
+        // Контраст с тестами выше: тот же снимок, но userId теперь и есть member.memberId —
+        // needsPreview находит его в списке участников, и это обычное чтение, не превью.
+        const full = await backend.getChannel({ channelId, userId: member.memberId });
+        expect(full?.members[0].name).toBe('Секстант');
+        // Не одна запись: join() и сам пишет строчку канала («встал в строй») раньше
+        // отправленного здесь текста — сверяем, что нужная запись среди них есть, а не что
+        // лента состоит только из неё.
+        expect(full?.messages).toEqual(expect.arrayContaining([expect.objectContaining({ text: 'Уже виднее' })]));
+
+        const heard = watch(backend, channelId, member.memberId);
+        await backend.sendMessage({ channelId, memberId: member.memberId, message: { text: 'И дальше видно' } });
+        expect(heard.some((event) => event.type === 'message-added')).toBe(true);
+    });
+});
