@@ -66,14 +66,13 @@ const minutesAfterMidnight = (hours: number, minutes: number): number => {
  * Корабли демо-канала: крупный, средний и малый — чтобы в кадре была видна разница в размере,
  * а расстановка развела их по дальности. Места раздаются по очереди, как при настоящем входе.
  */
-const DEMO_CREW: (Omit<Member, 'place'> & { shipKind: ShipKind })[] = [
+const DEMO_CREW: (Omit<Member, 'place' | 'joinedAt'> & { shipKind: ShipKind })[] = [
     {
         memberId: 'm-albatros',
         name: 'Альбатрос',
         hullNumber: '317',
         shipKind: 'pr1400',
         color: '#8ecae6',
-        joinedAt: minutesAfterMidnight(21, 30),
     },
     {
         memberId: 'm-vympel',
@@ -81,7 +80,6 @@ const DEMO_CREW: (Omit<Member, 'place'> & { shipKind: ShipKind })[] = [
         hullNumber: '561',
         shipKind: 'pr1234',
         color: '#f2cc8f',
-        joinedAt: minutesAfterMidnight(21, 32),
     },
     {
         memberId: 'm-rezvy',
@@ -89,7 +87,6 @@ const DEMO_CREW: (Omit<Member, 'place'> & { shipKind: ShipKind })[] = [
         hullNumber: '208',
         shipKind: 'pr205',
         color: '#95d5b2',
-        joinedAt: minutesAfterMidnight(21, 34),
     },
 ];
 
@@ -137,7 +134,17 @@ const placeDemoCrew = (): Member[] => {
         // хватит и первого слота — до него дело не дойдёт.
         const place = placeShip(member.shipKind, taken, berths[index]) ?? { ...taken[0].place };
         taken.push({ shipKind: member.shipKind, place });
-        return { ...member, place };
+        // Не в самом DEMO_CREW и не один раз на модуль: minutesAfterMidnight читает реальные
+        // часы в момент вызова, а DEMO_CREW — это константа модуля, вычисленная при первой
+        // загрузке файла и застывающая на всё время его жизни. В браузере это не заметно —
+        // там модуль и так живёт один просмотр страницы, — а вот в проверке с поддельными
+        // часами (`vi.setSystemTime`, seed.test.ts) время подменяется уже после того, как
+        // модуль загружен и DEMO_CREW вычислен по-настоящему один раз, так что подмена на него
+        // не подействует. Порядок состава на этом рейде не перемешан (перемешаны только места
+        // выше), так что «плюс две минуты на каждого» — это те же 21:30 / 21:32 / 21:34, что
+        // раньше были вписаны в сам DEMO_CREW.
+        const joinedAt = minutesAfterMidnight(21, 30 + index * 2);
+        return { ...member, place, joinedAt };
     });
 };
 
