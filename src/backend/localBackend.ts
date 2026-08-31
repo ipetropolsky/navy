@@ -416,13 +416,22 @@ export function createLocalBackend(): ChannelBackend {
             if (!snapshot) {
                 return delay(null);
             }
-            // Посторонний или вошедший не с этого рейда — превью (см. needsPreview выше).
-            // Не передан вовсе — вход вызвавшему не важен, и ящик тогда мешает тот же, что
-            // и раньше: свой, по вкладке (localAccount), а не по чьему-то конкретному userId.
+            // Посторонний или вошедший не с этого рейда — превью (см. needsPreview выше);
+            // решает именно userId, как его передали, вплоть до подставного (см.
+            // useChannel.ts, memberIdFromUrl, — это и есть проверяемая на этот случай
+            // личность).
             if (needsPreview(snapshot, userId)) {
                 return delay(previewOf(snapshot));
             }
-            return delay(mergeOutbox(paged(snapshot), userId ?? localAccount().userId, channelId));
+            // Ящик неотправленного — другое дело, и не тем же userId: он всегда свой, по
+            // вкладке (localAccount), а не по личности из довода, будь та кандидатом
+            // с адреса или нет. sendOffline/flushPending/retryMessage пишут и читают его
+            // тем же localAccount().userId (см. выше по файлу), о memberId/userId вызова
+            // вовсе не зная, — слияние должно бить по тому же ключу. Подставь сюда userId
+            // довода, как строкой выше, — своё же неотправленное молча пропадало бы из виду
+            // при каждой перезагрузке той вкладки, что открыта чужим адресом (см. историю
+            // бага — tests/errors.spec.ts, «нет связи… переживает перезагрузку»).
+            return delay(mergeOutbox(paged(snapshot), localAccount().userId, channelId));
         },
 
         getChannelBySlug: ({ slug, userId }) => {
@@ -431,10 +440,11 @@ export function createLocalBackend(): ChannelBackend {
                 return delay(null);
             }
             const { channelId } = snapshot.channel;
+            // См. комментарии у getChannel выше — то же самое разделение ролей userId.
             if (needsPreview(snapshot, userId)) {
                 return delay(previewOf(snapshot));
             }
-            return delay(mergeOutbox(paged(snapshot), userId ?? localAccount().userId, channelId));
+            return delay(mergeOutbox(paged(snapshot), localAccount().userId, channelId));
         },
 
         createChannel: async ({ channel: { slug, title } }) => {
