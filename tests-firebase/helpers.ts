@@ -155,10 +155,20 @@ export const sceneReady = async (page: Page): Promise<void> => {
     await page.locator('[data-scene-painted][data-scene-ready]').first().waitFor({ timeout: 10_000 });
 };
 
-/** Завести канал с указанным адресом и остаться в нём — форма своего канала откроется сама. */
-export const createChannel = async (page: Page, title: string, slug: string): Promise<void> => {
+/**
+ * Завести канал с указанным адресом и остаться в нём — форма своего канала откроется сама.
+ *
+ * `code` — только для закрытых каналов: передан — переключаем частоту на «Закрытая» и заполняем
+ * поле кода перед отправкой (см. `Switch`/`Field` в CreateChannel.tsx); не передан — канал
+ * остаётся открытым, как и по умолчанию у самой формы.
+ */
+export const createChannel = async (page: Page, title: string, slug: string, code?: string): Promise<void> => {
     await page.getByPlaceholder('Эскадра «Полночь»').fill(title);
     await page.locator('input[placeholder="eskadra-polnoch"]').fill(slug);
+    if (code !== undefined) {
+        await page.getByRole('group', { name: 'Частота' }).getByText('Закрытая').click();
+        await page.getByPlaceholder('Код доступа').fill(code);
+    }
     await page.locator('button[type=submit]').click();
     await sceneReady(page);
 };
@@ -167,6 +177,22 @@ export const createChannel = async (page: Page, title: string, slug: string): Pr
 export const openChannel = async (page: Page, slug: string): Promise<void> => {
     await page.goto(`/?channel=${slug}`, { waitUntil: 'domcontentloaded' });
     await sceneReady(page);
+};
+
+/**
+ * Ввести код доступа на экране «Закрытая частота» (см. ClosedChannel.tsx) и отправить форму.
+ *
+ * Отказ (неверный код) эту функцию не роняет — она только нажимает: снекбар с отказом и то,
+ * что делать дальше, остаются на стороне вызывающей проверки, а сам экран после отказа не
+ * закрывается и годится для повторной попытки.
+ */
+export const enterAccessCode = async (page: Page, code: string): Promise<void> => {
+    await expect(
+        page.getByRole('heading', { name: 'Закрытая частота' }),
+        'экран кода доступа не показался'
+    ).toBeVisible();
+    await page.getByPlaceholder('Код доступа').fill(code);
+    await page.getByRole('button', { name: 'Войти' }).click();
 };
 
 /**

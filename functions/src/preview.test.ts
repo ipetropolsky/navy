@@ -3,16 +3,14 @@ import { Firestore, WriteResult, getFirestore } from 'firebase-admin/firestore';
 import { afterAll, beforeEach, describe, expect, test } from 'vitest';
 
 import { paths } from '../../shared/config/model';
-import { MemberDraft } from '../../shared/types/calls';
-import { ShipKind } from '../../shared/types/channel';
-import { previewMembers } from './preview';
-import { joinChannel } from './raid';
+import { ChannelError } from '../../shared/errors';
+import { previewChannel } from './preview';
 
 /**
- * Проверки previewMembers — против настоящего эмулятора Firestore, тем же Admin SDK, каким
- * читает сама функция. Участников заводим настоящим joinChannel (raid.ts), а не сырой записью:
- * важно, что redactMember отработал над формой документа, какую пишет production, а не над
- * тем, что об этой форме подумал этот файл.
+ * Проверки previewChannel — против настоящего эмулятора Firestore, тем же Admin SDK, каким
+ * читает сама функция. Канал заводим сырой записью (seedChannel), а не через createChannel:
+ * previewChannel сама ничего не решает про форму документа канала, только читает готовые
+ * title/closed/code, — то, что их туда кладёт клиент, проверяют правила (firestore/rules.test.ts).
  *
  * Свой project id (demo-navy-preview), как и у соседей по эмулятору (demo-navy-raid,
  * demo-navy-rules, demo-navy-channels) — раздельные id держат данные наборов друг от друга,
@@ -45,62 +43,51 @@ beforeEach(async () => {
 // ---- помощники ----
 
 /** Канал без владельца — так его заводит и сегодняшний createChannel, до первого вошедшего. */
-const seedChannel = (channelId: string): Promise<WriteResult> =>
-    db.doc(paths.channel({ channelId })).set({ slug: channelId, title: channelId, createdAt: Date.now() });
+const seedChannel = (channelId: string, extra: { closed?: boolean; code?: string } = {}): Promise<WriteResult> =>
+    db.doc(paths.channel({ channelId })).set({ slug: channelId, title: channelId, createdAt: Date.now(), ...extra });
 
-const draft = (name: string, hullNumber: string, extra: Partial<MemberDraft> = {}): MemberDraft => ({
-    name,
-    hullNumber,
-    shipKind: 'pr1234' as ShipKind,
-    color: '#8ecae6',
-    ...extra,
-});
+/** Ошибка с ожидаемым кодом. Проверяем код, а не текст: текст — дело интерфейса. */
+const failsWith = async (run: () => Promise<unknown>, code: string): Promise<void> => {
+    let failure: unknown = null;
+    try {
+        await run();
+    } catch (thrown) {
+        failure = thrown;
+    }
+    expect(failure).toBeInstanceOf(ChannelError);
+    expect((failure as ChannelError).code).toBe(code);
+};
 
-describe('previewMembers', () => {
-    test('позывной заменён на бортовой номер — как и всюду у redactMember', async () => {
-        const channelId = 'ch-preview-redact';
-        await seedChannel(channelId);
-        await joinChannel({ db, channelId, userId: 'u-a', member: draft('Алый', '001') });
-
-        const [member] = await previewMembers(db, channelId);
-        expect(member.name).toBe('001');
-        expect(member.hullNumber).toBe('001');
-    });
-
-    test('user и lastSeen с клиента не уходят вовсе, даже когда они есть в документе', async () => {
-        const channelId = 'ch-preview-fields';
-        await seedChannel(channelId);
-        await joinChannel({ db, channelId, userId: 'u-a', member: draft('Алый', '001') });
-        // joinChannel сам lastSeen не пишет (это дело владельца, см. raid.ts) — заводим его
-        // здесь, чтобы проверить не отсутствие поля, а именно то, что previewMembers его
-        // не пропускает.
-        await db
-            .doc(paths.member({ channelId, memberId: 'u-a' }))
-            .update({ lastSeen: { messageId: 'msg-1', at: Date.now() } });
-
-        const [member] = await previewMembers(db, channelId);
-        expect('user' in member).toBe(false);
-        expect('lastSeen' in member).toBe(false);
-    });
-
-    test('список — по всем, кто встал на рейд', async () => {
-        const channelId = 'ch-preview-list';
-        await seedChannel(channelId);
-        await joinChannel({ db, channelId, userId: 'u-a', member: draft('Алый', '001') });
-        await joinChannel({ db, channelId, userId: 'u-b', member: draft('Белый', '002') });
-
-        const members = await previewMembers(db, channelId);
-        expect(members.map((member) => member.hullNumber).sort()).toEqual(['001', '002']);
-    });
-
-    test('на рейде никого — пустой список, а не отказ', async () => {
-        const channelId = 'ch-preview-empty';
+describe('previewChannel', () => {
+    test('открытый канал — название и closed: false', async () => {
+        const channelId = 'ch-preview-open';
         await seedChannel(channelId);
 
-        await expect(previewMembers(db, channelId)).resolves.toEqual([]);
+        await expect(previewChannel(db, channelId)).resolves.toEqual({ title: channelId, closed: false });
     });
 
-    test('канала нет вовсе — тоже пустой список: отсутствие документов здесь обычный ответ', async () => {
-        await expect(previewMembers(db, 'net-takogo-kanala')).resolves.toEqual([]);
+    test('закрытый канал без кода — название и closed: true, без отказа', async () => {
+        const channelId = 'ch-preview-closed';
+        await seedChannel(channelId, { closed: true, code: 'акула' });
+
+        await expect(previewChannel(db, channelId)).resolves.toEqual({ title: channelId, closed: true });
+    });
+
+    test('закрытый канал, верный код — тот же ответ, без отказа', async () => {
+        const channelId = 'ch-preview-closed-right-code';
+        await seedChannel(channelId, { closed: true, code: 'акула' });
+
+        await expect(previewChannel(db, channelId, 'акула')).resolves.toEqual({ title: channelId, closed: true });
+    });
+
+    test('закрытый канал, неверный код — channel-closed', async () => {
+        const channelId = 'ch-preview-closed-wrong-code';
+        await seedChannel(channelId, { closed: true, code: 'акула' });
+
+        await failsWith(() => previewChannel(db, channelId, 'кит'), 'channel-closed');
+    });
+
+    test('канала нет вовсе — channel-not-found, а не пустой ответ', async () => {
+        await failsWith(() => previewChannel(db, 'net-takogo-kanala'), 'channel-not-found');
     });
 });

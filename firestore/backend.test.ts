@@ -39,6 +39,7 @@ import {
     getDocs,
     setDoc,
     updateDoc,
+    waitForPendingWrites,
 } from 'firebase/firestore';
 import { Functions, getFunctions } from 'firebase/functions';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from 'vitest';
@@ -70,8 +71,21 @@ afterAll(async () => {
     await testEnv.cleanup();
 });
 
+/**
+ * Изредка после проверки, что держала слушателя (onSnapshot) на соединении, пережившем
+ * disableNetwork/enableNetwork (см. «статус отправки»), сам эмулятор роняет clearFirestore()
+ * с 500 UNKNOWN: гоняется за отписанной уже целью по старому, уже закрытому Listen-потоку
+ * (StreamTransportClosedException в его собственном логе) — не Firestore по-настоящему,
+ * а именно его эмулятор путает переподключение с обрывом. Один повтор эту цель из реестра
+ * уже не находит и проходит чисто; ждать между попытками не нужно — второй раз не гонка,
+ * а чистая попытка по свежему состоянию.
+ */
 beforeEach(async () => {
-    await testEnv.clearFirestore();
+    try {
+        await testEnv.clearFirestore();
+    } catch {
+        await testEnv.clearFirestore();
+    }
 });
 
 // ---- помощники ----
@@ -107,18 +121,6 @@ const seedDoc = (docPath: string, data: Record<string, unknown>): Promise<void> 
     testEnv.withSecurityRulesDisabled((context) => setDoc(doc(emulatorDb(context), docPath), data));
 
 /**
- * Дописать старшего в уже существующий документ канала — в обход правил, тем же приёмом.
- * Нужно там, где канал заводится по-настоящему, через backend.createChannel (значит, без
- * owner — его назначает только сервер, когда на рейд встаёт первый корабль, см.
- * functions/src/raid.ts), но дальше проверке требуется старший, чтобы прошло правило isOwner
- * на update. merge, а не перезапись: остальные поля документа трогать не нужно.
- */
-const seedOwner = (channelId: string, memberId: string): Promise<void> =>
-    testEnv.withSecurityRulesDisabled((context) =>
-        updateDoc(doc(emulatorDb(context), paths.channel({ channelId })), { owner: { memberId } })
-    );
-
-/**
  * Завести корабль в обход правил: по-настоящему его пишет только join (см. header-комментарий,
  * этот вызов здесь недоступен), а проверкам ниже участник нужен готовым. memberId — тот же,
  * что и uid, которым потом ходит backendAs: правило messages.create сверяет автора записи
@@ -140,6 +142,26 @@ const seedMember = (
         joinedAt,
         user: { userId: memberId },
     });
+
+/**
+ * Дописать старшего в уже существующий документ канала — в обход правил, тем же приёмом.
+ * Нужно там, где канал заводится по-настоящему, через backend.createChannel (значит, без
+ * owner — его назначает только сервер, когда на рейд встаёт первый корабль, см.
+ * functions/src/raid.ts), но дальше проверке требуется старший, чтобы прошло правило isOwner
+ * на update. merge, а не перезапись: остальные поля документа трогать не нужно.
+ *
+ * Настоящего старшего без участия не бывает — join() у сервера всегда заводит и то, и другое
+ * разом (functions/src/raid.ts). Дописываем поэтому и member-документ тем же приёмом (seedMember):
+ * без него isMember(channelId) в firestore.rules не пустил бы самого же старшего прочитать
+ * канал, которым он якобы распоряжается, — а именно чтение (transaction.get) и делает
+ * updateChannel, прежде чем правило isOwner вообще успеет что-то разрешить или отказать.
+ */
+const seedOwner = async (channelId: string, memberId: string): Promise<void> => {
+    await testEnv.withSecurityRulesDisabled((context) =>
+        updateDoc(doc(emulatorDb(context), paths.channel({ channelId })), { owner: { memberId } })
+    );
+    await seedMember(channelId, memberId, 'Старший', '000', 1);
+};
 
 /**
  * Сообщение в обход правил, с точным sentAt — чтобы страницы `loadOlderMessages` резались
@@ -216,6 +238,43 @@ describe('createChannel', () => {
         expect(slugData.channelId).toBe(channel.channelId);
     });
 
+    test('закрытый канал пишет closed и code рядом с прочими полями — наружу отдаёт только closed', async () => {
+        const backend = backendAs('u-create-closed');
+
+        const { channel } = await backend.createChannel({
+            channel: { slug: 'zakryt-sozdanie', title: 'Закрытый', closed: true, code: '  Акула  ' },
+        });
+
+        // Наружу, в Channel, code не идёт вовсе (см. createChannel в firebaseBackend.ts) —
+        // ни этим ответом, ни каким другим: тип его попросту не объявляет.
+        expect(channel.closed).toBe(true);
+        expect(channel).not.toHaveProperty('code');
+
+        const channelSnap = await rawDoc(paths.channel({ channelId: channel.channelId }));
+        const data = channelSnap.data() as Record<string, unknown>;
+        expect(Object.keys(data).sort()).toEqual(['closed', 'code', 'createdAt', 'serverAt', 'slug', 'title']);
+        expect(data.closed).toBe(true);
+        // Код подрезан по тем же правилам, что и title — пробелы по краям кода не значат ничего.
+        expect(data.code).toBe('Акула');
+    });
+
+    test('открытый канал code и closed не пишет вовсе, даже если код всё-таки прислали', async () => {
+        // closed не пришёл — а раз так, closedSane в firestore.rules не пустил бы code без
+        // closed рядом; здесь проверяем, что клиент до этого правила и не доводит, а сам
+        // отбрасывает code, когда канал не закрыт (см. createChannel в firebaseBackend.ts).
+        const backend = backendAs('u-create-open-with-code');
+
+        const { channel } = await backend.createChannel({
+            channel: { slug: 'otkryt-s-kodom', title: 'Открытый', code: 'Неважно' },
+        });
+
+        expect(channel.closed).toBeUndefined();
+
+        const channelSnap = await rawDoc(paths.channel({ channelId: channel.channelId }));
+        const data = channelSnap.data() as Record<string, unknown>;
+        expect(Object.keys(data).sort()).toEqual(['createdAt', 'serverAt', 'slug', 'title']);
+    });
+
     test('занятый адрес — slug-taken, исходный канал не переписывается', async () => {
         const backend = backendAs('u-taken');
         const { channel: first } = await backend.createChannel({ channel: { slug: 'zanyato', title: 'Первый' } });
@@ -259,14 +318,19 @@ describe('чтение канала', () => {
     });
 
     test('getChannelBySlug на чужой адрес — null', async () => {
+        // Бронь адреса (slugs/{slug}) читается без ограничений и сегодня — короткое замыкание
+        // здесь происходит до всякого чтения самого канала: getChannelBySlug на пустую бронь
+        // и не пробует его открыть (см. firebaseBackend.ts, getChannelBySlug).
         const backend = backendAs('u-read-2');
         expect(await backend.getChannelBySlug({ slug: 'net-takogo-adresa' })).toBeNull();
     });
 
-    test('getChannel по несуществующему channelId — null', async () => {
-        const backend = backendAs('u-read-3');
-        expect(await backend.getChannel({ channelId: 'net-takogo-kanala' })).toBeNull();
-    });
+    // getChannel по несуществующему channelId, в обход адреса, здесь больше не проверить:
+    // channels/{channelId} читается по isMember(channelId) (firestore.rules), а несуществующий
+    // канал этому правилу неотличим от чужого — участников нет ни у того, ни у другого. Ответ
+    // «канала нет» после этого приходит только через previewChannel, а её здесь не поднять
+    // (см. header-комментарий) — сам разбор «нет канала — channel-not-found, а не пустой ответ»
+    // проверен на уровне логики функции, в functions/src/preview.test.ts.
 
     // Пишем участников и сообщения в обратном порядке — так проверка ловит настоящую
     // сортировку по joinedAt/sentAt, а не случайное совпадение с порядком записи в базу.
@@ -434,6 +498,9 @@ describe('updateChannel', () => {
             owner: { memberId: ownerUid },
         });
         await seedDoc(paths.slug({ slug: 'staryi-adres' }), { channelId: 'ch-rename', createdAt: 1 });
+        // Настоящего старшего без участия не бывает (см. seedOwner выше) — без member-документа
+        // isMember(channelId) не пустил бы его же прочитать канал внутри updateChannel.
+        await seedMember('ch-rename', ownerUid, 'Старший', '000', 1);
 
         const backend = backendAs(ownerUid);
         const { channel } = await backend.updateChannel({
@@ -469,6 +536,9 @@ describe('updateChannel', () => {
         await seedDoc(paths.slug({ slug: 'a-adres' }), { channelId: 'ch-a', createdAt: 1 });
         await seedDoc(paths.channel({ channelId: 'ch-b' }), { slug: 'b-adres', title: 'Б', createdAt: 1 });
         await seedDoc(paths.slug({ slug: 'b-adres' }), { channelId: 'ch-b', createdAt: 1 });
+        // Настоящего старшего без участия не бывает (см. seedOwner выше) — без member-документа
+        // isMember(channelId) не пустил бы его же прочитать канал внутри updateChannel.
+        await seedMember('ch-a', ownerUid, 'Старший', '000', 1);
 
         const backend = backendAs(ownerUid);
         await failsWith(
@@ -485,7 +555,14 @@ describe('updateChannel', () => {
         expect((aChannelSnap.data() as { slug: string }).slug).toBe('a-adres');
     });
 
-    test('переименование несуществующего канала — channel-not-found', async () => {
+    test('переименование несуществующего канала — permission-denied, а не отдельный отказ', async () => {
+        // Раньше это был честный channel-not-found: канал читали в обход правил (allow get: if
+        // true), и transaction.get мог сам убедиться, что документа нет. Теперь тот же get
+        // подчиняется isMember(channelId) (см. firestore.rules), а несуществующий канал от
+        // чужого рейда этому правилу неотличим — участников нет ни у того, ни у другого.
+        // Разбирать эту разницу здесь и не нужно: если updateChannel вообще на что-то отвечает,
+        // значит вызывающий уже смотрел на настоящий, существующий канал (правки шлёт только
+        // экран его настроек), а этот случай — чисто теоретический, без входа в интерфейс.
         const backend = backendAs('u-none');
         await failsWith(
             () =>
@@ -493,7 +570,7 @@ describe('updateChannel', () => {
                     channelId: 'net-takogo-kanala',
                     channel: { slug: 'kakoy-to', title: 'Неважно' },
                 }),
-            'channel-not-found'
+            'permission-denied'
         );
     });
 });
@@ -700,7 +777,7 @@ describe('подписка на ленту', () => {
 });
 
 describe('подписка гостя (userId: null)', () => {
-    test('участников и ленту не слышит вовсе — только смену самого канала', async () => {
+    test('не приносит гостю ничего — ни рейда, ни даже смены самого канала', async () => {
         const ownerUid = 'owner-guest-sub';
         const backend = backendAs(ownerUid);
         const { channel } = await backend.createChannel({ channel: { slug: 'gost-podpiska', title: 'Гостю' } });
@@ -708,18 +785,18 @@ describe('подписка гостя (userId: null)', () => {
         // чтобы updateChannel прошёл правило isOwner.
         await seedOwner(channel.channelId, ownerUid);
 
-        // Соединение здесь настоящее, вошедшее (backendAs(ownerUid)) — правила бы и участников,
-        // и ленту ему пустили без вопроса. Раз они всё равно не доходят, значит их и не читают
-        // вовсе: гасит именно userId: null внутри subscribe (см. firebaseBackend.ts, комментарий
-        // над одноимённой веткой), а не отказ правил, — тот случай эмулятор функций не нужен,
-        // но подтверждает не то же самое, что и firestore/rules.test.ts.
+        // Соединение здесь настоящее, вошедшее (backendAs(ownerUid)) — правила бы пустили его
+        // куда угодно в этом канале без вопроса. Раз всё равно ничего не доходит, значит и не
+        // спрашивали вовсе: userId: null гасит подписку целиком, раньше первого onSnapshot
+        // (см. firebaseBackend.ts, subscribe) — тот случай, где эмулятор функций не нужен, но
+        // который не проверить и firestore/rules.test.ts: дело не в правилах, а в самом клиенте.
         const events: ChannelEvent[] = [];
         const unsubscribe = backend.subscribe({
             channelId: channel.channelId,
             userId: null,
             onEvent: (event) => events.push(event),
         });
-        await sleep(400); // первый снимок канала — состояние, а не событие (см. выше)
+        await sleep(400);
         expect(events).toHaveLength(0);
 
         await seedMember(channel.channelId, 'm-new', 'Новичок', '001', 1000);
@@ -728,33 +805,29 @@ describe('подписка гостя (userId: null)', () => {
             channelId: channel.channelId,
             channel: { slug: 'gost-podpiska', title: 'Другое имя' },
         });
+        // Дожидаться нечего — событий не будет вовсе; выжидаем с тем же запасом, с каким
+        // соседние тесты этого файла успевают дождаться настоящего.
+        await sleep(1000);
 
-        // Дождаться можно только правки канала: будь участники или лента услышаны, счётчик
-        // сдвинулся бы раньше неё, а не одновременно с ней.
-        await expect.poll(() => events.length, { timeout: 5000, interval: 50 }).toBeGreaterThan(0);
-        await sleep(300);
-
-        expect(events).toHaveLength(1);
-        expect(events[0].type).toBe('channel-updated');
-        expect(events.some((event) => event.type === 'member-joined')).toBe(false);
-        expect(events.some((event) => event.type === 'message-added')).toBe(false);
+        expect(events).toHaveLength(0);
 
         unsubscribe();
     }, 15000);
 });
 
 describe('подписка вошедшего не с этого рейда', () => {
-    test('участников и ленту не слышит, а канал — слышит, и соединение не рвётся', async () => {
+    test('не слышит ничего — ни рейда, ни самого канала, — а соединение не рвётся', async () => {
         const ownerUid = 'owner-stranger-sub';
         const backend = backendAs(ownerUid);
         const { channel } = await backend.createChannel({ channel: { slug: 'chuzhoy-rejd', title: 'Не для чужого' } });
         await seedOwner(channel.channelId, ownerUid);
 
         // Соединение вошедшего постороннего (backendAs(strangerUid)), а не гостя (userId: null):
-        // отказ здесь — правило isMember в firestore.rules, а не короткое замыкание внутри
-        // subscribe (см. описание выше, «подписка гостя»). Ровно этот отказ и должна молча
-        // проглотить subscribe (firebaseBackend.ts, комментарий у подписки на участников)
-        // вместо того, чтобы объявить обрыв связи через watchConnection.
+        // отказ здесь настоящий, от правил, — isMember в firestore.rules гасит теперь все три
+        // подписки одинаково, включая и сам документ канала (allow get: if isMember(channelId)),
+        // а не только участников и ленту, как раньше. Ровно этот отказ и должна молча проглотить
+        // subscribe (firebaseBackend.ts, комментарий у подписки на канал) вместо того, чтобы
+        // объявить обрыв связи через watchConnection.
         const strangerUid = 'stranger-sub';
         const strangerBackend = backendAs(strangerUid);
 
@@ -769,7 +842,7 @@ describe('подписка вошедшего не с этого рейда', ()
             userId: strangerUid,
             onEvent: (event) => events.push(event),
         });
-        await sleep(400); // первый снимок канала — состояние, а не событие (см. выше)
+        await sleep(400);
         expect(events).toHaveLength(0);
 
         await seedMember(channel.channelId, 'm-new', 'Новичок', '001', 1000);
@@ -778,18 +851,12 @@ describe('подписка вошедшего не с этого рейда', ()
             channelId: channel.channelId,
             channel: { slug: 'chuzhoy-rejd', title: 'Другое имя' },
         });
+        // Дожидаться нечего — событий не будет вовсе; выжидаем с тем же запасом, с каким
+        // соседние тесты этого файла успевают дождаться настоящего.
+        await sleep(1000);
 
-        // Дождаться можно только правки канала: будь участники или лента услышаны, счётчик
-        // сдвинулся бы раньше неё, а не одновременно с ней.
-        await expect.poll(() => events.length, { timeout: 5000, interval: 50 }).toBeGreaterThan(0);
-        await sleep(300);
-
-        expect(events).toHaveLength(1);
-        expect(events[0].type).toBe('channel-updated');
-        expect(events.some((event) => event.type === 'member-joined')).toBe(false);
-        expect(events.some((event) => event.type === 'message-added')).toBe(false);
-
-        // permission-denied у участников и ленты не долетел до состояния связи: оно и не
+        expect(events).toHaveLength(0);
+        // permission-denied у всех трёх подписок не долетел до состояния связи: оно и не
         // менялось вовсе (единственная запись — начальный снимок, выданный watchConnection
         // сразу после подписки, ещё до первого отказа).
         expect(connectionStatuses).toEqual(['online']);
@@ -1011,6 +1078,11 @@ describe('статус отправки', () => {
             expect((await rawCollection(paths.messages({ channelId: channel.channelId }))).empty).toBe(true);
         } finally {
             await enableNetwork(db);
+            // setDoc() из attemptWrite сдался только по таймеру — сам вызов остался висеть
+            // и допишется в фоне, как только сеть выше вернулась. Дожидаемся его здесь же,
+            // а не оставляем долетать когда придётся: без этого он всплывает уже во время
+            // соседней проверки — тем же сообщением, но по каналу, которого она не заводила.
+            await waitForPendingWrites(db);
         }
     }, 15000);
 
@@ -1037,6 +1109,9 @@ describe('статус отправки', () => {
             expect(message.delivery?.status).toBe('failed');
         } finally {
             await enableNetwork(db);
+            // Тот же зависший setDoc(), что и в проверке выше («нет сети»), — дожидаемся
+            // его здесь же, чтобы к следующей проверке файла в очереди ничего не осталось.
+            await waitForPendingWrites(db);
         }
 
         // Без этого клика — второй раз никто ничего не нажимал: доставилось само, как

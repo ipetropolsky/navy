@@ -12,7 +12,7 @@ import {
     parsePreviewChannelRequest,
     parseUpdateMemberRequest,
 } from './parse';
-import { previewMembers } from './preview';
+import * as preview from './preview';
 import * as raid from './raid';
 
 /**
@@ -51,7 +51,11 @@ const httpsCodeFor = (code: ChannelErrorCode): FunctionsErrorCode => {
         case 'name-taken':
         case 'hull-taken':
             return 'already-exists';
+        // channel-closed рядом не потому, что это то же самое, что not-senior, а потому что
+        // и здесь дверь открывает не личность, а знание: код доступа не совпал — заперто
+        // для всех одинаково, кто угадает код, тому дверь откроется ровно так же.
         case 'not-senior':
+        case 'channel-closed':
             return 'permission-denied';
         case 'course-too-long':
         case 'message-too-long':
@@ -62,10 +66,24 @@ const httpsCodeFor = (code: ChannelErrorCode): FunctionsErrorCode => {
 };
 
 /**
+ * Отказ правила (ChannelError) — в HttpsError с тем же кодом в деталях. Что не ChannelError —
+ * не наше дело, пусть падает как есть. Возвращает `never`, а не void: и `callable()`,
+ * и previewChannel ниже пишут `return toHttpsError(error)` в catch — сама функция никогда
+ * не возвращает значения, но так компилятору по-прежнему видно, что до конца тела дело
+ * не доходит ни при одном исходе.
+ */
+const toHttpsError = (error: unknown): never => {
+    if (error instanceof ChannelError) {
+        throw new HttpsError(httpsCodeFor(error.code), error.message, { code: error.code });
+    }
+    throw error;
+};
+
+/**
  * Общая обвязка всех четырёх функций: без входа на рейд не пускаем совсем (см.
  * docs/FIREBASE.md, «Без сети вход не проходит вовсе» — то же самое верно и без личности),
- * тело разбирает parse.ts, а отказ правила (ChannelError) переводится в HttpsError с тем же
- * кодом в деталях. Что не ChannelError — не наше дело, пусть падает как есть.
+ * тело разбирает parse.ts, а отказ правила переводится в HttpsError той же toHttpsError,
+ * какой пользуется и previewChannel ниже.
  */
 const callable = <Request, Response>(
     parse: (data: unknown) => Request,
@@ -79,15 +97,12 @@ const callable = <Request, Response>(
         try {
             return await run(request.auth.uid, parsed);
         } catch (error) {
-            if (error instanceof ChannelError) {
-                throw new HttpsError(httpsCodeFor(error.code), error.message, { code: error.code });
-            }
-            throw error;
+            return toHttpsError(error);
         }
     });
 
 export const joinChannel = callable(parseJoinChannelRequest, (userId, request) =>
-    raid.joinChannel({ db, channelId: request.channelId, userId, member: request.member })
+    raid.joinChannel({ db, channelId: request.channelId, userId, member: request.member, code: request.code })
 );
 
 export const updateMember = callable(parseUpdateMemberRequest, (userId, request) =>
@@ -109,13 +124,18 @@ export const kickMember = callable(parseKickMemberRequest, (userId, request) =>
 );
 
 /**
- * Список кораблей для того, кто не вошёл: без входа проверять здесь нечего (см. комментарий
- * над файлом), и звать эту функцию может кто угодно — сама она отдаёт уже без позывных
- * (см. previewMembers). Отказа с ChannelError у неё не бывает: чужой или неверный channelId
- * просто вернёт пустой список — отсутствие документов здесь такой же обычный ответ,
- * как и везде в этой базе (см. shared/config/model.ts).
+ * Вход в канал для того, кто на него ещё не встал: без входа в аккаунт проверять здесь нечего
+ * (см. комментарий над файлом), и звать эту функцию может кто угодно — сама она отдаёт только
+ * название канала и его закрытость, ничего из того, что видно исключительно участнику
+ * (см. preview.ts). Код доступа, если он пришёл, сверяется той же функцией — неверный код
+ * или несуществующий канал доходят до клиента как обычный HttpsError, той же toHttpsError,
+ * что и у остальных четырёх функций.
  */
 export const previewChannel = onCall(async (request: CallableRequest<unknown>): Promise<PreviewChannelResponse> => {
-    const { channelId } = parsePreviewChannelRequest(request.data);
-    return { members: await previewMembers(db, channelId) };
+    const { channelId, code } = parsePreviewChannelRequest(request.data);
+    try {
+        return await preview.previewChannel(db, channelId, code);
+    } catch (error) {
+        return toHttpsError(error);
+    }
 });

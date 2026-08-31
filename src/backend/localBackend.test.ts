@@ -116,9 +116,17 @@ const failsWith = async (run: () => Promise<unknown>, code: string): Promise<Cha
     return error as ChannelError;
 };
 
-/** Пустой канал под своим адресом: демо-канал для проверок правил слишком населён. */
-const freshChannel = async (backend: ChannelBackend, slug = 'proverka'): Promise<string> => {
-    const { channel } = await backend.createChannel({ channel: { slug, title: 'Проверка' } });
+/**
+ * Пустой канал под своим адресом: демо-канал для проверок правил слишком населён. `over`
+ * донашивает closed/code до createChannel — по умолчанию их нет вовсе, тем же открытым
+ * каналом, что и раньше этой возможности.
+ */
+const freshChannel = async (
+    backend: ChannelBackend,
+    slug = 'proverka',
+    over: { closed?: boolean; code?: string } = {}
+): Promise<string> => {
+    const { channel } = await backend.createChannel({ channel: { slug, title: 'Проверка', ...over } });
     return channel.channelId;
 };
 
@@ -350,6 +358,108 @@ describe('вход на рейд', () => {
         expect(member.place.corridor).toBeTruthy();
         expect(member.place.slot).toBeGreaterThanOrEqual(0);
         expect(member.place.facing).toBeTruthy();
+    });
+});
+
+/**
+ * Закрытая частота: тот же набор проверок, что и у joinChannel на настоящем бэкенде
+ * (functions/src/raid.test.ts, «закрытая частота») — код спрашивается у всех, кроме
+ * самого первого (он его и придумал) и уже стоящего на рейде (тому не спрашивать заново).
+ * Добавлены проверки, которых у настоящего бэкенда нет: checkAccessCode — своя функция
+ * лишь у бэкендов, previewChannel её на месте joinChannel не подменяет, — и то, что
+ * посторонний видит closed, но не сам код.
+ */
+describe('закрытая частота', () => {
+    test('первый вошедший становится старшим без кода — сам его только что придумал', async () => {
+        const backend = testBackend();
+        const channelId = await freshChannel(backend, 'zakryt-pervy', { closed: true, code: 'акула' });
+
+        const { member } = await backend.join({ channelId, member: draft('Алый', '001') });
+
+        expect(await ownerOf(backend, channelId)).toBe(member.memberId);
+    });
+
+    test('верный код — второй вошедший становится участником', async () => {
+        const backend = testBackend();
+        const channelId = await freshChannel(backend, 'zakryt-verny-kod', { closed: true, code: 'акула' });
+        await backend.join({ channelId, member: draft('Алый', '001') });
+
+        const { member } = await backend.join({ channelId, member: draft('Белый', '002'), code: 'акула' });
+
+        expect(member.name).toBe('Белый');
+        expect(await members(backend, channelId)).toHaveLength(2);
+    });
+
+    test('неверный код — channel-closed, и второй корабль не появляется', async () => {
+        const backend = testBackend();
+        const channelId = await freshChannel(backend, 'zakryt-neverny-kod', { closed: true, code: 'акула' });
+        await backend.join({ channelId, member: draft('Алый', '001') });
+
+        await failsWith(
+            () => backend.join({ channelId, member: draft('Белый', '002'), code: 'кит' }),
+            'channel-closed'
+        );
+        expect(await members(backend, channelId)).toHaveLength(1);
+    });
+
+    test('код не передан вовсе — тоже channel-closed', async () => {
+        const backend = testBackend();
+        const channelId = await freshChannel(backend, 'zakryt-bez-koda', { closed: true, code: 'акула' });
+        await backend.join({ channelId, member: draft('Алый', '001') });
+
+        await failsWith(() => backend.join({ channelId, member: draft('Белый', '002') }), 'channel-closed');
+    });
+
+    test('уже стоящий на рейде — повторный вход не спрашивает код заново', async () => {
+        // Без testBackend(): проверке нужна та же личность на обоих join(), а сброс перед
+        // каждым (см. testBackend выше) как раз завёл бы второго вместо повторного входа.
+        const backend = createLocalBackend();
+        const channelId = await freshChannel(backend, 'zakryt-povtorny', { closed: true, code: 'акула' });
+        const first = await backend.join({ channelId, member: draft('Алый', '001') });
+
+        const second = await backend.join({ channelId, member: draft('Алый', '001') });
+
+        expect(second.member).toEqual(first.member);
+    });
+
+    test('открытый канал код не спрашивает вовсе', async () => {
+        const backend = testBackend();
+        const channelId = await freshChannel(backend, 'zakryt-otkryty');
+        await backend.join({ channelId, member: draft('Алый', '001') });
+
+        const { member } = await backend.join({ channelId, member: draft('Белый', '002') });
+
+        expect(member.name).toBe('Белый');
+    });
+
+    test('checkAccessCode: верный код проходит бесследно, неверный — channel-closed', async () => {
+        const backend = testBackend();
+        const channelId = await freshChannel(backend, 'zakryt-proverka-koda', { closed: true, code: 'акула' });
+
+        await expect(backend.checkAccessCode({ channelId, code: 'акула' })).resolves.toBeUndefined();
+        await failsWith(() => backend.checkAccessCode({ channelId, code: 'кит' }), 'channel-closed');
+        // Сама подсказка ничего не решает — ни на рейде, ни в канале ничего не изменилось.
+        expect(await members(backend, channelId)).toHaveLength(0);
+    });
+
+    test('checkAccessCode для несуществующего канала — channel-not-found', async () => {
+        const backend = testBackend();
+
+        await failsWith(
+            () => backend.checkAccessCode({ channelId: 'net-takogo-kanala', code: 'что угодно' }),
+            'channel-not-found'
+        );
+    });
+
+    test('постороннему виден флаг closed, но не сам код', async () => {
+        const backend = testBackend();
+        const channelId = await freshChannel(backend, 'zakryt-dlya-chuzhogo', { closed: true, code: 'акула' });
+        await backend.join({ channelId, member: draft('Алый', '001') });
+
+        const snapshot = await backend.getChannel({ channelId, userId: 'stranger-uid' });
+
+        expect(snapshot?.channel.closed).toBe(true);
+        expect(snapshot?.channel).not.toHaveProperty('code');
     });
 });
 
@@ -1020,7 +1130,7 @@ describe('статус отправки', () => {
 });
 
 describe('гость (userId: null)', () => {
-    test('getChannel отдаёт участников без позывных и без ленты вовсе', async () => {
+    test('getChannel отдаёт вход, а не рейд — ни участников, ни ленты, ни старшинства', async () => {
         const backend = testBackend();
         const channelId = await freshChannel(backend, 'dlya-gostya');
         const { member } = await backend.join({ channelId, member: draft('Альбатрос', '317') });
@@ -1028,14 +1138,17 @@ describe('гость (userId: null)', () => {
 
         const snapshot = await backend.getChannel({ channelId, userId: null });
 
-        // redactMember меняет только name — на hullNumber; остальное у местного участника
-        // и так не содержит ничего, что стоило бы прятать (см. shared/types/channel.ts).
-        expect(snapshot?.members).toEqual([{ ...member, name: member.hullNumber }]);
+        // Название и closed — настоящие, это и есть весь экран входа; кто на рейде и кто
+        // старший — уже сведения о рейде, а не о канале, и гостю их не видать вовсе
+        // (см. localBackend.ts, previewOf).
+        expect(snapshot?.channel.title).toBe('Проверка');
+        expect(snapshot?.channel.owner).toBeUndefined();
+        expect(snapshot?.members).toEqual([]);
         expect(snapshot?.messages).toEqual([]);
         expect(snapshot?.hasMoreMessages).toBe(false);
     });
 
-    test('getChannelBySlug — та же редактура, по адресу вместо id', async () => {
+    test('getChannelBySlug — тот же вход, по адресу вместо id', async () => {
         const backend = testBackend();
         const channelId = await freshChannel(backend, 'gost-po-adresu');
         await backend.join({ channelId, member: draft('Буревестник', '404') });
@@ -1043,19 +1156,8 @@ describe('гость (userId: null)', () => {
         const snapshot = await backend.getChannelBySlug({ slug: 'gost-po-adresu', userId: null });
 
         expect(snapshot?.channel.channelId).toBe(channelId);
-        expect(snapshot?.members).toEqual([expect.objectContaining({ name: '404', hullNumber: '404' })]);
+        expect(snapshot?.members).toEqual([]);
         expect(snapshot?.messages).toEqual([]);
-    });
-
-    test('lastSeen с гостя не уходит, даже когда оно есть у участника', async () => {
-        const backend = testBackend();
-        const channelId = await freshChannel(backend, 'lastseen-gostyu');
-        const { member } = await backend.join({ channelId, member: draft('Секстант', '512') });
-        await backend.markSeen({ channelId, memberId: member.memberId, message: { messageId: 'msg-1', sentAt: 1 } });
-
-        const snapshot = await backend.getChannel({ channelId, userId: null });
-
-        expect(snapshot?.members[0] && 'lastSeen' in snapshot.members[0]).toBe(false);
     });
 
     test('канала нет вовсе — тот же null, что и вошедшему', async () => {
@@ -1063,7 +1165,7 @@ describe('гость (userId: null)', () => {
         expect(await backend.getChannel({ channelId: 'net-takogo', userId: null })).toBeNull();
     });
 
-    test('subscribe пропускает только смену самого канала — участников и ленту гасит', async () => {
+    test('subscribe гостю не приносит ничего — ни рейда, ни даже смены самого канала', async () => {
         const backend = testBackend();
         const channelId = await freshChannel(backend, 'podpiska-gostya');
 
@@ -1071,11 +1173,10 @@ describe('гость (userId: null)', () => {
         const { member } = await backend.join({ channelId, member: draft('Клипер', '208') });
         await backend.sendMessage({ channelId, memberId: member.memberId, message: { text: 'Тест' } });
 
-        expect(heard.some((event) => event.type === 'member-joined')).toBe(false);
-        expect(heard.some((event) => event.type === 'message-added')).toBe(false);
-        // Первый вошедший становится старшим — это меняет сам документ канала, и это гостю
-        // как раз положено видеть (см. firestore.rules, allow get: if true на channels).
-        expect(heard.some((event) => event.type === 'channel-updated')).toBe(true);
+        // Первый вошедший становится старшим — это меняет сам документ канала, но теперь
+        // и это уже сведения о рейде: без участия в канал живьём не заглянуть вовсе
+        // (см. firestore.rules, allow get: if isMember(channelId) на channels).
+        expect(heard).toHaveLength(0);
     });
 
     test('userId не передан вовсе — тот же ответ, что и раньше, гостю не спутать с этим', async () => {
@@ -1095,15 +1196,15 @@ describe('гость (userId: null)', () => {
 });
 
 /**
- * Вошедший по-настоящему (`userId` — не `null`), но не тот, кто стоит на этом рейде: та же
- * редактура, что и у гостя выше, — needsPreview в localBackend.ts не различает, откуда взялась
- * причина превью, лишь бы вызывающего не было среди участников снимка. У настоящего сервера
- * этот же случай решает isMember(channelId) в firestore.rules (см. firebaseBackend.ts,
+ * Вошедший по-настоящему (`userId` — не `null`), но не тот, кто стоит на этом рейде: тот же
+ * вход, а не рейд, что и у гостя выше, — needsPreview в localBackend.ts не различает, откуда
+ * взялась причина превью, лишь бы вызывающего не было среди участников снимка. У настоящего
+ * сервера этот же случай решает isMember(channelId) в firestore.rules (см. firebaseBackend.ts,
  * readChannelForUser) — здесь сверяться не с чем, кроме самого списка участников, и делает это
  * needsPreview напрямую.
  */
 describe('вошедший не с этого рейда', () => {
-    test('getChannel отдаёт участников без позывных и без ленты вовсе — как и гостю', async () => {
+    test('getChannel отдаёт вход, а не рейд — как и гостю', async () => {
         const backend = testBackend();
         const channelId = await freshChannel(backend, 'ne-s-etogo-rejda');
         const { member } = await backend.join({ channelId, member: draft('Альбатрос', '317') });
@@ -1113,12 +1214,14 @@ describe('вошедший не с этого рейда', () => {
         // подложной вкладки, см. localAccount() в auth.ts, testBackend() выше).
         const snapshot = await backend.getChannel({ channelId, userId: 'stranger-uid' });
 
-        expect(snapshot?.members).toEqual([{ ...member, name: member.hullNumber }]);
+        expect(snapshot?.channel.title).toBe('Проверка');
+        expect(snapshot?.channel.owner).toBeUndefined();
+        expect(snapshot?.members).toEqual([]);
         expect(snapshot?.messages).toEqual([]);
         expect(snapshot?.hasMoreMessages).toBe(false);
     });
 
-    test('getChannelBySlug — та же редактура, по адресу вместо id', async () => {
+    test('getChannelBySlug — тот же вход, по адресу вместо id', async () => {
         const backend = testBackend();
         const channelId = await freshChannel(backend, 'chuzhoy-po-adresu');
         await backend.join({ channelId, member: draft('Буревестник', '404') });
@@ -1126,11 +1229,11 @@ describe('вошедший не с этого рейда', () => {
         const snapshot = await backend.getChannelBySlug({ slug: 'chuzhoy-po-adresu', userId: 'stranger-uid' });
 
         expect(snapshot?.channel.channelId).toBe(channelId);
-        expect(snapshot?.members).toEqual([expect.objectContaining({ name: '404', hullNumber: '404' })]);
+        expect(snapshot?.members).toEqual([]);
         expect(snapshot?.messages).toEqual([]);
     });
 
-    test('subscribe пропускает только смену самого канала — участников и ленту гасит', async () => {
+    test('subscribe чужому не приносит ничего — ни рейда, ни даже смены самого канала', async () => {
         const backend = testBackend();
         const channelId = await freshChannel(backend, 'podpiska-chuzhogo');
 
@@ -1138,9 +1241,7 @@ describe('вошедший не с этого рейда', () => {
         const { member } = await backend.join({ channelId, member: draft('Клипер', '208') });
         await backend.sendMessage({ channelId, memberId: member.memberId, message: { text: 'Тест' } });
 
-        expect(heard.some((event) => event.type === 'member-joined')).toBe(false);
-        expect(heard.some((event) => event.type === 'message-added')).toBe(false);
-        expect(heard.some((event) => event.type === 'channel-updated')).toBe(true);
+        expect(heard).toHaveLength(0);
     });
 
     test('свой же участник (userId === memberId) — превью не нужно, видно всё', async () => {

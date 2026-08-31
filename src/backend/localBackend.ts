@@ -16,7 +16,6 @@ import {
     ShipNotice,
     isSameBerth,
     memberRef,
-    redactMember,
 } from '@shared/types/channel';
 import { limitMessage, overLimit } from '@shared/utils/limit';
 
@@ -67,7 +66,7 @@ const BROADCAST_NAME = 'kilvater';
  * здесь, туда же кладут и функцию перехода — иначе разговор, лежащий в хранилище, дальше
  * этой выкладки не проедет.
  */
-const STORAGE_VERSION = 15;
+const STORAGE_VERSION = 16;
 
 /** Ключ, под которым состояние лежало до появления версии. Чистим, чтобы не мусорить. */
 const LEGACY_STORAGE_KEY = 'kilvater.v1';
@@ -185,23 +184,36 @@ const mutate = <T>(channelId: string, change: (channel: StoredChannel) => T): Pr
  * Хвост ленты в MESSAGE_PAGE сообщений — то же самое, что при чтении канала отдаёт
  * настоящий бэкенд (см. firebaseBackend.ts, readChannel). Хранилище при этом не трогается:
  * полный разговор остаётся в состоянии как есть, страницей режется только ответ.
+ *
+ * Поля перечислены явно, а не общим `...snapshot`: у StoredChannel есть code (см.
+ * backend/migrate.ts), а наружу, в ChannelSnapshot, ему хода нет ни при каких обстоятельствах
+ * — тем же способом, каким toChannel в firebaseBackend.ts не пускает code из ChannelDoc
+ * дальше себя.
  */
 const paged = (snapshot: StoredChannel): ChannelSnapshot => {
     const { messages } = snapshot;
     const hasMoreMessages = messages.length > MESSAGE_PAGE;
-    return { ...snapshot, messages: hasMoreMessages ? messages.slice(-MESSAGE_PAGE) : messages, hasMoreMessages };
+    return {
+        channel: snapshot.channel,
+        members: snapshot.members,
+        messages: hasMoreMessages ? messages.slice(-MESSAGE_PAGE) : messages,
+        hasMoreMessages,
+    };
 };
 
 /**
- * То же самое для того, кто не вошёл — той же общей политикой, что и у настоящего бэкенда
- * (см. firebaseBackend.ts, readChannelPreview): участники без позывных, взамен бортовыми
- * номерами (redactMember), лента не читается вовсе. У настоящего сервера это держат правила
- * и отдельная функция, у localStorage правил нет вовсе — здесь эту же политику держит сама
- * функция чтения, а не какой-то отдельный слой: подменять тут больше нечему.
+ * Вход, а не рейд, — тому, кто не вошёл: той же общей политикой, что и у настоящего бэкенда
+ * (см. firebaseBackend.ts, readChannelPreview) — участники и лента не отдаются вовсе, только
+ * сам канал, да и тот не целиком. title и closed настоящие — это и есть весь экран входа;
+ * owner гасим нарочно: старшинство — это уже «кто на рейде», а не «что за канал», и превью
+ * настоящего бэкенда его не знает вовсе (Cloud Function отдаёт только title и closed,
+ * см. readChannelPreview) — здесь та же граница проведена вручную, раз сетевой её провести
+ * не за кого. slug и createdAt настоящие: прятать их не от кого — это адрес канала и его
+ * возраст, а не сведения о рейде.
  */
 const previewOf = (snapshot: StoredChannel): ChannelSnapshot => ({
-    channel: snapshot.channel,
-    members: snapshot.members.map(redactMember),
+    channel: { ...snapshot.channel, owner: undefined },
+    members: [],
     messages: [],
     hasMoreMessages: false,
 });
@@ -447,7 +459,7 @@ export function createLocalBackend(): ChannelBackend {
             return delay(mergeOutbox(paged(snapshot), localAccount().userId, channelId));
         },
 
-        createChannel: async ({ channel: { slug, title } }) => {
+        createChannel: async ({ channel: { slug, title, closed, code } }) => {
             if (!isValidSlug(slug)) {
                 throw new ChannelError('slug-invalid', 'В адресе только латинские буквы, цифры и дефис');
             }
@@ -457,13 +469,24 @@ export function createLocalBackend(): ChannelBackend {
                 if (!isSlugFree(state, slug)) {
                     throw new ChannelError('slug-taken', 'Канал с таким адресом уже есть');
                 }
+                // closed попадает в Channel, только когда канал и правда закрыт — отсутствие
+                // поля и есть открытый канал (см. Channel.closed в shared/types/channel.ts).
+                // code в Channel не идёт вовсе — он лежит рядом, в StoredChannel (см.
+                // backend/migrate.ts), тем же разделением, что и code/ChannelDoc
+                // у firebaseBackend.ts.
                 const created: Channel = {
                     channelId: randomId('ch'),
                     slug,
                     title: title.trim(),
                     createdAt: Date.now(),
+                    ...(closed ? { closed: true } : {}),
                 };
-                state.channels[created.channelId] = { channel: created, members: [], messages: [] };
+                state.channels[created.channelId] = {
+                    channel: created,
+                    members: [],
+                    messages: [],
+                    ...(closed ? { code: (code ?? '').trim() } : {}),
+                };
                 return created;
             });
             emit(channel.channelId, { type: 'channel-created', channel });
@@ -490,7 +513,24 @@ export function createLocalBackend(): ChannelBackend {
             return delay({ channel: updated });
         },
 
-        join: async ({ channelId, member: draft }) => {
+        /**
+         * Подсказка, не запирающая проверка (см. checkAccessCode в types.ts) — сверяем код
+         * напрямую с тем, что лежит в состоянии: отдельной функции, за пределы правил
+         * не выходящей (previewChannel у настоящего бэкенда), здесь нет и незачем — сверять
+         * не с чем чужим, только со своим же localStorage.
+         */
+        checkAccessCode: async ({ channelId, code }) => {
+            const snapshot = readState().channels[channelId];
+            if (!snapshot) {
+                throw new ChannelError('channel-not-found', 'Канал не найден');
+            }
+            if (snapshot.channel.closed && snapshot.code !== code.trim()) {
+                throw new ChannelError('channel-closed', 'Код доступа неверен. Обратитесь к старшему на рейде.');
+            }
+            return delay(undefined);
+        },
+
+        join: async ({ channelId, member: draft, code }) => {
             // Всё решение целиком — в одной очереди: и сколько кораблей в канале, и свободен ли
             // позывной, и какое место достанется. Спрошенное до очереди устаревает к записи,
             // и на рейде от этого появлялись два корабля на одной точке.
@@ -502,6 +542,14 @@ export function createLocalBackend(): ChannelBackend {
                 const existing = current.members.find((item) => item.memberId === userId);
                 if (existing) {
                     return { member: existing, channel: null, already: true as const };
+                }
+                // Код спрашиваем только у того, кто входит на закрытый рейд по-настоящему первым
+                // разом — тем же условием, что и joinChannel на сервере (functions/src/raid.ts):
+                // свой повторный вход (already, выше) — тот же самый пропуск, а не чужой, а самому
+                // первому на рейде (владельца ещё нет) сверять код не с чем — это он сам его
+                // секунду назад и придумал, заводя канал.
+                if (current.channel.closed && current.channel.owner && current.code !== (code ?? '').trim()) {
+                    throw new ChannelError('channel-closed', 'Код доступа неверен. Обратитесь к старшему на рейде.');
                 }
                 checkDraftIsFree(current, draft);
                 // Место на рейде назначаем здесь, а не в сцене: тогда оно уедет вместе
@@ -761,26 +809,23 @@ export function createLocalBackend(): ChannelBackend {
         },
 
         subscribe: ({ channelId, userId, onEvent: listener }): Unsubscribe => {
-            // Тем, кому положено превью (посторонний или вошедший не с этого рейда —
-            // см. needsPreview выше), участники и лента не показываются вовсе — той же
-            // политикой, что и у настоящего бэкенда (см. firebaseBackend.ts, subscribe). Там
-            // для этого не заводят две из трёх подписок; здесь на весь канал одна общая,
-            // и тот же эффект даёт фильтр на уже готовом событии — до такого слушателя долетает
-            // только канал, то, что ему и так открыто превью-снимком. Решаем один раз, на весь
-            // срок подписки, по снимку на этот миг: вступление в канал заводит новую подписку
-            // (см. useChannel.ts, переподписка по myId), а не оживляет старую.
-            const forward = needsPreview(readState().channels[channelId], userId)
-                ? (event: ChannelEvent) => {
-                      if (event.type === 'channel-created' || event.type === 'channel-updated') {
-                          listener(event);
-                      }
-                  }
-                : listener;
+            // Тому, кому положен вход, а не рейд (посторонний или чужой вошедший — см.
+            // needsPreview выше), события не идут вовсе — той же политикой, что и у настоящего
+            // бэкенда теперь и на сам канал (см. firebaseBackend.ts, subscribe: там для
+            // чужого все три подписки проваливаются одинаково, permission-denied, включая
+            // документ канала, — раньше документ был публичным и его перемены доходили живьём,
+            // сейчас нет). Экран входа у не-участника поэтому не оживает без перезагрузки —
+            // ровно то же самое видит теперь и вошедший на настоящем бэкенде. Решаем один раз,
+            // на весь срок подписки, по снимку на этот миг: вступление в канал заводит новую
+            // подписку (см. useChannel.ts, переподписка по myId), а не оживляет старую.
+            if (needsPreview(readState().channels[channelId], userId)) {
+                return () => {};
+            }
             const forChannel = listeners.get(channelId) ?? new Set();
-            forChannel.add(forward);
+            forChannel.add(listener);
             listeners.set(channelId, forChannel);
             return () => {
-                forChannel.delete(forward);
+                forChannel.delete(listener);
                 if (!forChannel.size) {
                     listeners.delete(channelId);
                 }

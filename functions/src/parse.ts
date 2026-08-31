@@ -128,7 +128,14 @@ const asMemberDraft = (value: unknown): MemberDraft => {
 
 export const parseJoinChannelRequest = (data: unknown): JoinChannelRequest => {
     const body = asRecord(data, 'request');
-    return { channelId: asId(body.channelId, 'channelId'), member: asMemberDraft(body.member) };
+    const request: JoinChannelRequest = {
+        channelId: asId(body.channelId, 'channelId'),
+        member: asMemberDraft(body.member),
+    };
+    if (body.code !== undefined) {
+        request.code = asString(body.code, 'code');
+    }
+    return request;
 };
 
 export const parseUpdateMemberRequest = (data: unknown): UpdateMemberRequest => {
@@ -159,5 +166,9 @@ export const parseKickMemberRequest = (data: unknown): KickMemberRequest => {
 
 export const parsePreviewChannelRequest = (data: unknown): PreviewChannelRequest => {
     const body = asRecord(data, 'request');
-    return { channelId: asId(body.channelId, 'channelId') };
+    const request: PreviewChannelRequest = { channelId: asId(body.channelId, 'channelId') };
+    if (body.code !== undefined) {
+        request.code = asString(body.code, 'code');
+    }
+    return request;
 };

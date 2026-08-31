@@ -33,8 +33,14 @@ import { ChannelSnapshot } from '@/backend/types';
  * Как канал лежит в хранилище — то же самое, что ChannelSnapshot, отдаваемый наружу,
  * только без hasMoreMessages: это не факт о канале, а факт о прочитанной странице,
  * и его считают при чтении (см. backend/localBackend.ts, paged), а не хранят.
+ *
+ * code — рядом с каналом, а не внутри него: `Channel` наружу код не выносит никаким путём
+ * (см. Channel.closed в shared/types/channel.ts), а localStorage — это и есть «наружу» для
+ * местного бэкенда, тот же слой, что и клиент у настоящего. Та же причина, по которой code
+ * лежит в ChannelDoc у firebaseBackend.ts, а не в самом Channel. Поле есть только у закрытого
+ * канала — у открытого, как и до появления этой возможности, его не бывает вовсе.
  */
-export type StoredChannel = Omit<ChannelSnapshot, 'hasMoreMessages'>;
+export type StoredChannel = Omit<ChannelSnapshot, 'hasMoreMessages'> & { code?: string };
 
 /** Состояние «сервера» целиком: каналов может быть сколько угодно, адресуются по id. */
 export interface ServerState {
@@ -108,6 +114,12 @@ const MIGRATIONS: Record<number, (state: Raw) => Raw> = {
     // само — автор ищется среди нынешних участников, как и раньше (см. `authorLook`).
     // Совместимая правка схемы выглядит именно так, и версию за неё подняли с запасом.
     14: (state) => state,
+    // Пятнадцатая в шестнадцатую: тоже приводить нечего. Появились closed/code (см.
+    // Channel.closed в shared/types/channel.ts и StoredChannel.code выше), но оба поля
+    // необязательные и парой: у канала, заведённого раньше, их и не бывает вовсе, а это
+    // и есть открытый канал — то, чем читается их отсутствие. Та же самая совместимая
+    // правка, что и у перехода выше.
+    15: (state) => state,
 };
 
 /** Самая старая форма, из которой ещё есть чем выводить. */
@@ -150,6 +162,10 @@ interface Parsed {
  * не мешает, а недостающее читается запасным вариантом там, где читается (`authorLook`,
  * `place.tried`); придирчивый разбор выбрасывал бы разговор из-за мелочи, которую никто
  * и не заметил бы.
+ *
+ * code — исключение, и переносится отдельной строкой, а не общим `...snapshot`: он лежит
+ * рядом с channel/members/messages, а не внутри одного из них, и общий разбор его иначе
+ * просто не увидит.
  */
 const parseChannels = (value: unknown): Parsed => {
     const channels: Record<string, StoredChannel> = {};
@@ -159,7 +175,12 @@ const parseChannels = (value: unknown): Parsed => {
             const members = Array.isArray(snapshot.members) ? (snapshot.members as Member[]) : [];
             const messages = Array.isArray(snapshot.messages) ? (snapshot.messages as Message[]) : [];
             whole = whole && Array.isArray(snapshot.members) && Array.isArray(snapshot.messages);
-            channels[id] = { channel: snapshot.channel, members, messages };
+            channels[id] = {
+                channel: snapshot.channel,
+                members,
+                messages,
+                ...(typeof snapshot.code === 'string' ? { code: snapshot.code } : {}),
+            };
         } else {
             whole = false;
         }

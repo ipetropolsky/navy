@@ -88,6 +88,12 @@ import {
  * Как канал хранится в Firestore. Ключ документа — сам channelId, отдельным полем его
  * в документе нет. owner ставит сервер, когда на рейд встаёт первый корабль (см.
  * functions/src/raid.ts) — до этого момента у канала владельца нет вовсе.
+ *
+ * closed/code пишет клиент сам, один раз, при создании (см. createChannel ниже) — и оба
+ * неизменны после (firestore.rules не пускает их в onlyChanges у update). code наружу,
+ * в Channel, не превращается никогда: participant ли, посторонний ли — то, что можно
+ * прочитать этот документ целиком, не значит, что код должен куда-то из него уйти
+ * (см. Channel.closed в shared/types/channel.ts).
  */
 interface ChannelDoc {
     slug: string;
@@ -95,6 +101,8 @@ interface ChannelDoc {
     createdAt: number;
     owner?: { memberId: string };
     serverAt: Timestamp;
+    closed?: boolean;
+    code?: string;
 }
 
 /** channels/{channelId}/members/{memberId} — см. functions/src/raid.ts, тот же MemberDoc. */
@@ -137,6 +145,7 @@ const toChannel = (channelId: string, data: ChannelDoc): Channel => ({
     title: data.title,
     createdAt: data.createdAt,
     owner: data.owner,
+    closed: data.closed,
 });
 
 /** user.userId наружу не идёт: он всегда равен memberId (см. docs/FIREBASE.md, «Формы документов»). */
@@ -180,6 +189,16 @@ const isChannelErrorCode = (value: string): value is ChannelErrorCode =>
     (CHANNEL_ERROR_CODES as readonly string[]).includes(value);
 
 /**
+ * SDK сам приписывает к сообщению вызванной функции HTTP-статус отказа — `" [403]"`,
+ * `" [404]"` и так далее (см. _errorForResponse в @firebase/functions/dist/index.cjs.js:
+ * `${description} [${httpStatus}]` собирается безусловно, для любого отказа). Это дело
+ * транспорта, а не слова для человека, и наружу им идти незачем. Сообщения ChannelError
+ * с сервера такого хвоста не несут никогда (см. functions/src/raid.ts, preview.ts) —
+ * срез снимает только то, что дописал сам клиент.
+ */
+const stripStatusSuffix = (message: string): string => message.replace(/ \[\d+\]$/, '');
+
+/**
  * Код отказа, голым — без префикса 'functions/', которым FunctionsError отличает свой код
  * от кода самого Firestore (см. комментарий у toChannelError ниже). Не Error вовсе или Error
  * без code — пустая строка, а не исключение: решать, что значит пустой код, дальше уже дело
@@ -208,7 +227,7 @@ export const toChannelError = (failure: unknown): ChannelError => {
     if (failure instanceof FunctionsError) {
         const code = (failure.details as { code?: unknown } | null | undefined)?.code;
         if (typeof code === 'string' && isChannelErrorCode(code)) {
-            return new ChannelError(code, failure.message);
+            return new ChannelError(code, stripStatusSuffix(failure.message));
         }
     }
     switch (errorStatus(failure)) {
@@ -480,36 +499,39 @@ export function createFirebaseBackend({
 
     /**
      * То же самое для того, кому нельзя видеть рейд как есть — посторонний или чужой вошедший,
-     * не стоящий на этом рейде: правила закрывают участников и ленту целиком (firestore.rules,
-     * allow read: if isMember(channelId)) — различить в правиле, что показать, а что нет,
-     * нечем. Бортовые номера взамен позывных вместо этого отдаёт функция (previewChannel, см.
-     * functions/src/index.ts и preview.ts) — сама она уже читает Admin SDK, минуя правила.
-     * Лента не читается вовсе: до чата не-участник не доходит ни одной веткой App.tsx,
-     * и спрашивать её неоткого незачем.
+     * не стоящий на этом рейде: документ канала правила отдают только участнику (firestore.rules,
+     * allow get: if isMember(channelId)), участников и ленту — тоже. Читать здесь поэтому
+     * нечего — весь ответ идёт от previewChannel (functions/src/index.ts, preview.ts), которая
+     * сама уже читает Admin SDK, минуя правила, и отдаёт ровно вход: название канала и закрыт
+     * ли он, ни участников, ни ленты. channel-not-found — тот же самый «нет канала», что и
+     * пустой снимок getDoc в readChannel, а не отказ: наружу оба пути отвечают одинаковым null.
      */
     const readChannelPreview = async (channelId: string): Promise<ChannelSnapshot | null> => {
-        const channelSnap = await getDoc(channelRef(channelId));
-        if (!channelSnap.exists()) {
-            return null;
+        try {
+            const { data } = await previewChannelCall({ channelId });
+            return {
+                channel: { channelId, slug: '', title: data.title, createdAt: 0, closed: data.closed },
+                members: [],
+                messages: [],
+                hasMoreMessages: false,
+            };
+        } catch (failure) {
+            if (toChannelError(failure).code === 'channel-not-found') {
+                return null;
+            }
+            throw failure;
         }
-        const { data } = await previewChannelCall({ channelId });
-        return {
-            channel: toChannel(channelId, channelSnap.data() as ChannelDoc),
-            members: data.members,
-            messages: [],
-            hasMoreMessages: false,
-        };
     };
 
     /**
-     * Полный снимок — тому, кому положено, урезанный — всем прочим, а узнать заранее, кому
-     * что, неоткуда: решает правило (isMember(channelId), см. firestore.rules) на сервере,
+     * Полный снимок — тому, кому положено, вход вместо него — всем прочим, а узнать заранее,
+     * кому что, неоткуда: решает правило (isMember(channelId), см. firestore.rules) на сервере,
      * а не эта функция, и участник ли userId на самом деле, здесь видно только по итогу самой
      * попытки. null — заведомый посторонний, пробовать полный незачем: signedIn() внутри
      * isMember() всё равно его не пропустит. Любой другой userId — и вошедший, но чужой на этом
      * рейде, и не переданный вовсе (см. userId в types.ts, ChannelBackend.getChannel) — идёт
      * за полным снимком, а permission-denied, если рейд всё-таки оказался чужим, откатывается
-     * на превью вместо того, чтобы всплыть отказом: ровно то же самое видит и посторонний
+     * на вход вместо того, чтобы всплыть отказом: ровно то же самое видит и посторонний
      * без входа.
      */
     const readChannelForUser = async (
@@ -555,7 +577,7 @@ export function createFirebaseBackend({
             }
         },
 
-        createChannel: async ({ channel: { slug, title } }) => {
+        createChannel: async ({ channel: { slug, title, closed, code } }) => {
             if (!isValidSlug(slug)) {
                 throw new ChannelError('slug-invalid', 'В адресе только латинские буквы, цифры и дефис');
             }
@@ -566,7 +588,17 @@ export function createFirebaseBackend({
             const channelId = doc(collection(db, paths.channels())).id;
             // Только что созданный канал — без owner: старшего назначает сервер, когда
             // на рейд встаёт первый корабль, а до тех пор у канала владельца нет вовсе.
-            const created: Channel = { channelId, slug, title: title.trim(), createdAt: Date.now() };
+            // closed попадает в Channel, только когда канал и правда закрыт — отсутствие
+            // поля и есть открытый канал (см. Channel.closed в shared/types/channel.ts);
+            // code наружу, в Channel, не идёт вовсе — даже переменной, которую можно было бы
+            // забыть отфильтровать, здесь нет.
+            const created: Channel = {
+                channelId,
+                slug,
+                title: title.trim(),
+                createdAt: Date.now(),
+                ...(closed ? { closed: true } : {}),
+            };
 
             try {
                 await withTimeout(
@@ -584,6 +616,10 @@ export function createFirebaseBackend({
                                 title: created.title,
                                 createdAt: created.createdAt,
                                 serverAt: serverTimestamp(),
+                                // closed и code — строго парой или не пишутся вовсе (closedSane
+                                // в firestore.rules): открытый канал в базе выглядит точно так же,
+                                // как и до появления закрытых, — без этих двух полей вовсе.
+                                ...(closed ? { closed: true, code: (code ?? '').trim() } : {}),
                             });
                             transaction.set(slugRef(slug), { channelId, createdAt: Date.now() });
                         }),
@@ -650,10 +686,33 @@ export function createFirebaseBackend({
             return { channel: toChannel(channelId, { ...before, slug, title: trimmedTitle }) };
         },
 
-        join: async ({ channelId, member }) => {
+        /**
+         * Подсказка, не запирающая проверка (см. checkAccessCode в types.ts) — поэтому зовёт
+         * ту же previewChannel, что и вход для не-участника, только с кодом в запросе:
+         * previewChannel и без кода ничего не решает, а с кодом ровно сверяет его и бросает
+         * channel-closed, если код не совпал. Ответ самой функции здесь не нужен, важен только
+         * сам факт, что она не бросила.
+         */
+        checkAccessCode: async ({ channelId, code }) => {
             try {
+                await withTimeout(() => previewChannelCall({ channelId, code: code.trim() }), READ_TIMEOUT);
+            } catch (failure) {
+                throw toChannelError(failure);
+            }
+        },
+
+        join: async ({ channelId, member, code }) => {
+            try {
+                // code — как и course/nextOwnerId в leave ниже: отсутствие поля, а не undefined,
+                // потому что сериализатор вызова превращает undefined в null, а серверный разбор
+                // (parseJoinChannelRequest) ждёт отсутствия поля вовсе, а не null.
                 const result = await withTimeout(
-                    () => joinChannelCall({ channelId, member: draftToCall(member) }),
+                    () =>
+                        joinChannelCall({
+                            channelId,
+                            member: draftToCall(member),
+                            ...(code !== undefined ? { code: code.trim() } : {}),
+                        }),
                     WRITE_TIMEOUT
                 );
                 return result.data;
@@ -966,6 +1025,22 @@ export function createFirebaseBackend({
         },
 
         subscribe: ({ channelId, userId, onEvent }) => {
+            // Посторонний без входа не имеет доступа ни к одному документу канала — ни сам
+            // канал, ни участники, ни лента не проходят isMember(channelId) (firestore.rules),
+            // а signedIn() внутри isMember() такого userId вообще не пропустит: три подписки,
+            // которые тут же оборвутся отказом, заводить незачем — сразу отдаём пустую отписку.
+            //
+            // Любой другой userId — и вошедший, но чужой на этом рейде, и не переданный вовсе
+            // (см. userId в types.ts, ChannelBackend.subscribe) — заводит все три подписки как
+            // обычно: не участник получит тот же отказ правила на каждой из них, но он у него
+            // замрёт молча (см. комментарий у подписки на канал ниже), а не оборвёт связь.
+            // Эхо своего неотправленного ниже в этом случае не распознать — ключа нет, но
+            // и посылать вошедшему, ещё не участнику, есть нечего: форма отправки ему не
+            // открыта (App.tsx).
+            if (userId === null) {
+                return () => {};
+            }
+
             // Первый снимок onSnapshot приходит целиком и это не события, а состояние —
             // то же самое, что уже отдал getChannel. Пропускаем его отдельным флагом
             // на каждую из трёх подписок: иначе каждое открытие канала заново рождало бы
@@ -996,38 +1071,24 @@ export function createFirebaseBackend({
                         channel: toChannel(channelId, snap.data() as ChannelDoc),
                     });
                 },
-                () => {
-                    // Подписка оборвалась (правило не пустило, сети нет) — событие не рождаем,
-                    // а не роняем вкладку: точного кода у обрыва подписки нет и не будет
-                    // (см. docs/FIREBASE.md, «Состояние связи»), только сам факт обрыва —
-                    // он и уходит в состояние связи, которое слушает watchConnection. Документ
-                    // канала читает allow get: if true — правило здесь отказать не может,
-                    // и этот отказ (в отличие от участников и ленты ниже) всегда об обрыве
-                    // связи, а не о том, что вошедший ещё не встал на этот рейд.
-                    reportSnapshotFailure();
+                (failure) => {
+                    // Не встал на этот рейд — документ канала тоже не открыть (firestore.rules,
+                    // allow get: if isMember(channelId)), и это не обрыв связи: ровно то же
+                    // самое видел бы и посторонний без входа (см. readChannelPreview выше).
+                    // Подписка на отказе всё равно замирает сама — Firestore не переспрашивает
+                    // правило заново, а join() в useChannel.ts отвечает на вступление свежей
+                    // подпиской, а не эта, на своё же будущее членство. Прочие отказы (сети
+                    // нет) — тот же класс, что и у подписок на участников и на ленту ниже,
+                    // тот же выход в состояние связи.
+                    if (errorStatus(failure) !== 'permission-denied') {
+                        reportSnapshotFailure();
+                    }
                 }
             );
 
-            // Участники и лента закрыты правилами для всех, кроме того, кто сам стоит на этом
-            // рейде (firestore.rules, allow read: if isMember(channelId)) — двух подписок ниже
-            // заведомому постороннему заводить незачем, они бы тут же и оборвались отказом.
-            // Подписка на канал при этом остаётся: документ канала публичен (allow get: if
-            // true), и именно в нём будущему признаку закрытого канала предстоит доходить
-            // до постороннего взгляда живьём, без перезагрузки страницы.
-            //
-            // null — явно посторонний, и только этот случай известен заранее. Любой другой
-            // userId — и вошедший, но чужой на этом рейде, и не переданный вовсе (см. userId
-            // в types.ts, ChannelBackend.subscribe) — заводит обе подписки как обычно: не
-            // участник получит тот же отказ правила, но он у него замрёт молча (см. комментарий
-            // у подписки на участников ниже), а не оборвёт связь. Эхо своего неотправленного
-            // ниже в этом случае не распознать — ключа нет, но и посылать вошедшему, ещё не
-            // участнику, есть нечего: форма отправки ему не открыта (App.tsx).
-            if (userId === null) {
-                return () => {
-                    unsubscribeChannel();
-                };
-            }
-
+            // Участники и лента — тот же самый isMember(channelId), что и у канала выше:
+            // не участник получит тот же permission-denied на каждой из них, и каждая
+            // замирает молча тем же способом (см. комментарий у подписки на канал выше).
             let firstMembers = true;
             const unsubscribeMembers = onSnapshot(
                 membersQuery(channelId),

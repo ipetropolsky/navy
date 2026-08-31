@@ -30,6 +30,12 @@ export interface MemberDraft {
 export interface JoinChannelRequest {
     channelId: string;
     member: MemberDraft;
+    /**
+     * Код доступа закрытого канала. Нужен, только если у канала стоит `closed` и входящий —
+     * не первый: тот, кто заводит канал, код только что сам придумал, и спрашивать его заново
+     * незачем (см. joinChannel в functions/src/raid.ts).
+     */
+    code?: string;
 }
 
 export interface UpdateMemberRequest {
@@ -54,9 +60,20 @@ export interface MemberResponse {
 
 export interface PreviewChannelRequest {
     channelId: string;
+    /**
+     * Код доступа — для проверки на экране «Закрытая частота» ещё до входа (см.
+     * checkAccessCode в src/backend/types.ts). Сам вход всё равно сверяет код заново:
+     * этот вызов только подсказывает, не запирая ничего по-настоящему.
+     */
+    code?: string;
 }
 
-/** Участники уже без позывных — см. redactMember в shared/types/channel.ts. */
+/**
+ * Вход, а не список участников: посторонний и чужой вошедший видят только название канала
+ * и закрыт ли он (см. общий комментарий вверху firestore.rules) — участников, ленту и брони
+ * мест previewChannel им не отдаёт вовсе.
+ */
 export interface PreviewChannelResponse {
-    members: Member[];
+    title: string;
+    closed: boolean;
 }

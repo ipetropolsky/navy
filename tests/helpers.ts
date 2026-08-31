@@ -188,13 +188,35 @@ export const forgetLocalTab = (page: Page): Promise<void> =>
 /**
  * Завести свой канал и остаться в нём. Нужен там, где важен ровно один корабль в кадре
  * и он же — свой: в демо-канале на рейде уже стоит эскадра.
+ *
+ * `code`, если передан, заводит канал закрытым: включает переключатель «Частота» и вписывает
+ * код доступа в открывшееся поле — той же парой нажатий, что и человек в форме (см. `CLOSED_OPTIONS`
+ * в CreateChannel.tsx). Не передан — канал открытый, как и раньше: это умолчание формы.
  */
-export const openNewChannel = async (page: Page, slug: string): Promise<void> => {
+export const openNewChannel = async (page: Page, slug: string, code?: string): Promise<void> => {
     await page.goto('/', { waitUntil: 'domcontentloaded' });
     await page.getByPlaceholder('Эскадра «Полночь»').fill(slug);
     await page.locator('input[placeholder="eskadra-polnoch"]').fill(slug);
+    if (code !== undefined) {
+        await page.getByRole('group', { name: 'Частота' }).getByText('Закрытая').click();
+        await page.getByPlaceholder('Код доступа').fill(code);
+    }
     await page.locator('button[type=submit]').click();
     await sceneReady(page);
+};
+
+/**
+ * Экран «Закрытая частота»: ввести код и попытаться войти. Отказ (неверный код) остаётся
+ * на экране проверке — она сама решает, чем на него смотреть (снекбар или то, что экран
+ * не ушёл), а этот помощник только совершает попытку.
+ */
+export const enterAccessCode = async (page: Page, code: string): Promise<void> => {
+    await expect(
+        page.getByRole('heading', { name: 'Закрытая частота' }),
+        'экран кода доступа не показался'
+    ).toBeVisible();
+    await page.getByPlaceholder('Код доступа').fill(code);
+    await page.getByRole('button', { name: 'Войти' }).click();
 };
 
 /**

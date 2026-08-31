@@ -34,7 +34,7 @@ import {
 import { afterAll, beforeAll, beforeEach, describe, test } from 'vitest';
 
 import { paths } from '@shared/config/model';
-import { MAX_MESSAGE_LENGTH, NAME_MAX_LENGTH, TITLE_MAX_LENGTH } from '@shared/types/channel';
+import { ACCESS_CODE_MAX_LENGTH, MAX_MESSAGE_LENGTH, NAME_MAX_LENGTH, TITLE_MAX_LENGTH } from '@shared/types/channel';
 import { SLUG_MAX_LENGTH } from '@/utils/slug';
 
 // Проект-пустышка: настоящий Firebase-проект эмулятору не нужен, а demo-префикс — явная
@@ -470,19 +470,30 @@ describe('firestore.rules: slugs/{slug}', () => {
 });
 
 describe('firestore.rules: channels/{channelId}', () => {
-    test('невошедший читает канал по ключу — разрешено', async () => {
-        const channelId = 'smoke-channel';
+    test('участник читает канал по ключу', async () => {
+        const channelId = 'ch-1';
+        await seedDoc(paths.channel({ channelId }), { slug: 'dozor', title: 'Дозор', createdAt: 1 });
+        await seedDoc(paths.member({ channelId, memberId: 'm-1' }), { name: 'Дозорный' });
 
-        // Канал заводим в обход правил: эта проверка про чтение, а не про запись.
-        await testEnv.withSecurityRulesDisabled(async (context) => {
-            await setDoc(doc(context.firestore(), paths.channel({ channelId })), {
-                slug: 'dozor',
-                title: 'Дозор',
-            });
-        });
+        const sailor = testEnv.authenticatedContext('m-1');
+        await assertSucceeds(getDoc(doc(sailor.firestore(), paths.channel({ channelId }))));
+    });
+
+    test('вошедший не с этого рейда канал не читает', async () => {
+        const channelId = 'ch-1';
+        await seedDoc(paths.channel({ channelId }), { slug: 'dozor', title: 'Дозор', createdAt: 1 });
+        await seedDoc(paths.member({ channelId, memberId: 'm-1' }), { name: 'Дозорный' });
+
+        const stranger = testEnv.authenticatedContext('m-2');
+        await assertFails(getDoc(doc(stranger.firestore(), paths.channel({ channelId }))));
+    });
+
+    test('невошедший канал не читает', async () => {
+        const channelId = 'ch-1';
+        await seedDoc(paths.channel({ channelId }), { slug: 'dozor', title: 'Дозор', createdAt: 1 });
 
         const unauthed = testEnv.unauthenticatedContext();
-        await assertSucceeds(getDoc(doc(unauthed.firestore(), paths.channel({ channelId }))));
+        await assertFails(getDoc(doc(unauthed.firestore(), paths.channel({ channelId }))));
     });
 
     test('каналы не перебираются списком — иначе рейды нашлись бы один за другим', async () => {
@@ -582,6 +593,108 @@ describe('firestore.rules: channels/{channelId}', () => {
                 title: 'Норд',
                 createdAt: Date.now(),
                 serverAt: Date.now(),
+            })
+        );
+    });
+
+    test('закрытая частота с кодом доступа — можно', async () => {
+        const sailor = testEnv.authenticatedContext('u-1');
+
+        await assertSucceeds(
+            setDoc(doc(sailor.firestore(), paths.channel({ channelId: 'ch-new' })), {
+                slug: 'nord',
+                title: 'Норд',
+                createdAt: Date.now(),
+                serverAt: serverTimestamp(),
+                closed: true,
+                code: 'shtorm-7',
+            })
+        );
+    });
+
+    test('closed без code не проходит — пара строго вместе (closedSane)', async () => {
+        const sailor = testEnv.authenticatedContext('u-1');
+
+        await assertFails(
+            setDoc(doc(sailor.firestore(), paths.channel({ channelId: 'ch-new' })), {
+                slug: 'nord',
+                title: 'Норд',
+                createdAt: Date.now(),
+                serverAt: serverTimestamp(),
+                closed: true,
+            })
+        );
+    });
+
+    test('code без closed не проходит — пара строго вместе (closedSane)', async () => {
+        const sailor = testEnv.authenticatedContext('u-1');
+
+        await assertFails(
+            setDoc(doc(sailor.firestore(), paths.channel({ channelId: 'ch-new' })), {
+                slug: 'nord',
+                title: 'Норд',
+                createdAt: Date.now(),
+                serverAt: serverTimestamp(),
+                code: 'shtorm-7',
+            })
+        );
+    });
+
+    test('closed: true с пустым code не проходит', async () => {
+        const sailor = testEnv.authenticatedContext('u-1');
+
+        await assertFails(
+            setDoc(doc(sailor.firestore(), paths.channel({ channelId: 'ch-new' })), {
+                slug: 'nord',
+                title: 'Норд',
+                createdAt: Date.now(),
+                serverAt: serverTimestamp(),
+                closed: true,
+                code: '',
+            })
+        );
+    });
+
+    test('closed: false не проходит — у открытого канала нет этого поля вовсе', async () => {
+        const sailor = testEnv.authenticatedContext('u-1');
+
+        await assertFails(
+            setDoc(doc(sailor.firestore(), paths.channel({ channelId: 'ch-new' })), {
+                slug: 'nord',
+                title: 'Норд',
+                createdAt: Date.now(),
+                serverAt: serverTimestamp(),
+                closed: false,
+            })
+        );
+    });
+
+    test('код доступа длиннее предела не проходит', async () => {
+        const sailor = testEnv.authenticatedContext('u-1');
+
+        await assertFails(
+            setDoc(doc(sailor.firestore(), paths.channel({ channelId: 'ch-new' })), {
+                slug: 'nord',
+                title: 'Норд',
+                createdAt: Date.now(),
+                serverAt: serverTimestamp(),
+                closed: true,
+                code: 'a'.repeat(ACCESS_CODE_MAX_LENGTH + 1),
+            })
+        );
+    });
+
+    test('код доступа ровно в предел — можно', async () => {
+        const sailor = testEnv.authenticatedContext('u-1');
+
+        await assertSucceeds(
+            setDoc(doc(sailor.firestore(), paths.channel({ channelId: 'ch-new' })), {
+                slug: 'nord',
+                title: 'Норд',
+                createdAt: Date.now(),
+                serverAt: serverTimestamp(),
+                closed: true,
+                code: 'a'.repeat(ACCESS_CODE_MAX_LENGTH),
             })
         );
     });

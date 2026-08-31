@@ -60,14 +60,17 @@ const SPREAD_NEAR = 0.1;
 const berthOffset = (slot: number): number => CORRIDOR_STEP + SPREAD_FAR + (SPREAD_NEAR - SPREAD_FAR) * slotShare(slot);
 
 /**
+ * Сама форма корабля. Через страницу её не взять: список кораблей остаётся под ней нижним
+ * слоем (см. App.tsx, `listOpen`), а не закрывается, и в его строчках — тот же текст, что
+ * и в самой форме: и позывной, и силуэт. Без этой мерки `getByText` находил бы сразу оба.
+ */
+const shipForm = (page: Page) => page.locator('form').filter({ has: page.getByPlaceholder('Гром') });
+
+/**
  * Кнопка «Готово» самой формы корабля. Через страницу её не взять: форма выезжает поверх
  * разговора, и у поля ввода под ней тоже кнопка-submit.
  */
-const shipFormSubmit = (page: Page) =>
-    page
-        .locator('form')
-        .filter({ has: page.getByPlaceholder('Гром') })
-        .locator('button[type=submit]');
+const shipFormSubmit = (page: Page) => shipForm(page).locator('button[type=submit]');
 
 /**
  * Горящие огни каждого корабля в кадре: чем является каждый и где он стоит по вертикали.
@@ -310,11 +313,14 @@ test('на стоянке корабль отходит от своей лини
     await anchor('vtoroy', 'Вымпел', '303', '5-right');
     await anchor('tretiy', 'Резвый', '202', '2-right');
 
-    // Смотрим гостем: разметка рейда видна только при открытой форме, а линии рейда видны
-    // только в ней — точками свободных мест и подписями занятых. Сравнивать положение
-    // корабля больше не с чем.
-    await openChannel(page, 'stoyanka', 'gost');
-    await openJoinForm(page);
+    // Разметка рейда видна только при открытой форме — точками свободных мест и подписями
+    // занятых, — а гостю теперь и открывать нечего: не участнику канал отдаёт пустой снимок
+    // (см. needsPreview в localBackend.ts), и рейда для него нет вовсе, открыта форма или нет.
+    // Смотрим поэтому не гостем, а последним из своих же трёх: он и так уже в строю, а его
+    // собственная форма показывает те же три корабля — два соседних имени да точку на своём
+    // месте вместо третьего (о выбранном месте подпись не пишут, см. SeaScene,
+    // shownBerths.picked). Сравнивать положение корабля больше не с чем.
+    await openShipForm(page);
 
     const measure = () =>
         page.evaluate(() => {
@@ -432,13 +438,20 @@ test('свободные места на рейде зависят от выбр
     await page.locator('[data-berth="8-center"]').click();
     await join(page, 'Вымпел', '111');
 
-    // Возвращаемся тем, кого в канале нет: канал встречает закрытой формой, а корабль остаётся
-    // стоять. Открываем её — и выбор корабля снова пересчитывает свободные места.
-    await openChannel(page, 'razmer', 'gost');
+    // Смотрим вторым участником, а не гостем: гостю нечем увидеть даже то, что 8-центр занят, —
+    // не участнику канал отдаёт пустой снимок (needsPreview в localBackend.ts), и линия читалась
+    // бы свободной целиком. Второй входит по-настоящему, и далеко от восьмой линии, чтобы
+    // не путаться с тем, что меряем, — а дальше уже своей формой перебирает силуэты, и выбор
+    // корабля снова пересчитывает свободные места, как и раньше.
+    await forgetLocalTab(page);
+    await openChannel(page, 'razmer', 'nablyudatel');
     await openJoinForm(page);
+    await page.locator('[data-berth="1-center"]').click();
+    await join(page, 'Наблюдатель', '999');
+    await openShipForm(page);
 
     const offered = async (ship: string): Promise<string[]> => {
-        await page.getByText(ship, { exact: true }).click();
+        await shipForm(page).getByText(ship, { exact: true }).click();
         return berths(page).evaluateAll((dots) => dots.map((dot) => (dot as HTMLElement).dataset.berth ?? '').sort());
     };
 
@@ -477,11 +490,18 @@ test('соседняя линия занятого коридора остаёт
     await page.locator('[data-berth="4-center"]').click();
     await join(page, 'Малыш', '111');
 
-    // Сторона первая: гость видит на воде обе соседние линии центрального коридора. А вот
-    // сама четвёртая пропала — там место занято, и точка на воде у них была бы одна на двоих.
-    await openChannel(page, 'sosedi', 'gost');
+    // Сторона первая: второй участник видит на воде обе соседние линии центрального коридора.
+    // А вот сама четвёртая пропала — там место занято, и точка на воде у них была бы одна
+    // на двоих. Второй, а не гость: гостю нечем узнать даже то, что четвёртая занята
+    // (needsPreview в localBackend.ts отдаёт не участнику пустой снимок), и она читалась бы
+    // свободной наравне с соседними. Входит он далеко от испытуемых линий — девятой хватит.
+    await forgetLocalTab(page);
+    await openChannel(page, 'sosedi', 'nablyudatel');
     await openJoinForm(page);
-    await page.getByText('Пограничный сторожевой катер', { exact: true }).click();
+    await page.locator('[data-berth="9-center"]').click();
+    await join(page, 'Наблюдатель', '999');
+    await openShipForm(page);
+    await shipForm(page).getByText('Пограничный сторожевой катер', { exact: true }).click();
     const offered = await berths(page).evaluateAll((dots) =>
         dots.map((dot) => (dot as HTMLElement).dataset.berth ?? '')
     );
@@ -2012,7 +2032,10 @@ test.describe('рейд ложится на телефон трапецией', 
 
     test('передний край выходит за окно, дальний остаётся внутри, рейд — по середине', async ({ page }) => {
         takes(6);
-        await openChannel(page, DEMO);
+        // Своим же демо-кораблём, а не гостем: гостю теперь пустой снимок, и мерить нечего
+        // (needsPreview в localBackend.ts). Альбатрос уже стоит в демо-составе — этим не прибавляем
+        // рейду четвёртый корабль, а лишь смотрим на те же три от лица одного из них.
+        await openChannel(page, DEMO, ALBATROS);
         await expect(page.locator('[data-motion]'), 'корабли так и не встали на места').toHaveCount(0, {
             timeout: SAIL_TIMEOUT,
         });
@@ -2082,7 +2105,8 @@ test.describe('рейд ложится на телефон трапецией', 
     test('смена ширины окна переставляет корабли сразу, а не подвозит', async ({ page }) => {
         takes(12);
         await page.setViewportSize({ width: 738, height: 844 });
-        await openChannel(page, DEMO);
+        // Своим же демо-кораблём — см. комментарий у соседней проверки трапеции выше.
+        await openChannel(page, DEMO, ALBATROS);
         await expect(page.locator('[data-motion]'), 'корабли так и не встали на места').toHaveCount(0, {
             timeout: SAIL_TIMEOUT,
         });

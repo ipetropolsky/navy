@@ -53,8 +53,8 @@ beforeEach(async () => {
 // ---- помощники ----
 
 /** Канал без владельца — так его заводит и сегодняшний createChannel, до первого вошедшего. */
-const seedChannel = (channelId: string): Promise<WriteResult> =>
-    db.doc(paths.channel({ channelId })).set({ slug: channelId, title: channelId, createdAt: Date.now() });
+const seedChannel = (channelId: string, extra: { closed?: boolean; code?: string } = {}): Promise<WriteResult> =>
+    db.doc(paths.channel({ channelId })).set({ slug: channelId, title: channelId, createdAt: Date.now(), ...extra });
 
 const draft = (name: string, hullNumber: string, extra: Partial<MemberDraft> = {}): MemberDraft => ({
     name,
@@ -266,6 +266,72 @@ describe('вход', () => {
                 'channel-full'
             );
         }, 20000);
+    });
+});
+
+describe('закрытая частота', () => {
+    test('первый вошедший становится старшим без кода — сам его только что придумал', async () => {
+        const channelId = 'ch-closed-first';
+        await seedChannel(channelId, { closed: true, code: 'акула' });
+
+        const { member } = await joinChannel({ db, channelId, userId: 'u-a', member: draft('Алый', '001') });
+        expect(member.memberId).toBe('u-a');
+    });
+
+    test('верный код — второй вошедший становится участником', async () => {
+        const channelId = 'ch-closed-right-code';
+        await seedChannel(channelId, { closed: true, code: 'акула' });
+        await joinChannel({ db, channelId, userId: 'u-a', member: draft('Алый', '001') });
+
+        const { member } = await joinChannel({
+            db,
+            channelId,
+            userId: 'u-b',
+            member: draft('Белый', '002'),
+            code: 'акула',
+        });
+        expect(member.memberId).toBe('u-b');
+    });
+
+    test('неверный код — channel-closed', async () => {
+        const channelId = 'ch-closed-wrong-code';
+        await seedChannel(channelId, { closed: true, code: 'акула' });
+        await joinChannel({ db, channelId, userId: 'u-a', member: draft('Алый', '001') });
+
+        await failsWith(
+            () => joinChannel({ db, channelId, userId: 'u-b', member: draft('Белый', '002'), code: 'кит' }),
+            'channel-closed'
+        );
+    });
+
+    test('код не передан вовсе — тоже channel-closed', async () => {
+        const channelId = 'ch-closed-no-code';
+        await seedChannel(channelId, { closed: true, code: 'акула' });
+        await joinChannel({ db, channelId, userId: 'u-a', member: draft('Алый', '001') });
+
+        await failsWith(
+            () => joinChannel({ db, channelId, userId: 'u-b', member: draft('Белый', '002') }),
+            'channel-closed'
+        );
+    });
+
+    test('уже стоящий на рейде — повторный вход не спрашивает код заново', async () => {
+        const channelId = 'ch-closed-already';
+        await seedChannel(channelId, { closed: true, code: 'акула' });
+        const first = await joinChannel({ db, channelId, userId: 'u-a', member: draft('Алый', '001') });
+        await joinChannel({ db, channelId, userId: 'u-b', member: draft('Белый', '002'), code: 'акула' });
+
+        const second = await joinChannel({ db, channelId, userId: 'u-a', member: draft('Алый', '001') });
+        expect(second.member).toEqual(first.member);
+    });
+
+    test('открытый канал код не спрашивает вовсе', async () => {
+        const channelId = 'ch-open';
+        await seedChannel(channelId);
+        await joinChannel({ db, channelId, userId: 'u-a', member: draft('Алый', '001') });
+
+        const { member } = await joinChannel({ db, channelId, userId: 'u-b', member: draft('Белый', '002') });
+        expect(member.memberId).toBe('u-b');
     });
 });
 

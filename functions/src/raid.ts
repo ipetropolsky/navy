@@ -30,9 +30,11 @@ import { limitMessage, overLimit } from '../../shared/utils/limit';
  * без раздельных приложений столкнул бы боевые и проверочные данные в одном инстансе.
  */
 
-/** channels/{channelId} — здесь читаем только то, от чего зависит расстановка: старшего. */
+/** channels/{channelId} — здесь читаем то, от чего зависит расстановка и вход: старшего и код. */
 interface ChannelDoc {
     owner?: { memberId: string };
+    closed?: boolean;
+    code?: string;
 }
 
 /** channels/{channelId}/members/{memberId} — форма документа участника, см. docs/FIREBASE.md. */
@@ -186,11 +188,13 @@ export const joinChannel = ({
     channelId,
     userId,
     member: draft,
+    code,
 }: {
     db: Firestore;
     channelId: string;
     userId: string;
     member: MemberDraft;
+    code?: string;
 }): Promise<{ member: Member }> =>
     retryOnBerthTaken(() =>
         db.runTransaction(async (transaction) => {
@@ -200,6 +204,14 @@ export const joinChannel = ({
             const already = members.find((item) => item.memberId === userId);
             if (already) {
                 return { member: already };
+            }
+
+            // Код спрашиваем только у того, кто входит на закрытый рейд по-настоящему первым
+            // разом: свой повторный вход (already, выше) — тот же самый пропуск, а не чужой,
+            // а самому первому на рейде (владельца ещё нет) сверять код не с чем — это он сам
+            // его секунду назад и придумал, заводя канал.
+            if (channel.closed && channel.owner && channel.code !== code) {
+                throw new ChannelError('channel-closed', 'Код доступа неверен. Обратитесь к старшему на рейде.');
             }
 
             checkDraftIsFree(members, draft);

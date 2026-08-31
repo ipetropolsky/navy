@@ -7,15 +7,23 @@ import IconButton from '@/components/ui/IconButton';
 import Input from '@/components/ui/Input';
 import Panel from '@/components/ui/Panel';
 import { useSnackbar } from '@/components/ui/Snackbar';
+import Switch from '@/components/ui/Switch';
 import { LinkIcon } from '@/components/ui/icons';
 import { channelLink } from '@/routing';
 import { copyText } from '@/utils/clipboard';
 import { SLUG_MAX_LENGTH, isValidSlug, slugify, slugifyInput } from '@/utils/slug';
 import { isTouch } from '@/utils/viewport';
-import { TITLE_MAX_LENGTH } from '@shared/types/channel';
+import { ACCESS_CODE_MAX_LENGTH, TITLE_MAX_LENGTH } from '@shared/types/channel';
 import { limitMessage, overLimit } from '@shared/utils/limit';
 
 import styles from './CreateChannel.module.less';
+
+// Положения переключателя частоты. Список постоянный и лежит снаружи разметки — как и весь
+// набор положений «Огни» в ShipCard.tsx, устроенный точно так же.
+const CLOSED_OPTIONS = [
+    { value: 'open', label: 'Открытая' },
+    { value: 'closed', label: 'Закрытая' },
+] as const;
 
 interface CreateChannelProps {
     onCreate: (draft: ChannelDraft) => Promise<void>;
@@ -38,6 +46,10 @@ export default function CreateChannel({ onCreate, demoHref, onOpenDemo, account,
     // человек знает, чего хочет, а название он может ещё десять раз поменять.
     const [slug, setSlug] = useState('');
     const [slugEdited, setSlugEdited] = useState(false);
+    // Закрытая частота: по умолчанию канал открытый (см. ChannelDraft.closed) — код доступа
+    // тогда никому не нужен, и поле под него на экране не встаёт вовсе.
+    const [closed, setClosed] = useState(false);
+    const [code, setCode] = useState('');
     const [busy, setBusy] = useState(false);
     const notify = useSnackbar();
 
@@ -56,7 +68,10 @@ export default function CreateChannel({ onCreate, demoHref, onOpenDemo, account,
     };
 
     const slugOk = isValidSlug(slug);
-    const canSubmit = Boolean(title.trim()) && slugOk;
+    // Код нужен, только если частота закрытая (см. closedSane в firestore.rules): открытому
+    // каналу его наличие или пустота не важны вовсе.
+    const codeOk = !closed || Boolean(code.trim());
+    const canSubmit = Boolean(title.trim()) && slugOk && codeOk;
 
     const handleCopy = () => {
         void copyText(channelLink(slug)).then((done) =>
@@ -74,9 +89,19 @@ export default function CreateChannel({ onCreate, demoHref, onOpenDemo, account,
             notify(limitMessage(title, TITLE_MAX_LENGTH));
             return;
         }
+        if (closed && overLimit(code, ACCESS_CODE_MAX_LENGTH)) {
+            notify(limitMessage(code, ACCESS_CODE_MAX_LENGTH));
+            return;
+        }
         setBusy(true);
         try {
-            await onCreate({ slug, title: title.trim() });
+            await onCreate({
+                slug,
+                title: title.trim(),
+                // Пара строго вместе или не вовсе (см. closedSane в firestore.rules): открытому
+                // каналу не шлём ни closed: false, ни пустой code — их не бывает у него совсем.
+                ...(closed ? { closed: true, code: code.trim() } : {}),
+            });
         } catch (failure) {
             // Занятый адрес — ответ бэкенда: он один знает про все каналы. Говорим снекбаром,
             // чтобы отказ не раздвигал форму и не уводил кнопку из-под пальца.
@@ -167,6 +192,32 @@ export default function CreateChannel({ onCreate, demoHref, onOpenDemo, account,
                     }
                 />
             </Field>
+
+            {/* Внутри несколько нажимаемых положений, а не одно поле — обёртка `group`,
+                см. комментарий у Field. */}
+            <Field label="Частота" group>
+                <Switch
+                    label="Частота"
+                    options={CLOSED_OPTIONS}
+                    value={closed ? 'closed' : 'open'}
+                    onChange={(mode) => setClosed(mode === 'closed')}
+                />
+            </Field>
+
+            {/* Поле встаёт только у закрытой частоты: открытому каналу код доступа не нужен
+                вовсе, и просить его никогда не за чем (см. `closedSane` в firestore.rules). */}
+            {closed && (
+                <Field label="Код доступа">
+                    <Input
+                        value={code}
+                        half
+                        maxLength={ACCESS_CODE_MAX_LENGTH}
+                        placeholder="Код доступа"
+                        autoComplete="off"
+                        onChange={(event) => setCode(event.target.value)}
+                    />
+                </Field>
+            )}
         </Panel>
     );
 }

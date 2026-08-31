@@ -31,6 +31,7 @@ import {
     openNewChannel,
     openSheet,
     openShipCard,
+    openShipForm,
     readState,
     send,
     shipNames,
@@ -710,13 +711,17 @@ test.describe('телефон', () => {
     });
 
     test('места на рейде лежат на воде, а занятые подписаны', async ({ page }) => {
-        await openChannel(page, DEMO);
-        await openJoinForm(page);
+        // Своим кораблём, а не гостем: не участнику канал отдаёт пустой снимок (needsPreview
+        // в localBackend.ts), и мерить было бы нечего. Открываем поэтому не форму входа,
+        // а форму своего — Альбатрос и так уже в демо-составе, лишнего корабля это не прибавляет.
+        await openChannel(page, DEMO, ALBATROS);
+        await openShipForm(page);
         expectBerthsLieOnWater(await berthShapes(page));
         expectSlotsFollowDepth(await slotLines(page));
         await expectBerthLightGrows(page);
-        // Занятые места подписаны все: рейд читается целиком — где свободно, а где «Вымпел».
-        await expect(shipNames(page)).toHaveCount(await ships(page).count());
+        // Подписаны все, кроме своего: на своём месте, пока его выбирают, вместо имени стоит
+        // стрелка курса (см. SeaScene, shownBerths.picked) — соседей это не касается.
+        await expect(shipNames(page)).toHaveCount((await ships(page).count()) - 1);
         await expectNamesStandOnBerths(page);
     });
 
@@ -790,12 +795,13 @@ test.describe('десктоп', () => {
     // круче, а места на дальних линиях стоят теснее — правило «место на воде и подписано» одно,
     // а геометрия под ним разная по обе стороны мобильной мерки.
     test('места на рейде лежат на воде, а занятые подписаны', async ({ page }) => {
-        await openChannel(page, DEMO);
-        await openJoinForm(page);
+        // Своим кораблём — см. комментарий у той же проверки в телефонном describe выше.
+        await openChannel(page, DEMO, ALBATROS);
+        await openShipForm(page);
         expectBerthsLieOnWater(await berthShapes(page));
         expectSlotsFollowDepth(await slotLines(page));
         await expectBerthLightGrows(page);
-        await expect(shipNames(page)).toHaveCount(await ships(page).count());
+        await expect(shipNames(page)).toHaveCount((await ships(page).count()) - 1);
         await expectNamesStandOnBerths(page);
     });
 

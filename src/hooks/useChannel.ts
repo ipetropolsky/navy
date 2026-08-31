@@ -32,7 +32,12 @@ export interface ChannelController {
     myId: string | null;
     /** Что печатается прямо сейчас: пришедшая чужая реплика (см. `useReception`). */
     reception: Reception | null;
-    join: (draft: MemberDraft) => Promise<void>;
+    /**
+     * Встать на рейд. `code` — код доступа закрытого канала, нужен только когда его спросили
+     * (см. `needsCode` в App.tsx); открытому каналу и первому входу на закрытый он не нужен —
+     * пробрасываем его как есть, дальше решает backend.join (см. src/backend/types.ts).
+     */
+    join: (draft: MemberDraft, code?: string) => Promise<void>;
     updateMe: (draft: MemberDraft) => Promise<void>;
     /**
      * Сняться с рейда, сказав новый курс: с ним уход и встаёт строчкой в ленте.
@@ -83,11 +88,16 @@ const withMember = (snapshot: ChannelSnapshot, member: Member): ChannelSnapshot 
  * channel берём из current: он и так обновляется живыми событиями, даже сквозь превью (см.
  * `channel-updated` в applyEvent ниже), — fetched в этом смысле не свежее.
  *
- * members — от fetched: до входа они были видны лишь урезанными (см. redactMember
- * в localBackend.ts/firebaseBackend.ts), и это как раз то, что чинит fetched. Кого fetched
- * не знает вовсе, а current — знает, тот встал в строй уже позже снимка, событием, — эту
- * запись оставляем как есть. Кого, наоборот, не знает current, а знает fetched, тот успел
- * уйти в этом же зазоре (событием, current его убрал) — воскрешать его снимком не нужно.
+ * members — от fetched: до входа участников не показывают вовсе (см. readChannelForUser
+ * в firebaseBackend.ts), и current к этой минуте знает только самого себя — его join() дописал
+ * явно, ещё до этого запроса, — да разве что тех, о ком успела сказать уже переподписанная,
+ * не превью, подписка. Весь остальной, уже стоящий на рейде, флот знает только что пришедший
+ * fetched — берём его как есть. Кого, наоборот, знает current, а fetched не застал (встал
+ * в строй уже после самого чтения, отдельным живым событием), дописываем следом: тот снимок
+ * его ещё не видел, а подписке об этом уже сказали. Ушедшего в этом же зазоре снимком отдельно
+ * не ловим: следующий `member-left`, если он всё же случится, поправит рейд сам — тем же
+ * добром на честном слове, каким живёт вся эта довыгрузка (см. комментарий у неё, «Отказ
+ * здесь не должен ронять ничего»).
  *
  * messages — из current и fetched сразу: снимок несёт всё, что было до него, current — то,
  * что прибыло позже (в превью лента всегда пуста, см. previewOf, так что общих id между
@@ -97,9 +107,8 @@ const withMember = (snapshot: ChannelSnapshot, member: Member): ChannelSnapshot 
  * current узнал об этом не из снимка, значит после него.
  */
 const mergeCatchUp = (current: ChannelSnapshot, fetched: ChannelSnapshot): ChannelSnapshot => {
-    const currentMemberIds = new Set(current.members.map((member) => member.memberId));
     const members = [
-        ...fetched.members.filter((member) => currentMemberIds.has(member.memberId)),
+        ...fetched.members,
         ...current.members.filter((member) => !fetched.members.some((item) => item.memberId === member.memberId)),
     ];
     const freshById = new Map(current.messages.map((message) => [message.messageId, message]));
@@ -414,11 +423,11 @@ export function useChannel(
     );
 
     const join = useCallback(
-        async (draft: MemberDraft) => {
+        async (draft: MemberDraft, code?: string) => {
             if (!channelId) {
                 return;
             }
-            const { member } = await backend.join({ channelId, member: draft });
+            const { member } = await backend.join({ channelId, member: draft, code });
             keepLook(member);
             // Свой корабль ставим в снимок сами, а не ждём, пока подписка пришлёт его обратно.
             // Догадки тут нет: `member` — это ответ сервера, ровно та же запись, что придёт
@@ -435,9 +444,9 @@ export function useChannel(
             // не появлялся вовсе (см. tests-firebase/e2e.spec.ts).
             setChannel((current) => (current?.channel.channelId === channelId ? withMember(current, member) : current));
             // Полный снимок довыгрузит эффект подписки ниже, а не мы здесь: вошедший, ещё не
-            // участник, до этой минуты видел урезанный превью-снимок (participants — бортовые
-            // номера, messages: [] — см. readChannelForUser в firebaseBackend.ts), и withMember
-            // выше просто дописал в этот же урезанный снимок свежепринятого участника. Попроси
+            // участник, до этой минуты видел превью без участников вовсе (members: [],
+            // messages: [] — см. readChannelForUser в firebaseBackend.ts), и withMember
+            // выше просто дописал в этот же пустой снимок свежепринятого участника. Попроси
             // мы снимок прямо тут — запрос ушёл бы до того, как эффект успеет переподписаться
             // на уже-не-превью, и лёг бы в тот самый зазор, ради которого эта довыгрузка вообще
             // затевалась (см. комментарий там же). Метим только, чей снимок нужен, — эффект
