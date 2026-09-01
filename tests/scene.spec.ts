@@ -150,6 +150,62 @@ test('место на рейде выбирается щелчком по вод
 });
 
 /**
+ * Разметка ищется по замеру в пикселях, а стоит в долях кадра, — значит после всякой перемены
+ * кадра замер надо повторять. Поводом к повторению была одна высота, а на десктопе меняется
+ * ровно ширина: панель разъезжается и съезжается, высота у кадра прежняя. Замер оставался
+ * от прежнего, широкого кадра, коридоры в нём разнесены шире — и ближайшим к указателю выходил
+ * сосед слева: наводишь на правый коридор, загорается центральный (issue #75).
+ *
+ * Проверка водит указателем по самим огонькам: подсветиться обязан тот, на который навели.
+ * Мимо — это и есть та поломка, других способов её увидеть нет.
+ */
+test('после перемены ширины кадра подсвечивается место под указателем, а не соседнее', async ({ page }) => {
+    await openNewChannel(page, 'shirina');
+    await expect(berths(page).first()).toBeVisible();
+
+    // Панель уезжает — кадр становится шире, высота у него та же.
+    await page.getByRole('button', { name: 'Убрать панель' }).click();
+    await expect(page.getByRole('button', { name: /^Вернуть панель/ })).toBeVisible();
+    // Ждём не панель, а тишину после неё: замер разметки идёт с отсрочкой (SETTLE_MS в сцене),
+    // и до её конца точки честно стоят от прежнего кадра. Отсрочка эта временем проверок
+    // не ускоряется — она про покой размеров, а не про движение в кадре.
+    await page.waitForTimeout(300);
+
+    const spots = await berths(page).evaluateAll((dots) =>
+        dots.map((dot) => {
+            const box = dot.getBoundingClientRect();
+            return { berth: dot.getAttribute('data-berth')!, x: box.left + box.width / 2, y: box.top + box.height / 2 };
+        })
+    );
+    expect(spots.length, 'на воде не нашлось свободных мест').toBeGreaterThan(3);
+
+    const missed: string[] = [];
+    /* eslint-disable no-await-in-loop -- указатель один, места обходятся по очереди */
+    for (const spot of spots) {
+        await page.mouse.move(spot.x, spot.y);
+        // Подсветка — состояние React, и появляется она кадром позже указателя.
+        const lit = await page.evaluate(
+            () =>
+                new Promise<string | null>((resolve) => {
+                    requestAnimationFrame(() =>
+                        requestAnimationFrame(() =>
+                            resolve(
+                                document.querySelector('[class*="berthDotNear"]')?.getAttribute('data-berth-light') ??
+                                    null
+                            )
+                        )
+                    );
+                })
+        );
+        if (lit !== spot.berth) {
+            missed.push(`${spot.berth} → ${lit ?? 'ничего'}`);
+        }
+    }
+    /* eslint-enable no-await-in-loop */
+    expect(missed, 'указатель на месте, а подсвечивается другое').toEqual([]);
+});
+
+/**
  * Курс выбирает человек, и выбор этот сквозной: силуэты в форме разворачиваются сразу,
  * корабль встаёт на рейде тем же носом, а заходит с противоположного борта — носом вперёд.
  * Раньше курс доставался кораблю от стороны захода, которую разыгрывал бэкенд, и повлиять
