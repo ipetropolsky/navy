@@ -1359,9 +1359,14 @@ test('переключатель огней меняет огни портрет
     const switcher = card.getByRole('group', { name: 'Огни' });
     // Пилюля одна на оба положения и ездит между ними — потому и спрашиваем её место.
     // Спрашиваем в пикселях и округлённо: посреди переезда сдвиг идёт долями, и сравнивать
-    // на них нечего — важно, у какого положения пилюля встала.
+    // на них нечего — важно, у какого положения пилюля встала. Меряем саму коробку, а не сдвиг
+    // в стилях: сдвиг записан долями (`translate` в ui/Switch), и в вычисленном виде долями
+    // и остаётся — сравнивать по нему, у какого положения пилюля, нечего.
     const pill = switcher.locator('[class*="pill_"]');
-    const pillAt = () => pill.evaluate((el) => Math.round(new DOMMatrix(getComputedStyle(el).transform).m41));
+    const pillAt = () =>
+        pill.evaluate((el) =>
+            Math.round(el.getBoundingClientRect().left - el.parentElement!.getBoundingClientRect().left)
+        );
 
     // На рейде корабль стоит на якоре — с этого карточка и начинается, и это же помечено.
     const anchored = (await lights(page, portrait))[0].map((light) => light.kind);
@@ -1395,7 +1400,7 @@ test('переключатель огней меняет огни портрет
     expect(
         await pill.evaluate((el) => getComputedStyle(el).transitionProperty),
         'пилюля меняет место скачком, без перехода'
-    ).toContain('transform');
+    ).toContain('translate');
 
     // И обратно: якорь гасит ходовые.
     await switcher.getByText('Якорь').click();
