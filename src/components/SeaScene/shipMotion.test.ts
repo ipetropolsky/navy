@@ -1,10 +1,20 @@
 import { describe, expect, test } from 'vitest';
 
-import { ISLAND_FREE_SLOT, SHIP_SPECS, ShipKind, ShipPlacement, Side, shipWidthPercent } from '@shared/types/channel';
+import {
+    ISLAND_FREE_SLOT,
+    SHIP_KINDS,
+    SHIP_SPECS,
+    ShipKind,
+    ShipPlacement,
+    Side,
+    shipWidthPercent,
+} from '@shared/types/channel';
 
 import {
     LEAVE_GUARD,
+    RELOCATE_PAUSE_SECONDS,
     leaveCourse,
+    manoeuvreSeconds,
     pathToEdge,
     relocateCourse,
     sailSeconds,
@@ -186,5 +196,46 @@ describe('переход по воде', () => {
         expect(shiftAcross(afloat(here), afloat(at(NEAR, 'center', 'left')))).toBeNull();
         // И то же самое место — не перемена вовсе.
         expect(shiftAcross(afloat(here), afloat(at(NEAR, 'left', 'right')))).toBeNull();
+    });
+});
+
+describe('оценка манёвра', () => {
+    test('вход на рейд — один заход из-за кромки', () => {
+        const to = afloat(at(NEAR, 'center', 'right'));
+        // Приходить новичку неоткуда, и весь его манёвр — это заход: ни ухода, ни паузы.
+        expect(manoeuvreSeconds(undefined, to, [])).toBeGreaterThan(0);
+        expect(manoeuvreSeconds(undefined, to, [])).toBeLessThan(
+            manoeuvreSeconds(afloat(at(NEAR, 'left', 'left')), to, [])
+        );
+    });
+
+    test('перезаход — уход, пауза и заход, и всё это дольше одного захода', () => {
+        const from = afloat(at(NEAR, 'left', 'right'));
+        const to = afloat(at(NEAR - 2, 'right', 'right'));
+
+        expect(manoeuvreSeconds(from, to, [])).toBeGreaterThan(
+            RELOCATE_PAUSE_SECONDS + manoeuvreSeconds(undefined, to, [])
+        );
+    });
+
+    test('переход по воде оценивается своим ходом, без паузы', () => {
+        const from = afloat(at(NEAR, 'left', 'right'));
+        const to = afloat(at(NEAR, 'center', 'right'));
+
+        expect(manoeuvreSeconds(from, to, [])).toBeCloseTo(shiftAcross(from, to)!.seconds, 5);
+    });
+
+    test('самый долгий манёвр укладывается в предел, который принимает бэкенд', () => {
+        // Предел там — минута с лишним (MANOEUVRE_MAX_SECONDS в functions/src/parse.ts),
+        // и оценка обязана в него влезать: отвергнутую запись доигрывать будет нечем.
+        // Худший случай — самый крупный корабль на ближней линии, где кадр в корпусах мал,
+        // с уходом и заходом через весь рейд.
+        const worst = SHIP_KINDS.map((kind) => {
+            const from = afloat(at(0, 'left', 'right'), kind);
+            const to = afloat(at(0, 'right', 'left'), kind);
+            return manoeuvreSeconds(from, to, []);
+        });
+
+        expect(Math.max(...worst)).toBeLessThan(120);
     });
 });

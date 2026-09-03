@@ -40,6 +40,7 @@ import {
     Channel,
     ChatMessage,
     MAX_MESSAGE_LENGTH,
+    Manoeuvre,
     Member,
     MemberRef,
     Message,
@@ -113,6 +114,8 @@ interface MemberDoc {
     color: string;
     place: ShipPlacement;
     joinedAt: number;
+    /** Манёвр, который корабль отыгрывает прямо сейчас, — для пришедших посреди него. */
+    manoeuvre?: Manoeuvre;
     /** Чей это корабль. Сегодня равно ключу документа, и всё же полем: ссылка — объект. */
     user: { userId: string };
     /**
@@ -157,6 +160,7 @@ const toMember = (memberId: string, data: MemberDoc): Member => ({
     color: data.color,
     place: data.place,
     joinedAt: data.joinedAt,
+    manoeuvre: data.manoeuvre,
     lastSeen: data.lastSeen,
 });
 

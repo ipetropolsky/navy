@@ -2,18 +2,21 @@ import { FieldValue, Firestore, Transaction } from 'firebase-admin/firestore';
 
 import { paths } from '../../shared/config/model';
 import { ChannelError } from '../../shared/errors';
-import { refitNotices, shipTitle } from '../../shared/notice';
+import { moveNotices, refitNotices, shipTitle } from '../../shared/notice';
 import { isBerthFree, placeShip } from '../../shared/placement';
 import { MemberDraft } from '../../shared/types/calls';
 import {
     Corridor,
     MAX_COURSE_LENGTH,
+    Manoeuvre,
     Member,
     MemberRef,
     ShipKind,
     ShipNotice,
     ShipPlacement,
+    isManoeuvre,
     isSameBerth,
+    manoeuvreFrom,
     memberRef,
 } from '../../shared/types/channel';
 import { limitMessage, overLimit } from '../../shared/utils/limit';
@@ -45,6 +48,12 @@ interface MemberDoc {
     color: string;
     place: ShipPlacement;
     joinedAt: number;
+    /**
+     * Манёвр, который корабль отыгрывает прямо сейчас, — для тех, кто пришёл посреди него
+     * (см. `Manoeuvre`). Поля нет у тех, кто встал на рейд до того, как манёвры стали
+     * записывать, и у тех, чья вкладка не прислала оценки.
+     */
+    manoeuvre?: Manoeuvre;
     /** Чей это корабль. Сегодня равно ключу документа, и всё же полем: ссылка — объект. */
     user: { userId: string };
 }
@@ -80,8 +89,12 @@ const memberFromDoc = (memberId: string, doc: MemberDoc): Member => ({
     color: doc.color,
     place: doc.place,
     joinedAt: doc.joinedAt,
+    ...(doc.manoeuvre ? { manoeuvre: doc.manoeuvre } : {}),
 });
 
+// Поля с `undefined` Firestore не принимает вовсе — поэтому манёвр не проставляется пустым,
+// а не пишется совсем. Заодно это и правильно по смыслу: манёвра у корабля либо нет, либо
+// он есть целиком.
 const memberToDoc = (member: Member): MemberDoc => ({
     name: member.name,
     hullNumber: member.hullNumber,
@@ -89,6 +102,7 @@ const memberToDoc = (member: Member): MemberDoc => ({
     color: member.color,
     place: member.place,
     joinedAt: member.joinedAt,
+    ...(member.manoeuvre ? { manoeuvre: member.manoeuvre } : {}),
     user: { userId: member.memberId },
 });
 
@@ -234,6 +248,7 @@ export const joinChannel = ({
                 throw new BerthTaken();
             }
 
+            const joinedAt = Date.now();
             const joined: Member = {
                 memberId: userId,
                 name: draft.name.trim(),
@@ -241,7 +256,10 @@ export const joinChannel = ({
                 shipKind: draft.shipKind,
                 color: draft.color,
                 place,
-                joinedAt: Date.now(),
+                joinedAt,
+                // Заход на рейд — тоже манёвр: пришедший через полсекунды после нас застанет
+                // корабль ещё за кромкой кадра и доиграет его заход (см. `Manoeuvre`).
+                manoeuvre: manoeuvreFrom(undefined, draft.manoeuvre?.seconds, joinedAt),
             };
 
             transaction.create(db.doc(paths.member({ channelId, memberId: userId })), memberToDoc(joined));
@@ -332,6 +350,8 @@ export const updateMember = ({
                 }
             }
 
+            const started = Date.now();
+            const afloat = { place, shipKind: draft.shipKind };
             const updated: Member = {
                 ...before,
                 name: draft.name.trim(),
@@ -339,6 +359,14 @@ export const updateMember = ({
                 shipKind: draft.shipKind,
                 color: draft.color,
                 place,
+                // Корабль тронулся — запоминаем, откуда и когда: по этой записи вошедшие
+                // посреди манёвра его и доигрывают. Решает `isManoeuvre` — тот же самый,
+                // по которому решает и сцена: два мнения о том, тронулся корабль или нет,
+                // были бы двумя разными правдами. Не тронулся — прежняя запись остаётся
+                // лежать как есть: она давно протухла, и вреда от неё нет.
+                ...(isManoeuvre(before, afloat)
+                    ? { manoeuvre: manoeuvreFrom(before, draft.manoeuvre?.seconds, started) }
+                    : {}),
             };
 
             // merge: true, а не полная перезапись — у документа участника есть поле, которым
@@ -363,10 +391,12 @@ export const updateMember = ({
             // По записи на каждую перемену, одна за другой, со своим временем: в ленте они
             // встают отдельными сообщениями, и каждое можно процитировать по отдельности.
             // Снимок в записи — прежний, до правки: строчка говорит о том корабле, каким он был.
+            // Строчка о перемене места идёт первой: корабль тронулся, и это новость крупнее
+            // сменившегося позывного. Пишется она в начале манёвра, а не по прибытии, —
+            // канал рассказывает о происходящем, а не подводит итоги.
             const author = memberRef(before);
-            const now = Date.now();
-            refitNotices(before, updated).forEach((notice, index) => {
-                writeNotice(transaction, db, channelId, { author, notice, sentAt: now + index });
+            [...moveNotices(before, updated), ...refitNotices(before, updated)].forEach((notice, index) => {
+                writeNotice(transaction, db, channelId, { author, notice, sentAt: started + index });
             });
 
             return { member: updated };

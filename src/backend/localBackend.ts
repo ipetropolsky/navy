@@ -2,7 +2,7 @@ import { MESSAGE_PAGE } from '@/config/network';
 import { isOnline, watchOnlineStatus } from '@/utils/connection';
 import { isValidSlug } from '@/utils/slug';
 import { localStore } from '@/utils/storage';
-import { refitNotices, shipTitle } from '@shared/notice';
+import { moveNotices, refitNotices, shipTitle } from '@shared/notice';
 import { isBerthFree, placeShip } from '@shared/placement';
 import {
     Channel,
@@ -14,7 +14,9 @@ import {
     Message,
     MessageDelivery,
     ShipNotice,
+    isManoeuvre,
     isSameBerth,
+    manoeuvreFrom,
     memberRef,
 } from '@shared/types/channel';
 import { limitMessage, overLimit } from '@shared/utils/limit';
@@ -561,6 +563,7 @@ export function createLocalBackend(): ChannelBackend {
                 if (!place) {
                     throw new ChannelError('channel-full', 'На рейде не осталось свободного места');
                 }
+                const joinedAt = Date.now();
                 const joined: Member = {
                     memberId: userId,
                     name: draft.name.trim(),
@@ -568,7 +571,10 @@ export function createLocalBackend(): ChannelBackend {
                     shipKind: draft.shipKind,
                     color: draft.color,
                     place,
-                    joinedAt: Date.now(),
+                    joinedAt,
+                    // Заход на рейд — тоже манёвр, и записывается он так же, как перемена
+                    // места: приходить кораблю неоткуда, поэтому запись без `from`.
+                    manoeuvre: manoeuvreFrom(undefined, draft.manoeuvre?.seconds, joinedAt),
                 };
                 current.members.push(joined);
                 // Первый вставший на рейд становится старшим: канал заводят пустым, и до этого
@@ -629,6 +635,13 @@ export function createLocalBackend(): ChannelBackend {
                 if (!stays || turns) {
                     member.place = placeShip(draft.shipKind, others, wanted, draft.facing) ?? member.place;
                 }
+                // Корабль тронулся — запоминаем, откуда и когда: по этой записи вошедшие
+                // посреди манёвра его и доигрывают (см. `Manoeuvre`). Решает тут `isManoeuvre`,
+                // тот же самый, по которому решает и сцена: два мнения о том, тронулся корабль
+                // или нет, были бы двумя разными правдами.
+                if (isManoeuvre(before, member)) {
+                    member.manoeuvre = manoeuvreFrom(before, draft.manoeuvre?.seconds, Date.now());
+                }
                 return { ...member };
             });
             emit(channelId, { type: 'member-updated', member: updated });
@@ -640,7 +653,11 @@ export function createLocalBackend(): ChannelBackend {
             // и рассказывает о том корабле, а новый начинается после неё (см. группировку
             // в `components/chat/MessageList`).
             const author = before ? memberRef(before) : { memberId: updated.memberId };
-            for (const notice of before ? refitNotices(before, updated) : []) {
+            // Строчка о перемене места идёт первой: корабль тронулся, и это новость крупнее
+            // сменившегося позывного. Пишется она в начале манёвра, а не по прибытии, —
+            // канал рассказывает о происходящем, а не подводит итоги.
+            const notices = before ? [...moveNotices(before, updated), ...refitNotices(before, updated)] : [];
+            for (const notice of notices) {
                 // eslint-disable-next-line no-await-in-loop -- очередь тут и нужна: записи ложатся в ленту по одной и по порядку
                 await postNotice(channelId, author, notice, Date.now());
             }

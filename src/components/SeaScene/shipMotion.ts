@@ -1,5 +1,6 @@
 import { paced } from '@/config/time';
 import {
+    Afloat,
     ISLAND_FREE_SLOT,
     ISLAND_SIDE,
     SCENE_SCALE_LENGTH,
@@ -390,12 +391,6 @@ export const leaveCourse = (place: ShipPlacement, kind: ShipKind, others: ShipPl
     return { side: goBack ? back : place.facing, astern: goBack };
 };
 
-/** Корабль, каким его видит кадр: где стоит и какой он. Ровно это и сравнивается при перемене. */
-export interface Afloat {
-    place: ShipPlacement;
-    shipKind: ShipKind;
-}
-
 /** Весь перезаход разом: как корабль уходит со старого места и как заходит на новое. */
 export interface RelocateCourse {
     leave: EdgeCourse;
@@ -477,4 +472,60 @@ export const shiftAcross = (from: Afloat, to: Afloat): Shift | null => {
     const toward: Side = to.place.left > from.place.left ? 'right' : 'left';
     const astern = toward !== to.place.facing;
     return { toward, astern, path, seconds: sailSeconds(path, to.place.slot, to.shipKind, astern) };
+};
+
+/**
+ * Сколько корабль пропадает из виду, перезаходя на другое место, с. Пауза нужна, чтобы уход
+ * и заход читались как два разных манёвра, а не как рывок из одного края кадра в другой.
+ *
+ * Она часть манёвра, а не отсрочка перед ним, — поэтому идёт по той же скорости времени,
+ * что и сам ход (см. config/time). Иначе ускоренный перезаход состоял бы почти из одной паузы.
+ */
+export const RELOCATE_PAUSE_SECONDS = paced(3);
+
+/** Ход через кромку кадра от места, где корабль стоит по расстановке, с. */
+const edgeSeconds = (afloat: Afloat, course: EdgeCourse, guard: number): number => {
+    const width = shipWidthPercent(afloat.place.slot, afloat.shipKind);
+    const path = pathToEdge(afloat.place.left, width, course.side, guard);
+    return sailSeconds(path, afloat.place.slot, afloat.shipKind, course.astern);
+};
+
+/**
+ * Сколько манёвр займёт целиком, с: заход новичка, переход по воде или уход, пауза и заход
+ * заново. Ровно то, что отыграет сцена, — той же механикой и теми же ценами.
+ *
+ * Оценка, а не замер, и в двух местах нарочно грубее сцены. Во-первых, считается она до того,
+ * как манёвр начался: место назначает бэкенд, и корабль может встать не туда, куда целился
+ * человек. Во-вторых, путь до кромки берётся от рейдовой доли, а сцена ведёт корабль
+ * от настоящей точки в кадре — с разбросом внутри полосы, с расхождением с соседом,
+ * с проекцией дальнего края и с лишним морем по бокам от рейда.
+ *
+ * Грубости этой хватает. Отвечает число на один вопрос — идёт манёвр ещё или уже кончился, —
+ * и цена ошибки в нём: пришедший под самый конец либо доиграет лишнюю секунду, либо
+ * не доиграет её же. Точность тут стоила бы того, чтобы считать ход по чужому кадру,
+ * а кадры у всех разные.
+ *
+ * Секунды здесь по скорости времени этой вкладки, как и везде в этом файле. Наружу, в запись
+ * манёвра, они уходят через `unpaced` — см. `Manoeuvre.seconds`.
+ */
+export const manoeuvreSeconds = (from: Afloat | undefined, to: Afloat, others: ShipPlacement[]): number => {
+    if (!from) {
+        // Новичок приходит из-за кромки: откуда — известно из места, задним ли ходом — тоже
+        // (нос смотрит туда же, откуда пришёл, — значит идёт кормой вперёд).
+        return edgeSeconds(
+            to,
+            { side: to.place.enterFrom, astern: to.place.facing === to.place.enterFrom },
+            ENTER_GUARD
+        );
+    }
+    const shift = shiftAcross(from, to);
+    if (shift) {
+        return shift.seconds;
+    }
+    const course = relocateCourse(from, to, others);
+    return (
+        edgeSeconds(from, course.leave, LEAVE_GUARD) +
+        RELOCATE_PAUSE_SECONDS +
+        edgeSeconds(to, course.enter, ENTER_GUARD)
+    );
 };

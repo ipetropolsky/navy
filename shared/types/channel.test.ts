@@ -11,6 +11,8 @@ import {
     SLOT_COUNT,
     TITLE_MAX_LENGTH,
     authorLook,
+    isManoeuvre,
+    manoeuvreFrom,
     memberLook,
     memberRef,
     projectLeft,
@@ -133,5 +135,43 @@ describe('пределы длины', () => {
         ['maxHull', HULL_NUMBER_LENGTH],
     ])('%s в firestore.rules — то же число, что и в коде', (name, limit) => {
         expect(limitInRules(name)).toBe(limit);
+    });
+});
+
+describe('isManoeuvre', () => {
+    it('видит перемену места, силуэта и курса — всё, что кораблю не сменить стоя', () => {
+        const moved = { place: { ...ALBATROS.place, slot: 7 }, shipKind: ALBATROS.shipKind };
+        const refit = { place: ALBATROS.place, shipKind: 'pr1258' as const };
+        const turned = { place: { ...ALBATROS.place, facing: 'right' as const }, shipKind: ALBATROS.shipKind };
+
+        expect(isManoeuvre(ALBATROS, moved)).toBe(true);
+        expect(isManoeuvre(ALBATROS, refit)).toBe(true);
+        expect(isManoeuvre(ALBATROS, turned)).toBe(true);
+    });
+
+    it('молчит на позывном и номере: их меняют, не снимаясь с якоря', () => {
+        const renamed: Member = { ...ALBATROS, name: 'Буран', hullNumber: '512' };
+
+        expect(isManoeuvre(ALBATROS, renamed)).toBe(false);
+    });
+});
+
+describe('manoeuvreFrom', () => {
+    it('без срока не записывает ничего: доигрывать по такой записи нечего', () => {
+        expect(manoeuvreFrom(ALBATROS, undefined, 1000)).toBeUndefined();
+    });
+
+    it('оставляет от прежнего корабля только место и силуэт', () => {
+        // Целиком участник сюда не годится: у него есть и свой прошлый манёвр,
+        // и запись вложилась бы сама в себя.
+        expect(manoeuvreFrom(ALBATROS, 12.5, 1000)).toEqual({
+            from: { place: ALBATROS.place, shipKind: 'pr1400' },
+            startedAt: 1000,
+            seconds: 12.5,
+        });
+    });
+
+    it('входящему прежнего места не пишет вовсе: приходить ему неоткуда', () => {
+        expect(manoeuvreFrom(undefined, 12.5, 1000)).toEqual({ startedAt: 1000, seconds: 12.5 });
     });
 });

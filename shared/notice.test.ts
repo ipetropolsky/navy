@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { Member } from './types/channel';
 
-import { refitNotices, shipTitle } from './notice';
+import { moveNotices, refitNotices, shipTitle } from './notice';
 
 /**
  * Записи канала о корабле. Проверяем ровно то, за что здесь отвечает бэкенд: что случилось
@@ -61,5 +61,25 @@ describe('refitNotices', () => {
         });
 
         expect(refitNotices(ALBATROS, moved)).toEqual([]);
+    });
+});
+
+describe('moveNotices', () => {
+    it('пишет одну запись о перемене места, без старого и нового', () => {
+        const moved = changedTo({ place: { slot: 7, corridor: 'left', left: 20, facing: 'right', enterFrom: 'left' } });
+
+        expect(moveNotices(ALBATROS, moved)).toEqual([
+            { event: 'moved', before: { shipKind: 'pr1400', name: 'Альбатрос', hullNumber: '317' } },
+        ]);
+    });
+
+    it('молчит на развороте: корабль остался там же, где стоял', () => {
+        const turned = changedTo({ place: { ...ALBATROS.place, facing: 'right' } });
+
+        expect(moveNotices(ALBATROS, turned)).toEqual([]);
+    });
+
+    it('молчит на переоснащении: корабль сменился, место — нет', () => {
+        expect(moveNotices(ALBATROS, changedTo({ shipKind: 'pr1258', name: 'Буран' }))).toEqual([]);
     });
 });

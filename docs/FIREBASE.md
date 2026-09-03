@@ -275,6 +275,14 @@ interface MemberDoc {
     user: { userId: string };
     /** Докуда человек дочитал. Единственное поле, которое владелец правит сам. */
     lastSeen?: { messageId: string; at: number };
+    /**
+     * Последний ход корабля: откуда пошёл, когда тронулся и насколько хода отмерено.
+     * Нужен тому, кто открыл вкладку посреди манёвра, — по нему ход доигрывается
+     * с середины (см. BACKEND-API.md, «Манёвр, начавшийся без вас»). Поля нет,
+     * пока корабль не ходил ни разу или пока вкладка не прислала оценку срока:
+     * Firestore не принимает `undefined`, и запись просто не кладётся.
+     */
+    manoeuvre?: { from?: { place: ShipPlacement; shipKind: ShipKind }; startedAt: number; seconds: number };
 }
 
 /** channels/{channelId}/messages/{messageId} */

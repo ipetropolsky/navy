@@ -33,6 +33,7 @@ import {
     ShipPlacement,
     Side,
     hullCenter,
+    isManoeuvre,
     isSameBerth,
     otherSide,
     projectLeft,
@@ -47,6 +48,7 @@ import {
     EdgeCourse,
     ENTER_GUARD,
     LEAVE_GUARD,
+    RELOCATE_PAUSE_SECONDS,
     RelocateCourse,
     Shift,
     berthWidthPercent,
@@ -150,12 +152,19 @@ const heaveAmplitude = (depth: number) => HEAVE_FAR + depth * (HEAVE_NEAR - HEAV
 // пустое море дольше нужного. Появление одного корабля глаз почти не ловит.
 const SCENE_IMAGES = [skyUrl, moonUrl, cloudFarUrl, cloudNearUrl, islandUrl, seaUrl];
 
-// Сколько корабль пропадает из виду, перезаходя на другой слот. Пауза нужна, чтобы уход
-// и заход читались как два разных манёвра, а не как рывок из одного края кадра в другой.
-//
-// Она часть манёвра, а не отсрочка перед ним, — поэтому идёт по той же скорости времени,
-// что и сам ход (см. config/time). Иначе ускоренный перезаход состоял бы почти из одной паузы.
-const RELOCATE_PAUSE_MS = paced(3000);
+// Сколько корабль пропадает из виду, перезаходя на другой слот, мс. Сама пауза живёт
+// в shipMotion рядом с ходом: она такая же часть манёвра, как уход и заход, и оценка
+// манёвра считает её вместе с ними.
+const RELOCATE_PAUSE_MS = RELOCATE_PAUSE_SECONDS * 1000;
+
+/**
+ * Сколько хода остаётся неперемотанным, с. Перемотка — отрицательная задержка перехода:
+ * он начинается сразу, но уже с середины. Отмотать его дальше собственного конца нельзя —
+ * такой переход встаёт на месте мгновенно и уже не присылает `transitionend`, а на нём держится
+ * всё, что бывает после хода: и пауза перезахода, и снятие класса. Поэтому хвост оставляется
+ * всегда, и по той же скорости времени, что и сам ход: доля от хода тут важнее самих секунд.
+ */
+const REPLAY_TAIL = paced(0.5);
 
 // Сколько длится кивок, с. Сама длительность живёт в стилях (@nod-seconds), здесь она нужна
 // затем, чтобы вовремя снять класс: анимация запускается его появлением, и оставшийся класс
@@ -344,6 +353,24 @@ function SeaScene({ members, myId, morseFeeds, ready, berths, onEditShip, onShow
     // Что за корабль нарисован сейчас и где. Сравнение с каналом и говорит, что произошло:
     // сменился слот или сам корабль — перезаход, сменилась только точка — ход поперёк кадра.
     const shownById = useRef(new Map<string, { place: ShipPlacement; shipKind: ShipKind }>());
+    /**
+     * Манёвры, начавшиеся до того, как эта вкладка открылась: id → сколько хода отыграно
+     * без неё, с. Заводится один раз, на первой отрисовке с загруженным каналом (см. ниже),
+     * и тратится по перегонам: каждый начавшийся перегон съедает из запаса свою длину.
+     *
+     * Тратится, а не отсчитывается от часов, нарочно. Перегоны в этой вкладке свои —
+     * кадр другой ширины, и ход в нём другой длины, — а записанный срок манёвра общий
+     * и приблизительный. Считай мы перемотку по часам, вкладка то и дело промахивалась бы
+     * мимо перегона: пыталась бы отмотать заход, которого по её меркам ещё не началось.
+     */
+    const replayLeft = useRef(new Map<string, number>());
+    /**
+     * Перемотка нынешнего перегона: id → вид хода и на сколько он сдвинут назад, с.
+     * Считается один раз, в тот рендер, где перегон начался, и дальше только читается.
+     * Иначе беда та же, что и с меркой кадра (см. motionHold): переходу, которому посреди
+     * пути сменили задержку, браузер начинает путь заново.
+     */
+    const replaySeek = useRef(new Map<string, { kind: string; seconds: number }>());
     // Списки живут в ref, а не в state: они меняются прямо во время отрисовки, до кадра.
     // Через state корабль на один кадр оказался бы на месте, и вход дёргался бы. Убрать
     // же отработавший корабль из разметки без перерисовки нельзя — за этим и счётчик.
@@ -426,10 +453,47 @@ function SeaScene({ members, myId, morseFeeds, ready, berths, onEditShip, onShow
     const shownState = (member: Member) => ({ place: member.place, shipKind: member.shipKind });
 
     const known = useRef<Member[]>([]);
+    /**
+     * Первая отрисовка с загруженным каналом: кадр запоминает, кто на рейде уже стоит.
+     * Обычно этим всё и кончается — пришедший застаёт рейд таким, каков он есть, и корабли
+     * просто оказываются на местах: въезжать им неоткуда, это мы пришли к ним.
+     *
+     * Кроме тех, кто прямо сейчас идёт. Манёвр записан в участии (см. `Manoeuvre`), и вкладке,
+     * открытой посреди него, есть с чем сравнивать: она делает вид, что нарисовала корабль
+     * там, откуда он пошёл, — а дальше всё идёт обычным ходом, сравнением, тем же самым,
+     * каким кадр отыгрывает и манёвры, случившиеся при нём. Заходящему сравнивать не с чем
+     * (приходить ему неоткуда), и он просто помечается заходящим — как настоящий новичок.
+     *
+     * Отыгрывается манёвр не с начала, а с середины: сколько его прошло мимо этой вкладки,
+     * столько она и перемотает (см. `replayLeft`). Иначе корабль, тронувшийся полминуты назад,
+     * пошёл бы у пришедшего заново — и разошёлся бы со всеми остальными на целый манёвр.
+     */
     if (ready && seenIds.current === null) {
         seenIds.current = new Set(members.map((member) => member.memberId));
-        members.forEach((member) => shownById.current.set(member.memberId, shownState(member)));
-    } else if (seenIds.current) {
+        const now = Date.now();
+        for (const member of members) {
+            const manoeuvre = member.manoeuvre;
+            // Срок манёвра записан настоящими секундами, а идёт он по скорости времени этой
+            // вкладки: под проверками кадр живёт вдесятеро быстрее, и записанные полминуты
+            // отыграются за три секунды.
+            const left = manoeuvre ? paced(manoeuvre.seconds) * 1000 - (now - manoeuvre.startedAt) : 0;
+            // Откуда пошёл, туда и пришёл — доигрывать нечего: сравнение такой манёвр
+            // не заметит, а остаток так и остался бы висеть на корабле до следующего хода.
+            const going = manoeuvre && left > 0 && (!manoeuvre.from || isManoeuvre(manoeuvre.from, member));
+            if (going) {
+                replayLeft.current.set(member.memberId, (now - manoeuvre.startedAt) / 1000);
+            }
+            if (going && manoeuvre.from) {
+                shownById.current.set(member.memberId, manoeuvre.from);
+            } else {
+                shownById.current.set(member.memberId, shownState(member));
+                if (going) {
+                    enteringIds.current.add(member.memberId);
+                }
+            }
+        }
+    }
+    if (seenIds.current) {
         for (const member of members) {
             if (!seenIds.current.has(member.memberId)) {
                 seenIds.current.add(member.memberId);
@@ -599,6 +663,34 @@ function SeaScene({ members, myId, morseFeeds, ready, berths, onEditShip, onShow
         }));
 
     /**
+     * Насколько отмотать вперёд начинающийся ход, с. Ответ уходит в стили отрицательной
+     * задержкой: переход начинается сразу, но уже с середины — и с той же плавностью,
+     * какая была бы у него, начнись он вовремя.
+     *
+     * Мотаем по остатку, а не по часам: у этой вкладки кадр своей ширины, и её собственные
+     * сроки хода не те, что были у вкладки, где манёвр начался, — а записанный срок и вовсе
+     * лишь оценка (см. `manoeuvreSeconds`). Поэтому вкладка тратит прошедшее время коленами:
+     * сколько взял уход, столько из остатка и вычитается, а что не влезло — достаётся паузе
+     * и заходу. Тратится оно и тогда, когда мотать уже нечего: колено, целиком оставшееся
+     * в прошлом, всё равно должно из остатка уйти.
+     *
+     * Ответ запоминается на всё колено (по виду хода): в разметке он живёт стилем, и смена
+     * задержки на ходу перезапустила бы переход с новой отметки — корабль дёрнулся бы назад.
+     * Заодно это делает вызов безвредным при двойной отрисовке в StrictMode.
+     */
+    const seekMotion = (id: string, kind: string, seconds: number): number => {
+        const memo = replaySeek.current.get(id);
+        if (memo?.kind === kind) {
+            return memo.seconds;
+        }
+        const left = replayLeft.current.get(id) ?? 0;
+        const seek = Math.max(0, Math.min(left, seconds - REPLAY_TAIL));
+        replaySeek.current.set(id, { kind, seconds: seek });
+        replayLeft.current.set(id, Math.max(0, left - seconds));
+        return seek;
+    };
+
+    /**
      * Кивок на остановке: корабль гасит ход и клюёт носом. Ставится он не по концу хода,
      * а раньше — см. NOD_LEAD, — и держится ровно на свою анимацию. Снять класс обязательно:
      * анимацию запускает его появление, и с оставшимся классом второй раз корабль уже не кивнёт.
@@ -650,6 +742,10 @@ function SeaScene({ members, myId, morseFeeds, ready, berths, onEditShip, onShow
             // Сюда же приходит и перезаходящий, отработавший вторую половину манёвра: он встал
             // на новое место, и стороны ему больше не нужны.
             relocateCourses.current.delete(id);
+            // Манёвр кончился весь — и перематывать больше нечего: остаток с отметкой уходят,
+            // чтобы следующий ход этого корабля начался с начала, как у всех.
+            replayLeft.current.delete(id);
+            replaySeek.current.delete(id);
             redraw();
             return;
         }
@@ -660,17 +756,28 @@ function SeaScene({ members, myId, morseFeeds, ready, berths, onEditShip, onShow
         noddingIds.current.delete(id);
         leavingById.current.delete(id);
         if (!relocatingIds.current.has(id)) {
+            replayLeft.current.delete(id);
+            replaySeek.current.delete(id);
             redraw();
             return;
         }
+        // Перемотка тратится и на паузу: она такая же часть манёвра, как ход. Пришедший
+        // посреди неё пропустит её вовсе, а пришедший к её началу — досидит остаток.
+        const skip = replayLeft.current.get(id) ?? 0;
+        if (skip) {
+            replayLeft.current.set(id, Math.max(0, skip - RELOCATE_PAUSE_SECONDS));
+        }
         pauseTimers.current.set(
             id,
-            window.setTimeout(() => {
-                pauseTimers.current.delete(id);
-                relocatingIds.current.delete(id);
-                enteringIds.current.add(id);
-                redraw();
-            }, RELOCATE_PAUSE_MS)
+            window.setTimeout(
+                () => {
+                    pauseTimers.current.delete(id);
+                    relocatingIds.current.delete(id);
+                    enteringIds.current.add(id);
+                    redraw();
+                },
+                Math.max(0, RELOCATE_PAUSE_MS - skip * 1000)
+            )
         );
         redraw();
     };
@@ -694,7 +801,14 @@ function SeaScene({ members, myId, morseFeeds, ready, berths, onEditShip, onShow
                 if (member) {
                     motionHold.current.set(id, { left: leftOf(member), overhang, reach: reachFar });
                 }
-                const seconds = Number.parseFloat(getComputedStyle(element).transitionDuration) || 0;
+                // Сколько ходу осталось: длительность плюс задержка. Задержка обычно нулевая,
+                // а у отыгрываемого манёвра отрицательная — и на неё ход уже сдвинут вперёд
+                // (см. `seekMotion`), так что и конца его ждать столько же меньше.
+                const style = getComputedStyle(element);
+                const seconds = Math.max(
+                    0,
+                    (Number.parseFloat(style.transitionDuration) || 0) + (Number.parseFloat(style.transitionDelay) || 0)
+                );
                 window.clearTimeout(motionTimers.current.get(id));
                 motionTimers.current.set(
                     id,
@@ -1199,6 +1313,13 @@ function SeaScene({ members, myId, morseFeeds, ready, berths, onEditShip, onShow
                     // Ход, который корабль отыгрывает сейчас: по нему считается дифферент.
                     const movePath = leaving ? leavePath : (shift?.path ?? enterPath);
                     const moveSeconds = leaving ? leaveSeconds : (shift?.seconds ?? enterSeconds);
+                    // Манёвр, начавшийся без этой вкладки, доигрывается с середины: столько
+                    // хода она отматывает вперёд (см. `seekMotion`). У всех остальных — ноль,
+                    // и ход идёт с начала.
+                    const seek =
+                        motionKind && replayLeft.current.has(member.memberId)
+                            ? seekMotion(member.memberId, motionKind, moveSeconds)
+                            : 0;
                     const trim = motionKind
                         ? sailTrim(movePath, moveSeconds, member.place.slot, member.shipKind) * bowUp
                         : 0;
@@ -1281,6 +1402,10 @@ function SeaScene({ members, myId, morseFeeds, ready, berths, onEditShip, onShow
                                     // знает только компонент: это расстояние между точками
                                     // и размер корабля.
                                     '--shift-seconds': `${(shift?.seconds ?? 0).toFixed(1)}s`,
+                                    // Отрицательная задержка — перемотка: ход начинается сразу,
+                                    // но уже с этого места. Одна на все колена: сразу двух ходов
+                                    // у корабля не бывает, а имён понадобилось бы три.
+                                    '--motion-delay': `-${seek.toFixed(2)}s`,
                                     '--sail-trim': `${trim.toFixed(2)}deg`,
                                     '--nod-angle': `${nod.toFixed(2)}deg`,
                                     // Разворот корпуса на стоянке: постоянный угол, не движение.

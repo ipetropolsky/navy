@@ -109,6 +109,23 @@ const asBerth = (value: unknown): Berth => {
     return berthAt(slot, asCorridor(body.corridor));
 };
 
+/**
+ * Сколько манёвра осталось у корабля впереди, с. Верхний предел тут не про безопасность записи,
+ * а про то, что бывает: самый долгий манёвр на рейде — уход за дальнюю кромку, пауза и заход
+ * с другой, — и минуты на него хватает с большим запасом. Всё, что длиннее, — не манёвр,
+ * а корабль, который у пришедшего посреди хода так и остался бы идущим навсегда.
+ */
+const MANOEUVRE_MAX_SECONDS = 120;
+
+const asManoeuvre = (value: unknown): { seconds: number } => {
+    const body = asRecord(value, 'member.manoeuvre');
+    const seconds = body.seconds;
+    if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds <= 0 || seconds > MANOEUVRE_MAX_SECONDS) {
+        return invalid('Длительность манёвра указана неверно');
+    }
+    return { seconds };
+};
+
 const asMemberDraft = (value: unknown): MemberDraft => {
     const body = asRecord(value, 'member');
     const draft: MemberDraft = {
@@ -122,6 +139,9 @@ const asMemberDraft = (value: unknown): MemberDraft => {
     }
     if (body.facing !== undefined) {
         draft.facing = asSide(body.facing);
+    }
+    if (body.manoeuvre !== undefined) {
+        draft.manoeuvre = asManoeuvre(body.manoeuvre);
     }
     return draft;
 };

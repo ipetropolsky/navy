@@ -40,5 +40,13 @@ export * from '@/backend/types';
  * модулям, и рано или поздно расстановка пустила бы на линию пару, которую сцена развести
  * не сумеет.
  */
-export { freeBerths, fleetLefts, restingDrift, restingLeft, restingYaw, suggestBerth } from '@shared/placement';
+export {
+    freeBerths,
+    fleetLefts,
+    placeShip,
+    restingDrift,
+    restingLeft,
+    restingYaw,
+    suggestBerth,
+} from '@shared/placement';
 export type { Anchored } from '@shared/placement';

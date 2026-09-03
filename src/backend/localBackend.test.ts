@@ -625,6 +625,71 @@ describe('переоснащение', () => {
         expect(renamed.place).toEqual(member.place);
     });
 
+    test('перемена места пишет свою запись, и она встаёт перед переоснащением', async () => {
+        const backend = testBackend();
+        const channelId = await freshChannel(backend);
+        const { member } = await backend.join({ channelId, member: draft('Альбатрос', '317') });
+        const berth = { slot: member.place.slot === 0 ? 1 : 0, corridor: 'right' as const, left: 80 };
+
+        await backend.updateMember({
+            channelId,
+            memberId: member.memberId,
+            member: draft('Буревестник', '317', { berth }),
+        });
+
+        const written = await notices(backend, channelId);
+        // Снявшийся с якоря корабль — новость крупнее сменённого позывного, и стоит она выше.
+        expect(written.map((message) => message.notice.event)).toEqual(['joined', 'moved', 'refit']);
+        expect(written[1].notice.before).toEqual({ shipKind: 'pr1234', name: 'Буревестник', hullNumber: '317' });
+    });
+
+    test('манёвр записывается в участии со сроком и прежним местом', async () => {
+        const backend = testBackend();
+        const channelId = await freshChannel(backend);
+        const { member } = await backend.join({ channelId, member: draft('Альбатрос', '317') });
+        const berth = { slot: member.place.slot === 0 ? 1 : 0, corridor: 'right' as const, left: 80 };
+
+        const { member: moved } = await backend.updateMember({
+            channelId,
+            memberId: member.memberId,
+            member: draft('Альбатрос', '317', { berth, manoeuvre: { seconds: 24 } }),
+        });
+
+        // Прежнее место — то, откуда корабль пошёл: по нему кадр и доигрывает манёвр.
+        expect(moved.manoeuvre?.from).toEqual({ place: member.place, shipKind: 'pr1234' });
+        expect(moved.manoeuvre?.seconds).toBe(24);
+        expect(moved.manoeuvre?.startedAt).toBeGreaterThan(0);
+    });
+
+    test('без срока манёвр не записывается вовсе: доигрывать по такой записи нечего', async () => {
+        const backend = testBackend();
+        const channelId = await freshChannel(backend);
+        const { member } = await backend.join({ channelId, member: draft('Альбатрос', '317') });
+        const berth = { slot: member.place.slot === 0 ? 1 : 0, corridor: 'right' as const, left: 80 };
+
+        const { member: moved } = await backend.updateMember({
+            channelId,
+            memberId: member.memberId,
+            member: draft('Альбатрос', '317', { berth }),
+        });
+
+        expect(moved.manoeuvre).toBeUndefined();
+    });
+
+    test('переоснащение на месте манёвром не считается: корабль с якоря не снимался', async () => {
+        const backend = testBackend();
+        const channelId = await freshChannel(backend);
+        const { member } = await backend.join({ channelId, member: draft('Альбатрос', '317') });
+
+        const { member: renamed } = await backend.updateMember({
+            channelId,
+            memberId: member.memberId,
+            member: draft('Буревестник', '317', { manoeuvre: { seconds: 24 } }),
+        });
+
+        expect(renamed.manoeuvre).toBeUndefined();
+    });
+
     test('смена курса — тоже перемена места: корабль заходит заново', async () => {
         const backend = testBackend();
         const channelId = await freshChannel(backend);

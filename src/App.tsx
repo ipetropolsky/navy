@@ -11,11 +11,22 @@ import {
     useState,
 } from 'react';
 
-import { Berth, Message, MorseFeed, ShipKind, Side, authorLook, isSameBerth, otherSide } from '@shared/types/channel';
+import {
+    Berth,
+    Message,
+    MorseFeed,
+    ShipKind,
+    Side,
+    authorLook,
+    isManoeuvre,
+    isSameBerth,
+    otherSide,
+} from '@shared/types/channel';
 
-import { ChannelDraft, ChannelError, MemberDraft, backend, freeBerths, suggestBerth } from '@/backend';
+import { ChannelDraft, ChannelError, MemberDraft, backend, freeBerths, placeShip, suggestBerth } from '@/backend';
 import { DEMO_CHANNEL_SLUG } from '@/backend/seed';
 import SeaScene, { BerthChoice } from '@/components/SeaScene/SeaScene';
+import { manoeuvreSeconds } from '@/components/SeaScene/shipMotion';
 import SignIn from '@/components/auth/SignIn';
 import ClosedChannel from '@/components/channel/ClosedChannel';
 import CreateChannel from '@/components/channel/CreateChannel';
@@ -34,7 +45,7 @@ import Shade from '@/components/ui/Shade';
 import { useSnackbar } from '@/components/ui/Snackbar';
 import { LeaveIcon } from '@/components/ui/icons';
 import { GATE_PAD, SHEET_HANDLE, SHEET_TOP_GAP } from '@/config/layout';
-import { paced } from '@/config/time';
+import { paced, unpaced } from '@/config/time';
 import { HAIL_SIGNAL, morseDuration } from '@/hooks/morse';
 import { useAuth } from '@/hooks/useAuth';
 import { useChannel } from '@/hooks/useChannel';
@@ -546,13 +557,49 @@ export default function App() {
         act({ type: 'open-join' });
     };
 
+    /**
+     * Сколько займёт манёвр, который сейчас начнётся, с. Считает его вкладка, а не сервер:
+     * ход живёт в кадре, и знает о нём кадр (см. `manoeuvreSeconds`). Уходит оценка вместе
+     * с заявкой и ложится в участие — по ней вошедшие посреди манёвра доигрывают его
+     * с середины (см. `Manoeuvre`).
+     *
+     * Место здесь предсказывается тем же `placeShip`, каким его назначит бэкенд: правила
+     * общие, состав тот же, и в подавляющем большинстве случаев выйдет то же самое место.
+     * Разойдётся — манёвр окажется чуть длиннее или короче оценки, и это неважно: она
+     * отвечает на вопрос «идёт он ещё или уже кончился», а не рисует кадры.
+     *
+     * Ничего не поменялось — манёвра нет вовсе: остаться на месте и переоснаститься кораблю
+     * можно, не снимаясь с якоря, и записывать тут нечего.
+     */
+    const manoeuvreOf = (draft: MemberDraft): { seconds: number } | undefined => {
+        const others = members.filter((member) => member.memberId !== myId);
+        const place = placeShip(draft.shipKind, others, draft.berth, draft.facing);
+        if (!place) {
+            return undefined;
+        }
+        const after = { place, shipKind: draft.shipKind };
+        if (me && !isManoeuvre(me, after)) {
+            return undefined;
+        }
+        return {
+            seconds: unpaced(
+                manoeuvreSeconds(
+                    me ?? undefined,
+                    after,
+                    others.map((member) => member.place)
+                )
+            ),
+        };
+    };
+
     const handleMemberSubmit = async (draft: MemberDraft) => {
         const withBerth = { ...draft, berth: pickedBerth ?? undefined };
+        const withManoeuvre = { ...withBerth, manoeuvre: manoeuvreOf(withBerth) };
         if (editing) {
-            await channelState.updateMe(withBerth);
+            await channelState.updateMe(withManoeuvre);
             act({ type: 'close-form' });
         } else {
-            await channelState.join(withBerth, verifiedCode ?? undefined);
+            await channelState.join(withManoeuvre, verifiedCode ?? undefined);
         }
     };
 
