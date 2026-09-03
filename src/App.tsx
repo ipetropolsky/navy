@@ -265,7 +265,12 @@ export default function App() {
     // Тот же канал, тот же признак «панель на виду», но другой отклик: не цифра на кнопке,
     // а браузерное уведомление (или мигающий заголовок вкладки, если разрешения нет) —
     // на случай, когда человек вовсе отошёл от вкладки (issue #83).
-    useMessageNotifications(channel, myId, shown);
+    //
+    // requestPermission сама по себе решает не всё: браузер показывает диалог о разрешении
+    // по-настоящему только в ответ на жест человека, а без него — либо молчит, либо прячет
+    // вопрос в мелкий значок адресной строки. Поэтому её ещё дёргают из настоящих жестов
+    // ниже — открытия разговора и отправки реплики, — не полагаясь на один только вход в канал.
+    const { requestPermission: requestNotificationPermission } = useMessageNotifications(channel, myId, shown);
 
     const sceneRef = useRef<HTMLDivElement>(null);
 
@@ -279,8 +284,11 @@ export default function App() {
     const chose = useCallback(() => act({ type: 'chose' }), []);
     const toggleChat = useCallback(() => {
         chose();
+        // Настоящий жест: если разрешение на уведомления ещё не спрошено, самое время —
+        // молча спросить его при одной загрузке страницы браузер не даст (см. useMessageNotifications).
+        requestNotificationPermission();
         return shown ? hide() : show();
-    }, [chose, shown, hide, show]);
+    }, [chose, shown, hide, show, requestNotificationPermission]);
 
     /**
      * Переезд разговора из раскладки в раскладку.
@@ -751,6 +759,9 @@ export default function App() {
     }, [channel, reception]);
 
     const handleSend = (text: string) => {
+        // Тот же жест-повод, что и у toggleChat: отправка реплики — точно действие человека,
+        // а не что-то, случившееся само при загрузке страницы.
+        requestNotificationPermission();
         // Ответ снимаем сразу, не дожидаясь бэкенда: сообщение уже видно в ленте — крутилкой
         // или сразу значком (!), смотря по тому, есть ли связь (см. Message.delivery,
         // MessageList) — и держать шторку ответа открытой до подтверждения сервера незачем.

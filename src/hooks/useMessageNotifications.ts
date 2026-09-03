@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 
 import { ChannelSnapshot } from '@/backend/types';
 import { Message } from '@shared/types/channel';
@@ -35,8 +35,20 @@ const TITLE_FLASH_INTERVAL = 1000;
  * что и у useUnread), либо сама вкладка не видна или не в фокусе: со свёрнутым до пола
  * разговором, но открытой вкладкой человек ленту всё равно не видит, а с открытой,
  * но фоновой вкладкой — тем более.
+ *
+ * Возвращает `requestPermission` — её стоит дёрнуть ещё и из настоящего пользовательского
+ * действия (открыл разговор, отправил реплику): один лишь вход в канал через `useEffect`
+ * разрешения не покажет — современные браузеры показывают диалог только в ответ на жест,
+ * а без него либо молчат совсем, либо сворачивают его в мелкий значок в адресной строке
+ * (Chrome — «тихая» подсказка при низком «engagement» сайта). Здесь она всё равно вызывается
+ * и при входе в канал — тем самым не пропуская решение, если браузер согласится показать
+ * его и так, — но полагаться только на это нельзя.
  */
-export function useMessageNotifications(channel: ChannelSnapshot | null, myId: string | null, watching: boolean): void {
+export function useMessageNotifications(
+    channel: ChannelSnapshot | null,
+    myId: string | null,
+    watching: boolean
+): { requestPermission: () => void } {
     const channelId = channel?.channel.channelId ?? null;
     const messages = channel?.messages ?? [];
     const lastMessage = messages.length ? messages[messages.length - 1] : null;
@@ -85,18 +97,23 @@ export function useMessageNotifications(channel: ChannelSnapshot | null, myId: s
         }, TITLE_FLASH_INTERVAL);
     };
 
-    // Разрешение просим не при монтировании приложения, а при входе в конкретный канал:
-    // тогда понятно, зачем оно, — и раньше не спросить не получится, ждать первую чужую
-    // реплику незачем (так было раньше, и разрешение молчаливо повисало «default» до неё —
-    // ровно то, что не спросило при перезаходе в чат без свежих сообщений от других).
     // «default» — единственный запрашиваемый исход: спрошенный уже «granted» переспрашивать
     // незачем, а отказавшего («denied») спросить второй раз браузер и не даст — само вернёт
     // тот же «denied» без всякого диалога.
-    useEffect(() => {
-        if (channelId !== null && typeof Notification !== 'undefined' && Notification.permission === 'default') {
+    const requestPermission = useCallback((): void => {
+        if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
             void Notification.requestPermission();
         }
-    }, [channelId]);
+    }, []);
+
+    // При входе в канал — тоже: не единственный повод спросить (см. requestPermission выше
+    // и её вызовы из настоящих жестов в App.tsx), но и не помешает, если браузер согласится
+    // показать диалог без жеста.
+    useEffect(() => {
+        if (channelId !== null) {
+            requestPermission();
+        }
+    }, [channelId, requestPermission]);
 
     // Вкладка (снова) на виду — мигание, если оно шло, ни к чему: человек и так сейчас увидит ленту.
     useEffect(() => {
@@ -160,4 +177,6 @@ export function useMessageNotifications(channel: ChannelSnapshot | null, myId: s
 
     // Размонтировались с мигающим заголовком на экране — вернуть как было.
     useEffect(() => () => stopFlashing(), []);
+
+    return { requestPermission };
 }
