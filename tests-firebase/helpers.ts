@@ -252,6 +252,43 @@ export const berths = (page: Page) => page.locator('[data-berth]');
 export const shipsButton = (page: Page) => page.locator('button[title="Корабли на связи"]');
 
 /**
+ * Открыть список кораблей — именно открыть, а не переключить, и дождаться конца выезда.
+ * См. openSheet в tests/helpers.ts: и про то, почему спрашиваем `aria-expanded` (кнопка-то
+ * переключатель, и второй вызов подряд закрывал бы уже открытое), и про то, почему конца
+ * выезда ждут временем. Здесь эта же выдержка нужна ещё и сама по себе: нажатие по кнопке
+ * внутри выезжающего списка Playwright отвергает — «element is not stable», — и попадает
+ * оно в итоге уже мимо, по перерисованной разметке.
+ */
+const openSheet = async (page: Page): Promise<void> => {
+    if ((await shipsButton(page).getAttribute('aria-expanded')) !== 'true') {
+        await shipsButton(page).click();
+    }
+    await page.waitForTimeout(280 / TIME_SCALE + 60);
+};
+
+/**
+ * Уйти с рейда: кнопка внизу списка кораблей, а следом — новый курс в шторке прощания.
+ * Курс обязателен, молча с рейда не уходят, — см. leaveRaid в tests/helpers.ts, там же
+ * и про две дороги к одной шторке.
+ *
+ * Ждать отметку в хранилище, как делает местная тёзка, здесь нечем и незачем: «сервер»
+ * настоящий, и чего именно ждать после ухода — своего корабля за кромкой кадра, пустого
+ * рейда, строчки в ленте, — решает сама проверка.
+ */
+export const leaveRaid = async (page: Page, course = 'В Кронштадт'): Promise<void> => {
+    await openSheet(page);
+    await page.getByRole('button', { name: /^Уйти/ }).click();
+    await page.getByLabel('Задайте новый курс').fill(course);
+    await page.getByRole('button', { name: 'Курс верный' }).click();
+};
+
+/** Высадить чужой корабль — из списка кораблей, старшим на рейде. */
+export const kickShip = async (page: Page, name: string): Promise<void> => {
+    await openSheet(page);
+    await page.getByLabel(`Высадить «${name}»`).click();
+};
+
+/**
  * Ткнуть в корабль в кадре — тем же способом, что и в tests/helpers.ts: целимся в середину
  * коробки, а не в locator.click(), потому что нажатие ловит вода поверх флота, а не сам корпус.
  */
