@@ -109,6 +109,7 @@ export const DEMO = 'demo';
 /** Корабли демо-канала: их id заданы руками в seed.ts, на них можно ссылаться. */
 export const ALBATROS = 'm-albatros';
 export const VYMPEL = 'm-vympel';
+export const REZVY = 'm-rezvy';
 
 /**
  * Сколько идёт проявление сцены, мс: те же 600 мс из стилей, поделённые на скорость времени,
@@ -134,8 +135,13 @@ const FADE_MS = 600 / TIME_SCALE + 100;
  * Спросить о нём саму страницу (`getAnimations`) не выходит — к этому мигу переход может ещё
  * не начаться, и тогда ждать нечего; по прозрачности слоёв тоже не понять — облака и на
  * проступившей сцене стоят полупрозрачными, такими они и нарисованы.
+ *
+ * Экспортирован ради проверок, которым нужна настоящая перезагрузка вкладки (`page.reload`,
+ * а не переход по адресу) — например, что набранное, но не отправленное, переживает её
+ * (issue #69, ящик неотправленного в sessionStorage). `openChannel`/`openNewChannel` внизу
+ * пользуются им же, тем же самым признаком готовности, а не своим.
  */
-const sceneReady = async (page: Page): Promise<void> => {
+export const sceneReady = async (page: Page): Promise<void> => {
     await page.locator('[data-scene-painted][data-scene-ready]').first().waitFor({ timeout: 3_000 });
     await page.waitForTimeout(FADE_MS);
 };
@@ -162,15 +168,55 @@ export const openChannel = async (page: Page, slug = DEMO, memberId?: string): P
 };
 
 /**
+ * Заставить вкладку забыть, кем она входила: следующий join() заведёт для неё новый userId
+ * (`localAccount()` в backend/auth.ts), как если бы за той же страницей теперь сидел кто-то
+ * другой. Сама вкладка не меняется, меняется только эта запись в её sessionStorage.
+ *
+ * Нужна там, где несколько кораблей заводятся подряд на одной странице (см. scene.spec.ts,
+ * `anchor`): без сброса очередной join() застаёт userId уже занятым предыдущим кораблём,
+ * а memberId === userId, так что вторая заявка распознаётся как повторный вход того же
+ * корабля (см. join в localBackend.ts, идемпотентность та же, что у joinChannel на сервере),
+ * а не как новый. У настоящих разных вкладок эта путаница невозможна: у каждой свой
+ * sessionStorage, и localAccount() заводит свой userId в каждой сам, один раз.
+ */
+export const forgetLocalTab = (page: Page): Promise<void> =>
+    page.evaluate(() => {
+        // eslint-disable-next-line no-restricted-syntax -- взгляд снаружи, а не код приложения
+        sessionStorage.removeItem('kilvater.entrance.local');
+    });
+
+/**
  * Завести свой канал и остаться в нём. Нужен там, где важен ровно один корабль в кадре
  * и он же — свой: в демо-канале на рейде уже стоит эскадра.
+ *
+ * `code`, если передан, заводит канал закрытым: включает переключатель «Частота» и вписывает
+ * код доступа в открывшееся поле — той же парой нажатий, что и человек в форме (см. `CLOSED_OPTIONS`
+ * в CreateChannel.tsx). Не передан — канал открытый, как и раньше: это умолчание формы.
  */
-export const openNewChannel = async (page: Page, slug: string): Promise<void> => {
+export const openNewChannel = async (page: Page, slug: string, code?: string): Promise<void> => {
     await page.goto('/', { waitUntil: 'domcontentloaded' });
     await page.getByPlaceholder('Эскадра «Полночь»').fill(slug);
     await page.locator('input[placeholder="eskadra-polnoch"]').fill(slug);
+    if (code !== undefined) {
+        await page.getByRole('group', { name: 'Частота' }).getByText('Закрытая').click();
+        await page.getByPlaceholder('Код доступа').fill(code);
+    }
     await page.locator('button[type=submit]').click();
     await sceneReady(page);
+};
+
+/**
+ * Экран «Закрытая частота»: ввести код и попытаться войти. Отказ (неверный код) остаётся
+ * на экране проверке — она сама решает, чем на него смотреть (снекбар или то, что экран
+ * не ушёл), а этот помощник только совершает попытку.
+ */
+export const enterAccessCode = async (page: Page, code: string): Promise<void> => {
+    await expect(
+        page.getByRole('heading', { name: 'Закрытая частота' }),
+        'экран кода доступа не показался'
+    ).toBeVisible();
+    await page.getByPlaceholder('Код доступа').fill(code);
+    await page.getByRole('button', { name: 'Войти' }).click();
 };
 
 /**
@@ -286,9 +332,43 @@ export const shipsButton = (page: Page) => page.locator('button[title="Кора�
  */
 const SLIDE_MS = 280 / TIME_SCALE + 60;
 
+/**
+ * Открыть список кораблей — именно открыть, а не переключить. Кнопка-то переключатель, и вызов
+ * подряд закрывал бы уже открытое: проверка, которая сперва посмотрела список, а потом позвала
+ * помощника снова, оставалась без него и падала на первом же нажатии внутри. Спрашиваем поэтому
+ * у самой кнопки, в каком она положении (`aria-expanded`), и жмём только когда есть что открывать.
+ */
 export const openSheet = async (page: Page): Promise<void> => {
+    if ((await shipsButton(page).getAttribute('aria-expanded')) === 'true') {
+        return;
+    }
     await shipsButton(page).click();
     await page.waitForTimeout(SLIDE_MS);
+};
+
+/** Сам слой со списком кораблей: он стоит в коробке разговора и накрывает собой ленту. */
+const shipsList = (page: Page) => page.locator('section[aria-label="Корабли на связи"]');
+
+/**
+ * Убрать список кораблей — и дождаться, пока он и правда уедет.
+ *
+ * Нужен он тем проверкам, которые после списка берутся за ленту: список стоит слоем поверх неё
+ * и нажатия себе забирает. Сам собой он не уходит и после закрытой формы своего корабля —
+ * форма ложилась поверх него, и, уйдя, возвращает человека туда, откуда он её позвал.
+ *
+ * Ждать приходится дважды. Сперва — пока список окажется наверху: пока поверх него стоит форма,
+ * то же нажатие вернуло бы к списку, а не убрало его, и об этом кнопка говорит своим положением.
+ * Форма же уходит не в тот же миг, когда её отправили: сперва запись в «сервер», потом рендер, —
+ * и помощник, спросивший положение разом после `join`, застаёт ещё форму. Потом — пока слой
+ * снимется с экрана: до конца движения он всё ещё ловит нажатия.
+ */
+export const closeSheet = async (page: Page): Promise<void> => {
+    if ((await shipsList(page).count()) === 0) {
+        return;
+    }
+    await expect(shipsButton(page)).toHaveAttribute('aria-expanded', 'true');
+    await shipsButton(page).click();
+    await expect(shipsList(page)).toHaveCount(0);
 };
 
 /**
@@ -307,11 +387,18 @@ export const leaveButton = (page: Page) => page.getByRole('button', { name: /^У
  * Курс обязателен: молча с рейда не уходят, и без набранного курса подтверждение недоступно.
  * Дорог к выходу две — эта и кнопка в шапке, пока открыта форма своего корабля, — но шторка
  * прощания у них одна, и проверкам, которым нужен сам уход, а не путь к нему, хватает короткой.
+ *
+ * `successorName` называет, кого оставить старшим, — тычком по его строчке в шторке. Поле это
+ * не обязательное (см. `LeaveRaid`), и большинству проверок оно не нужно вовсе: не назвали —
+ * старшинство решает бэкенд сам, по прежнему правилу.
  */
-export const leaveRaid = async (page: Page, course = 'В Кронштадт'): Promise<void> => {
+export const leaveRaid = async (page: Page, course = 'В Кронштадт', successorName?: string): Promise<void> => {
     await openSheet(page);
     const mark = await before(page);
     await leaveButton(page).click();
+    if (successorName) {
+        await page.getByLabel(`Оставить старшим «${successorName}»`).click();
+    }
     await page.getByLabel('Задайте новый курс').fill(course);
     await page.getByRole('button', { name: 'Курс верный' }).click();
     await awaitWrite(page, mark);
@@ -412,10 +499,32 @@ export const ships = (page: Page) => page.locator('[class*="shipSlot"]');
 export const berths = (page: Page) => page.locator('[data-berth]');
 
 /**
+ * Дождаться, пока свой корабль встанет на рейде и станет нажимаемым.
+ *
+ * Признак — метка `shipMine`: её сцена вешает ровно на свой стоящий корабль (см. `canEdit`
+ * в SeaScene), и вхолостую такое ожидание не пройдёт — до появления корабля в разметке метки
+ * нет ни на чём.
+ *
+ * Прежде тут ждали обратного — «хода в кадре нет» (`[data-motion]` в нуле), — и ожидание это
+ * отрицательное: оно сходится и в тот миг, когда корабль ещё не вышел на сцену. А выходит он
+ * не тогда, когда `join` вернулся: постановка в строй ждёт записи в «сервер», разметка догоняет
+ * её кадром-другим позже, и ход начинается уже после. Проверка, щёлкнувшая по кораблю в этот
+ * зазор, попадала в идущий — а идущий нажатий не берёт вовсе: метки на нём нет, и вода поверх
+ * флота ведёт нажатие только к стоящим (`shipSlots` в SeaScene идущих не считает).
+ *
+ * Срок — ход через весь кадр: ждём мы именно его конца.
+ */
+export const myShipParked = async (page: Page): Promise<void> => {
+    await expect(page.locator('[class*="shipMine"]'), 'свой корабль так и не встал на место').toBeVisible({
+        timeout: SAIL_TIMEOUT,
+    });
+};
+
+/**
  * Ткнуть в корабль в кадре.
  *
- * Целимся в середину корпуса, а ловит нажатие вода поверх флота и отдаёт его ближайшей
- * стоянке (см. shipWater и shipNearest в SeaScene). Отсюда и `page.mouse` вместо
+ * Целимся в середину корпуса, а ловит нажатие вода поверх флота и отдаёт его тому, в чью
+ * область оно попало (см. `.shipWater` в стилях и `shipPick`). Отсюда и `page.mouse` вместо
  * `locator.click()`: тот сперва проверяет, что в точке нажатия лежит сам корпус, — а лежит
  * там вода, и попадать в корпус больше не нужно ни человеку, ни проверке.
  */

@@ -2,8 +2,9 @@ import { Ref, SyntheticEvent, useEffect, useRef, useState } from 'react';
 
 import IconButton from '@/components/ui/IconButton';
 import Input from '@/components/ui/Input';
-import { AuthorLook, MAX_MESSAGE_LENGTH, Message } from '@/types/channel';
-import { limitMessage, overLimit } from '@/utils/limit';
+import { paced } from '@/config/time';
+import { AuthorLook, MAX_MESSAGE_LENGTH, Message } from '@shared/types/channel';
+import { limitMessage, overLimit } from '@shared/utils/limit';
 
 import MessageBody from '@/components/chat/MessageBody';
 import ReplyQuote from '@/components/chat/ReplyQuote';
@@ -62,6 +63,22 @@ const typedChars = (prev: string, next: string): string => {
     return next.length < prev.length ? '\b' : '';
 };
 
+/**
+ * Как часто набранное уходит наружу, мс.
+ *
+ * Каждая буква — это новый повод передавать для лампы своего корабля, а лампа живёт в кадре:
+ * буква перерисовывает всё приложение целиком. При беглом наборе это десяток полных отрисовок
+ * в секунду на пустом месте.
+ *
+ * Копится набранное куском и уходит раз в треть секунды. На глаз ничего не меняется: лампа
+ * и так проигрывает очередь посегментно и своей скоростью (см. useMorseLamp) — знак в ней
+ * идёт около секунды, и треть секунды на его фоне не видна.
+ *
+ * Треть секунды — примерно два-три знака беглого набора: короче не даёт выигрыша, длиннее
+ * начинает читаться задержкой отклика лампы на первую букву.
+ */
+const TYPING_SEND_MS = 300;
+
 /** Поле ввода в стиле Telegram: плашка ответа, кнопка отправки появляется при вводе. */
 export default function Composer({
     replyTo,
@@ -91,13 +108,45 @@ export default function Composer({
         }
     }, [replyId]);
 
+    /**
+     * Набранное, которое ещё не ушло, и таймер его отправки. Первая буква уходит сразу —
+     * иначе лампа отзывалась бы на набор с задержкой в треть секунды, — а следующие за ней
+     * копятся до конца срока и уходят одним куском.
+     *
+     * Отправляет всегда таймер, а не сама правка: правка приходит когда угодно, и решение
+     * «пора» должно быть в одном месте, иначе хвост набора — последние буквы перед паузой —
+     * оставался бы неотправленным.
+     */
+    const pendingRef = useRef('');
+    const sendTimerRef = useRef(0);
+    const onTypedRef = useRef(onTyped);
+    onTypedRef.current = onTyped;
+
+    const flushTyped = () => {
+        sendTimerRef.current = 0;
+        const typed = pendingRef.current;
+        pendingRef.current = '';
+        if (typed) {
+            onTypedRef.current(typed);
+            // Ушло не пусто — значит набор идёт, и следующий срок отсчитываем от этого мига.
+            // Пустой заход отсчёт не продлевает: набор кончился, и ждать больше нечего.
+            sendTimerRef.current = window.setTimeout(flushTyped, paced(TYPING_SEND_MS));
+        }
+    };
+
+    useEffect(() => () => window.clearTimeout(sendTimerRef.current), []);
+
     const handleChange = (nextValue: string) => {
         const prevValue = prevValueRef.current;
         prevValueRef.current = nextValue;
         setValue(nextValue);
         const typed = typedChars(prevValue, nextValue);
-        if (typed) {
-            onTyped(typed);
+        if (!typed) {
+            return;
+        }
+        pendingRef.current += typed;
+        if (!sendTimerRef.current) {
+            flushTyped();
         }
     };
 
@@ -122,7 +171,7 @@ export default function Composer({
     };
 
     return (
-        <form className={styles.composer} ref={ref} onSubmit={handleSubmit}>
+        <form className={styles.composer} ref={ref} onSubmit={handleSubmit} autoComplete="off">
             {replyTo && (
                 <div className={styles.replyBar}>
                     <ReplyQuote author={replyToAuthor ?? undefined} text={<MessageBody message={replyTo} />} />

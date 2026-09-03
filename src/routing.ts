@@ -34,6 +34,12 @@ const routeToUrl = (slug: string | null): string => {
 export const channelLink = (slug: string): string =>
     `${window.location.origin}${window.location.pathname}?channel=${encodeURIComponent(slug)}`;
 
+/**
+ * Адрес главной — та же страница без канала в параметрах. Собирается тут же, где и ссылка
+ * на канал, и по той же причине: адрес приложения знает routing.ts, и знать его дважды незачем.
+ */
+export const homeLink = (): string => `${window.location.origin}${window.location.pathname}`;
+
 /** Адрес и состояние всегда сходятся: назад в браузере работает сам собой. */
 export function useRoute(): Route & { openChannel: (slug: string) => void; openHome: () => void } {
     const [route, setRoute] = useState<Route>(readRoute);

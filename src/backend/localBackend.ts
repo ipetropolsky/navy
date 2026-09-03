@@ -1,28 +1,44 @@
+import { MESSAGE_PAGE } from '@/config/network';
+import { isOnline, watchOnlineStatus } from '@/utils/connection';
+import { isValidSlug } from '@/utils/slug';
+import { localStore } from '@/utils/storage';
+import { moveNotices, refitNotices, shipTitle } from '@shared/notice';
+import { isBerthFree, placeShip } from '@shared/placement';
 import {
     Channel,
+    ChatMessage,
     MAX_COURSE_LENGTH,
     MAX_MESSAGE_LENGTH,
     Member,
     MemberRef,
     Message,
+    MessageDelivery,
     ShipNotice,
+    isManoeuvre,
     isSameBerth,
+    manoeuvreFrom,
     memberRef,
-} from '@/types/channel';
-import { limitMessage, overLimit } from '@/utils/limit';
-import { isValidSlug } from '@/utils/slug';
-import { localStore } from '@/utils/storage';
+} from '@shared/types/channel';
+import { limitMessage, overLimit } from '@shared/utils/limit';
 
-import { refitNotices, shipTitle } from '@/backend/notice';
-import { isBerthFree, placeShip } from '@/backend/placement';
+import { localAccount } from '@/backend/auth';
+import { ServerState, StoredChannel, archiveKey, restoreState } from '@/backend/migrate';
+import {
+    discardOutboxMessage,
+    listOutboxChannels,
+    mergeOutbox,
+    putOutboxMessage,
+    readOutbox,
+    removeOutboxMessage,
+} from '@/backend/outbox';
 import { DEMO_CHANNEL_ID, createDemoChannel } from '@/backend/seed';
 import {
     ChannelBackend,
     ChannelError,
     ChannelEvent,
     ChannelSnapshot,
-    MAX_MEMBERS,
     MemberDraft,
+    MessageDraft,
     Unsubscribe,
 } from '@/backend/types';
 
@@ -45,17 +61,14 @@ const BROADCAST_NAME = 'kilvater';
  * поля переименовали, добавили обязательное, разделили одно на два. Старое состояние
  * тогда не подходит — и это не теория: канал раньше адресовался прямо своим id, потом
  * у него появился отдельный slug, и сохранённые каналы стали не находиться по адресу
- * при живом и на вид исправном хранилище. Проверка версии превращает такую поломку
- * в понятное «начали заново» вместо молчаливого «канала нет».
+ * при живом и на вид исправном хранилище.
  *
- * Данные при несовпадении версии сейчас выбрасываются, и это временно. Пока идёт разработка
- * и настоящих разговоров ни у кого нет, тащить хвост приведений ради вчерашнего тестового
- * канала незачем. Правило же — обратное: к чужой истории относимся бережно, изменения делаем
- * совместимыми, а версия схемы означает «привести данные к нынешней форме», а не «стереть».
- * Здесь должна появиться миграция раньше, чем в канале заведётся первый неигрушечный разговор.
- * Подробно — в docs/BACKEND-API.md, раздел «К чужим данным — бережно».
+ * Несовпадение версии значит «данные другой формы», а не «стереть»: состояние приводится
+ * к нынешней форме приведением на каждый переход (см. `backend/migrate`). Поднимая версию
+ * здесь, туда же кладут и функцию перехода — иначе разговор, лежащий в хранилище, дальше
+ * этой выкладки не проедет.
  */
-const STORAGE_VERSION = 15;
+const STORAGE_VERSION = 16;
 
 /** Ключ, под которым состояние лежало до появления версии. Чистим, чтобы не мусорить. */
 const LEGACY_STORAGE_KEY = 'kilvater.v1';
@@ -63,12 +76,6 @@ const LEGACY_STORAGE_KEY = 'kilvater.v1';
 /** Ответ приходит с задержкой нарочно: у настоящего сервера мгновенных ответов не бывает,
  *  и UI не должен рассчитывать на то, что состояние обновится к следующей строке кода. */
 const LATENCY_MS = 40;
-
-/** Состояние «сервера» целиком: каналов может быть сколько угодно, адресуются по id. */
-interface ServerState {
-    version: number;
-    channels: Record<string, ChannelSnapshot>;
-}
 
 /**
  * Событие без служебных полей — их проставляет сам бэкенд. Omit по объединению нужно
@@ -85,21 +92,24 @@ const delay = <T>(value: T): Promise<T> =>
 
 const readState = (): ServerState => {
     const raw = localStore.read(STORAGE_KEY);
-    if (raw) {
-        try {
-            const parsed = JSON.parse(raw) as Partial<ServerState>;
-            // Версия должна совпасть: состояние прошлой схемы выглядит исправным,
-            // но ведёт себя непредсказуемо — лучше начать заново, чем ловить призраков.
-            if (parsed.version === STORAGE_VERSION && parsed.channels) {
-                return parsed as ServerState;
-            }
-        } catch {
-            // Битый или чужой JSON по нашему ключу: начинаем заново.
-        }
+    const { state, was } = restoreState(raw, STORAGE_VERSION);
+    // Прежнее откладываем, а не переписываем поверх: приведение могло чего-то не знать,
+    // и тогда единственный шанс вернуть разговор — тот самый JSON, каким он лежал.
+    // Раскладывается архив по версиям, так что копия у каждой формы своя и одна.
+    if (raw && was !== null) {
+        localStore.write(archiveKey(STORAGE_KEY, was), raw);
     }
-    // Первый запуск (или смена схемы): кладём демо-канал, чтобы чат было на что посмотреть.
-    // Если состояние есть и версия совпала, сюда не попадаем и ничего не перетираем —
-    // вчерашний разговор остаётся.
+    if (state) {
+        // Переписываем только приведённое: у состояния, и так лежащего нынешней формой,
+        // `was` пуст, и трогать хранилище на каждом чтении незачем.
+        if (was !== null) {
+            localStore.write(STORAGE_KEY, JSON.stringify(state));
+        }
+        return state;
+    }
+    // Восстанавливать оказалось не из чего: первый запуск, чужой JSON под нашим ключом или
+    // форма старше всех написанных приведений. Кладём демо-канал, чтобы чат было на что
+    // посмотреть; отложенное в архив при этом остаётся лежать.
     const fresh: ServerState = { version: STORAGE_VERSION, channels: { [DEMO_CHANNEL_ID]: createDemoChannel() } };
     localStore.write(STORAGE_KEY, JSON.stringify(fresh));
     localStore.remove(LEGACY_STORAGE_KEY);
@@ -163,7 +173,7 @@ const mutateState = <T>(change: (state: ServerState) => T): Promise<T> =>
     });
 
 /** То же самое, но про один канал: его отсутствие — общая для всех ошибка. */
-const mutate = <T>(channelId: string, change: (channel: ChannelSnapshot) => T): Promise<T> =>
+const mutate = <T>(channelId: string, change: (channel: StoredChannel) => T): Promise<T> =>
     mutateState((state) => {
         const channel = state.channels[channelId];
         if (!channel) {
@@ -171,6 +181,58 @@ const mutate = <T>(channelId: string, change: (channel: ChannelSnapshot) => T): 
         }
         return change(channel);
     });
+
+/**
+ * Хвост ленты в MESSAGE_PAGE сообщений — то же самое, что при чтении канала отдаёт
+ * настоящий бэкенд (см. firebaseBackend.ts, readChannel). Хранилище при этом не трогается:
+ * полный разговор остаётся в состоянии как есть, страницей режется только ответ.
+ *
+ * Поля перечислены явно, а не общим `...snapshot`: у StoredChannel есть code (см.
+ * backend/migrate.ts), а наружу, в ChannelSnapshot, ему хода нет ни при каких обстоятельствах
+ * — тем же способом, каким toChannel в firebaseBackend.ts не пускает code из ChannelDoc
+ * дальше себя.
+ */
+const paged = (snapshot: StoredChannel): ChannelSnapshot => {
+    const { messages } = snapshot;
+    const hasMoreMessages = messages.length > MESSAGE_PAGE;
+    return {
+        channel: snapshot.channel,
+        members: snapshot.members,
+        messages: hasMoreMessages ? messages.slice(-MESSAGE_PAGE) : messages,
+        hasMoreMessages,
+    };
+};
+
+/**
+ * Вход, а не рейд, — тому, кто не вошёл: той же общей политикой, что и у настоящего бэкенда
+ * (см. firebaseBackend.ts, readChannelPreview) — участники и лента не отдаются вовсе, только
+ * сам канал, да и тот не целиком. title и closed настоящие — это и есть весь экран входа;
+ * owner гасим нарочно: старшинство — это уже «кто на рейде», а не «что за канал», и превью
+ * настоящего бэкенда его не знает вовсе (Cloud Function отдаёт только title и closed,
+ * см. readChannelPreview) — здесь та же граница проведена вручную, раз сетевой её провести
+ * не за кого. slug и createdAt настоящие: прятать их не от кого — это адрес канала и его
+ * возраст, а не сведения о рейде.
+ */
+const previewOf = (snapshot: StoredChannel): ChannelSnapshot => ({
+    channel: { ...snapshot.channel, owner: undefined },
+    members: [],
+    messages: [],
+    hasMoreMessages: false,
+});
+
+/**
+ * Показать превью вместо настоящего снимка — посторонний (`userId === null`) или вошедший,
+ * ещё не ставший участником именно этого канала: тот же случай, который у настоящего
+ * бэкенда решает `isMember(channelId)` в firestore.rules (см. firebaseBackend.ts,
+ * readChannelForUser). Здесь сверяться не с чем, кроме самого списка участников снимка, —
+ * оттого снимок и доводом: канала нет вовсе (`getChannel`/`getChannelBySlug` на такой случай
+ * отвечают `null` раньше, до этой функции) или он ещё не пришёл к моменту подписки — решать
+ * пока не по чему, и превью не нужно. Не передан вовсе (`undefined`) — вход вызвавшему
+ * не важен (см. `userId` в types.ts), и превью не нужно ни при каком снимке.
+ */
+const needsPreview = (snapshot: StoredChannel | undefined, userId: string | null | undefined): boolean =>
+    userId === null ||
+    (typeof userId === 'string' && !!snapshot && !snapshot.members.some((member) => member.memberId === userId));
 
 export function createLocalBackend(): ChannelBackend {
     // Чтение состояния при старте заодно кладёт демо-канал в хранилище, если его там нет.
@@ -201,6 +263,17 @@ export function createLocalBackend(): ChannelBackend {
     };
 
     /**
+     * То же самое, но только этой вкладке — без провода наружу. Оффлайновая отправка
+     * (см. sendOffline) и смена статуса неотправленного (retryMessage, discardMessage)
+     * не должны показываться соседней вкладке: сервер их не видел, а лента у него одна
+     * на всех. Настоящий провод узнает об этом сообщении, только когда оно и правда уйдёт
+     * (см. flushPending) — тогда оно попадёт в состояние и разойдётся уже обычным emit.
+     */
+    const emitLocal = (channelId: string, payload: ChannelEventPayload): void => {
+        deliver({ ...payload, eventId: randomId('e'), channelId, at: Date.now() } as ChannelEvent);
+    };
+
+    /**
      * Записать в ленту запись от самого канала и разослать её как обычное сообщение.
      *
      * Автор приходит ссылкой, а не одним id, потому что снимок к ней прикладывает тот, кто
@@ -219,7 +292,7 @@ export function createLocalBackend(): ChannelBackend {
     };
 
     /** Позывной и бортовой номер должны быть свободны: иначе в ленте не различить, кто говорит. */
-    const checkDraftIsFree = (snapshot: ChannelSnapshot, draft: MemberDraft, exceptId?: string): void => {
+    const checkDraftIsFree = (snapshot: StoredChannel, draft: MemberDraft, exceptId?: string): void => {
         const others = snapshot.members.filter((member) => member.memberId !== exceptId);
         if (others.some((member) => member.name.toLowerCase() === draft.name.trim().toLowerCase())) {
             throw new ChannelError('name-taken', 'Корабль с таким позывным уже на связи');
@@ -233,7 +306,10 @@ export function createLocalBackend(): ChannelBackend {
      * Вычеркнуть корабль из канала и передать старшинство, если ушёл сам старший. Общее
      * для ухода и высадки: событий это два разных, а происходит одно и то же.
      *
-     * Старшинство переходит к тому, кто дольше всех на рейде. Оставлять канал без старшего
+     * Преемника называет сам уходящий старший (`nextOwnerId`) — на рейде решает не бэкенд,
+     * а тот, кто его оставляет. Названный должен и правда остаться на рейде: подсказка
+     * могла устареть, пока корабль набирал курс, — тогда, как и без подсказки вовсе,
+     * старшинство переходит к тому, кто дольше всех на рейде. Оставлять канал без старшего
      * нельзя: высаживать тогда некому, и первый же ушедший запирал бы правило навсегда.
      * Ушли все — старшего снова нет, и им станет тот, кто придёт следующим.
      *
@@ -244,7 +320,8 @@ export function createLocalBackend(): ChannelBackend {
     const dropMember = async (
         channelId: string,
         memberId: string,
-        check?: (snapshot: ChannelSnapshot) => void
+        check?: (snapshot: StoredChannel) => void,
+        nextOwnerId?: string
     ): Promise<Member | null> => {
         const { gone, channel } = await mutate(channelId, (snapshot) => {
             check?.(snapshot);
@@ -253,7 +330,8 @@ export function createLocalBackend(): ChannelBackend {
             if (snapshot.channel.owner?.memberId !== memberId) {
                 return { gone: member, channel: null };
             }
-            const senior = [...snapshot.members].sort((one, other) => one.joinedAt - other.joinedAt)[0];
+            const named = snapshot.members.find((item) => item.memberId === nextOwnerId);
+            const senior = named ?? [...snapshot.members].sort((one, other) => one.joinedAt - other.joinedAt)[0];
             snapshot.channel.owner = senior ? { memberId: senior.memberId } : undefined;
             return { gone: member, channel: { ...snapshot.channel } };
         });
@@ -264,13 +342,126 @@ export function createLocalBackend(): ChannelBackend {
         return gone;
     };
 
+    /**
+     * Отправка, когда на этот миг связи нет, — sendMessage решает так одним синхронным
+     * вопросом (isOnline), не дожидаясь ничего: у местного «сервера» неоткуда взяться
+     * настоящему таймауту, как у firebaseBackend.ts. Сообщение в общее состояние не
+     * попадает вовсе — иначе оно тут же всплыло бы в соседней вкладке, а localStorage
+     * (то есть «сервер») его не видел. Видна запись только у этой вкладки: через ящик
+     * неотправленного (см. backend/outbox.ts) и синтетическую рассылку emitLocal.
+     *
+     * Автор ищется тем же способом, что и в онлайновой ветке sendMessage, — самим
+     * состоянием, а не memberId в чистом виде: не нашёлся, значит вкладка знает о себе
+     * больше, чем канал, и запись остаётся со ссылкой без имени, как и там.
+     */
+    const sendOffline = (channelId: string, memberId: string, draft: MessageDraft): ChatMessage => {
+        const snapshot = readState().channels[channelId];
+        if (!snapshot) {
+            throw new ChannelError('channel-not-found', 'Канал не найден');
+        }
+        const author = snapshot.members.find((item) => item.memberId === memberId);
+        const delivery: MessageDelivery = {
+            status: 'failed',
+            error: { code: 'offline', message: 'Нет связи. Попробуйте, когда она появится' },
+        };
+        const message: ChatMessage = {
+            messageId: draft.messageId ?? randomId('msg'),
+            author: author ? memberRef(author) : { memberId },
+            text: draft.text,
+            thread: draft.thread,
+            sentAt: Date.now(),
+            delivery,
+        };
+        putOutboxMessage(localAccount().userId, channelId, message);
+        emitLocal(channelId, { type: 'message-added', message });
+        return message;
+    };
+
+    /**
+     * Настоящая запись того, что лежало в ящике неотправленного, — то же самое, что делает
+     * обычная (онлайновая) отправка: попадает в общее состояние и уходит проводом всем.
+     * Зовут её и клик по значку (!) (retryMessage), и автоподхват при восстановлении связи
+     * (см. подписку на watchOnlineStatus ниже) — оба могут прийти почти одновременно за одним
+     * и тем же сообщением, поэтому проверка «уже записано» стоит внутри mutate(), в одной
+     * очереди с самой записью, а не до неё: снаружи между вопросом и ответом успела бы
+     * протиснуться вторая попытка.
+     */
+    const flushPending = async (channelId: string, pending: ChatMessage): Promise<Message> => {
+        const { messageId, author, sentAt, text, thread } = pending;
+        const settled: Message = { messageId, author, sentAt, text, thread };
+        await mutate(channelId, (snapshot) => {
+            if (snapshot.messages.some((item) => item.messageId === messageId)) {
+                return;
+            }
+            snapshot.messages.push(settled);
+        });
+        removeOutboxMessage(localAccount().userId, channelId, messageId);
+        emit(channelId, { type: 'message-added', message: settled });
+        return settled;
+    };
+
+    /**
+     * Автоподхват при восстановлении связи — то самое «повторно нажимать не нужно» из
+     * определения готовности (issue #69, docs/FIREBASE.md, «Ящик неотправленного»). Подписка
+     * одна на весь бэкенд и не привязана к одному каналу: неотправленное может лежать и там,
+     * где сейчас не открыто ни одной вкладки этого канала (см. listOutboxChannels).
+     *
+     * Первый вызов watchOnlineStatus приходит сразу, с состоянием на этот миг: вкладку могли
+     * перезагрузить уже после того, как связь вернулась, — и тогда дослать осевшее в ящике
+     * нужно сразу же, не дожидаясь ещё одной перемены online/offline.
+     */
+    watchOnlineStatus(({ status }) => {
+        if (status !== 'online') {
+            return;
+        }
+        for (const channelId of listOutboxChannels(localAccount().userId)) {
+            for (const pending of readOutbox(localAccount().userId, channelId)) {
+                flushPending(channelId, pending).catch(() => {
+                    // Не вышло и в этот раз — запись остаётся в ящике тем же messageId;
+                    // следующая перемена связи или клик по значку (!) попробуют снова.
+                });
+            }
+        }
+    });
+
     return {
-        getChannel: ({ channelId }) => delay(readState().channels[channelId] ?? null),
+        getChannel: ({ channelId, userId }) => {
+            const snapshot = readState().channels[channelId];
+            if (!snapshot) {
+                return delay(null);
+            }
+            // Посторонний или вошедший не с этого рейда — превью (см. needsPreview выше);
+            // решает именно userId, как его передали, вплоть до подставного (см.
+            // useChannel.ts, memberIdFromUrl, — это и есть проверяемая на этот случай
+            // личность).
+            if (needsPreview(snapshot, userId)) {
+                return delay(previewOf(snapshot));
+            }
+            // Ящик неотправленного — другое дело, и не тем же userId: он всегда свой, по
+            // вкладке (localAccount), а не по личности из довода, будь та кандидатом
+            // с адреса или нет. sendOffline/flushPending/retryMessage пишут и читают его
+            // тем же localAccount().userId (см. выше по файлу), о memberId/userId вызова
+            // вовсе не зная, — слияние должно бить по тому же ключу. Подставь сюда userId
+            // довода, как строкой выше, — своё же неотправленное молча пропадало бы из виду
+            // при каждой перезагрузке той вкладки, что открыта чужим адресом (см. историю
+            // бага — tests/errors.spec.ts, «нет связи… переживает перезагрузку»).
+            return delay(mergeOutbox(paged(snapshot), localAccount().userId, channelId));
+        },
 
-        getChannelBySlug: ({ slug }) =>
-            delay(Object.values(readState().channels).find((snapshot) => snapshot.channel.slug === slug) ?? null),
+        getChannelBySlug: ({ slug, userId }) => {
+            const snapshot = Object.values(readState().channels).find((item) => item.channel.slug === slug);
+            if (!snapshot) {
+                return delay(null);
+            }
+            const { channelId } = snapshot.channel;
+            // См. комментарии у getChannel выше — то же самое разделение ролей userId.
+            if (needsPreview(snapshot, userId)) {
+                return delay(previewOf(snapshot));
+            }
+            return delay(mergeOutbox(paged(snapshot), localAccount().userId, channelId));
+        },
 
-        createChannel: async ({ channel: { slug, title } }) => {
+        createChannel: async ({ channel: { slug, title, closed, code } }) => {
             if (!isValidSlug(slug)) {
                 throw new ChannelError('slug-invalid', 'В адресе только латинские буквы, цифры и дефис');
             }
@@ -280,13 +471,24 @@ export function createLocalBackend(): ChannelBackend {
                 if (!isSlugFree(state, slug)) {
                     throw new ChannelError('slug-taken', 'Канал с таким адресом уже есть');
                 }
+                // closed попадает в Channel, только когда канал и правда закрыт — отсутствие
+                // поля и есть открытый канал (см. Channel.closed в shared/types/channel.ts).
+                // code в Channel не идёт вовсе — он лежит рядом, в StoredChannel (см.
+                // backend/migrate.ts), тем же разделением, что и code/ChannelDoc
+                // у firebaseBackend.ts.
                 const created: Channel = {
                     channelId: randomId('ch'),
                     slug,
                     title: title.trim(),
                     createdAt: Date.now(),
+                    ...(closed ? { closed: true } : {}),
                 };
-                state.channels[created.channelId] = { channel: created, members: [], messages: [] };
+                state.channels[created.channelId] = {
+                    channel: created,
+                    members: [],
+                    messages: [],
+                    ...(closed ? { code: (code ?? '').trim() } : {}),
+                };
                 return created;
             });
             emit(channel.channelId, { type: 'channel-created', channel });
@@ -313,41 +515,79 @@ export function createLocalBackend(): ChannelBackend {
             return delay({ channel: updated });
         },
 
-        join: async ({ channelId, member: draft }) => {
+        /**
+         * Подсказка, не запирающая проверка (см. checkAccessCode в types.ts) — сверяем код
+         * напрямую с тем, что лежит в состоянии: отдельной функции, за пределы правил
+         * не выходящей (previewChannel у настоящего бэкенда), здесь нет и незачем — сверять
+         * не с чем чужим, только со своим же localStorage.
+         */
+        checkAccessCode: async ({ channelId, code }) => {
+            const snapshot = readState().channels[channelId];
+            if (!snapshot) {
+                throw new ChannelError('channel-not-found', 'Канал не найден');
+            }
+            if (snapshot.channel.closed && snapshot.code !== code.trim()) {
+                throw new ChannelError('channel-closed', 'Код доступа неверен. Обратитесь к старшему на рейде.');
+            }
+            return delay(undefined);
+        },
+
+        join: async ({ channelId, member: draft, code }) => {
             // Всё решение целиком — в одной очереди: и сколько кораблей в канале, и свободен ли
             // позывной, и какое место достанется. Спрошенное до очереди устаревает к записи,
             // и на рейде от этого появлялись два корабля на одной точке.
-            const { member, channel } = await mutate(channelId, (current) => {
-                if (current.members.length >= MAX_MEMBERS) {
-                    throw new ChannelError('channel-full', 'В канале уже пять кораблей');
+            const { member, channel, already } = await mutate(channelId, (current) => {
+                const userId = localAccount().userId;
+                // Повторный вызов той же личностью второй корабль не заводит: memberId ===
+                // userId, а второго корабля с тем же memberId на одном рейде не бывает —
+                // то же самое решение и по той же причине, что в joinChannel (functions/src/raid.ts).
+                const existing = current.members.find((item) => item.memberId === userId);
+                if (existing) {
+                    return { member: existing, channel: null, already: true as const };
+                }
+                // Код спрашиваем только у того, кто входит на закрытый рейд по-настоящему первым
+                // разом — тем же условием, что и joinChannel на сервере (functions/src/raid.ts):
+                // свой повторный вход (already, выше) — тот же самый пропуск, а не чужой, а самому
+                // первому на рейде (владельца ещё нет) сверять код не с чем — это он сам его
+                // секунду назад и придумал, заводя канал.
+                if (current.channel.closed && current.channel.owner && current.code !== (code ?? '').trim()) {
+                    throw new ChannelError('channel-closed', 'Код доступа неверен. Обратитесь к старшему на рейде.');
                 }
                 checkDraftIsFree(current, draft);
                 // Место на рейде назначаем здесь, а не в сцене: тогда оно уедет вместе
                 // с участником во все вкладки, и корабль у всех окажется в одном и том же месте.
                 // Выбранное в форме место — пожелание: занято, значит корабль встанет
-                // на свободное.
+                // на свободное. Предела числом кораблей нет вовсе — предел кладёт само место
+                // на рейде: свободных мест не осталось, значит канал полон.
                 const place = placeShip(draft.shipKind, current.members, draft.berth, draft.facing);
                 if (!place) {
                     throw new ChannelError('channel-full', 'На рейде не осталось свободного места');
                 }
+                const joinedAt = Date.now();
                 const joined: Member = {
-                    memberId: randomId('m'),
+                    memberId: userId,
                     name: draft.name.trim(),
                     hullNumber: draft.hullNumber.trim(),
                     shipKind: draft.shipKind,
                     color: draft.color,
                     place,
-                    joinedAt: Date.now(),
+                    joinedAt,
+                    // Заход на рейд — тоже манёвр, и записывается он так же, как перемена
+                    // места: приходить кораблю неоткуда, поэтому запись без `from`.
+                    manoeuvre: manoeuvreFrom(undefined, draft.manoeuvre?.seconds, joinedAt),
                 };
                 current.members.push(joined);
                 // Первый вставший на рейд становится старшим: канал заводят пустым, и до этого
                 // мига отвечать за него некому.
                 if (current.channel.owner) {
-                    return { member: joined, channel: null };
+                    return { member: joined, channel: null, already: false as const };
                 }
                 current.channel.owner = { memberId: joined.memberId };
-                return { member: joined, channel: { ...current.channel } };
+                return { member: joined, channel: { ...current.channel }, already: false as const };
             });
+            if (already) {
+                return delay({ member });
+            }
             emit(channelId, { type: 'member-joined', member });
             if (channel) {
                 emit(channelId, { type: 'channel-updated', channel });
@@ -395,6 +635,13 @@ export function createLocalBackend(): ChannelBackend {
                 if (!stays || turns) {
                     member.place = placeShip(draft.shipKind, others, wanted, draft.facing) ?? member.place;
                 }
+                // Корабль тронулся — запоминаем, откуда и когда: по этой записи вошедшие
+                // посреди манёвра его и доигрывают (см. `Manoeuvre`). Решает тут `isManoeuvre`,
+                // тот же самый, по которому решает и сцена: два мнения о том, тронулся корабль
+                // или нет, были бы двумя разными правдами.
+                if (isManoeuvre(before, member)) {
+                    member.manoeuvre = manoeuvreFrom(before, draft.manoeuvre?.seconds, Date.now());
+                }
                 return { ...member };
             });
             emit(channelId, { type: 'member-updated', member: updated });
@@ -406,14 +653,18 @@ export function createLocalBackend(): ChannelBackend {
             // и рассказывает о том корабле, а новый начинается после неё (см. группировку
             // в `components/chat/MessageList`).
             const author = before ? memberRef(before) : { memberId: updated.memberId };
-            for (const notice of before ? refitNotices(before, updated) : []) {
+            // Строчка о перемене места идёт первой: корабль тронулся, и это новость крупнее
+            // сменившегося позывного. Пишется она в начале манёвра, а не по прибытии, —
+            // канал рассказывает о происходящем, а не подводит итоги.
+            const notices = before ? [...moveNotices(before, updated), ...refitNotices(before, updated)] : [];
+            for (const notice of notices) {
                 // eslint-disable-next-line no-await-in-loop -- очередь тут и нужна: записи ложатся в ленту по одной и по порядку
                 await postNotice(channelId, author, notice, Date.now());
             }
             return delay({ member: updated });
         },
 
-        leave: async ({ channelId, memberId, course = '' }) => {
+        leave: async ({ channelId, memberId, course = '', nextOwnerId }) => {
             // Длину курса проверяет бэкенд, а не только шторка ухода: интерфейсов может стать
             // больше одного, и правило должно жить там, где данные, а не там, где поле ввода.
             const newCourse = course.trim();
@@ -422,7 +673,7 @@ export function createLocalBackend(): ChannelBackend {
             }
             // Кем корабль был, узнаём до того, как вычеркнем его: после вычёркивания
             // называть в строчке будет нечего.
-            const gone = await dropMember(channelId, memberId);
+            const gone = await dropMember(channelId, memberId, undefined, nextOwnerId);
             if (gone) {
                 // Курса может и не быть — тогда поля в записи нет вовсе, а не пустая строка:
                 // «не сказал» и «сказал пустое» в хранилище одно и то же, и хранить это
@@ -472,13 +723,19 @@ export function createLocalBackend(): ChannelBackend {
             if (overLimit(draft.text, MAX_MESSAGE_LENGTH)) {
                 throw new ChannelError('message-too-long', limitMessage(draft.text, MAX_MESSAGE_LENGTH));
             }
+            // Связи нет — не пишем в общее состояние вовсе (см. sendOffline): дальше решает
+            // человек, значок (!) в ленте и retryMessage по нажатию, а восстановление связи
+            // подхватит его и само (см. подписку на watchOnlineStatus выше).
+            if (!isOnline()) {
+                return delay({ message: sendOffline(channelId, memberId, draft) });
+            }
             // Снимок автора складываем в той же очереди, в которой сообщение и записывается:
             // отправитель на этот миг ещё в составе, и другого случая спросить, как он тогда
             // выглядел, уже не будет — снимется с рейда, и в ленте останется одно сообщение.
             const message = await mutate(channelId, (snapshot) => {
                 const author = snapshot.members.find((item) => item.memberId === memberId);
                 const posted: Message = {
-                    messageId: randomId('msg'),
+                    messageId: draft.messageId ?? randomId('msg'),
                     author: author ? memberRef(author) : { memberId },
                     text: draft.text,
                     thread: draft.thread,
@@ -491,13 +748,96 @@ export function createLocalBackend(): ChannelBackend {
             return delay({ message });
         },
 
-        setTyping: ({ channelId, memberId, typing }) => {
-            // Мимо хранилища: печать нигде не оседает.
-            emit(channelId, { type: 'typing', member: { memberId }, typing });
+        /**
+         * Тем же messageId, что и у неудачной попытки, — двойника не будет (см. комментарий
+         * над контрактом, types.ts). Текст берётся из ящика неотправленного, не из довода:
+         * retryMessage его не приносит, он там уже есть, с прошлой попытки.
+         *
+         * Связи всё ещё нет — то же самое неотправленное возвращается как есть, тем же
+         * messageId и тем же текстом: решение здесь одномоментное (isOnline, без ожидания),
+         * и показывать между одним отказом и другим промежуточное «в пути» нечего — в отличие
+         * от firebaseBackend.ts, где между кликом и ответом сервера проходит время.
+         */
+        retryMessage: async ({ channelId, message }) => {
+            const pending = readOutbox(localAccount().userId, channelId).find(
+                (item) => item.messageId === message.messageId
+            );
+            if (!pending) {
+                throw new ChannelError('unknown', 'Сообщение уже не в ящике неотправленного');
+            }
+            if (!isOnline()) {
+                return delay({ message: pending });
+            }
+            const settled = await flushPending(channelId, pending);
+            return delay({ message: settled });
+        },
+
+        // Ни выждать, ни бросить исключение здесь неоткуда: убрать из ящика и разослать
+        // своей же вкладке — оба шага синхронные, и оборачивать их в задержку незачем,
+        // сервер тут и не спрашивали (сервер неотправленного и не видел, см. firestore.rules,
+        // allow update, delete: if false, — тот же довод, что и у firebaseBackend.ts).
+        discardMessage: ({ channelId, message }) => {
+            discardOutboxMessage(channelId, message.messageId);
+            emitLocal(channelId, { type: 'message-removed', message: { messageId: message.messageId } });
             return Promise.resolve();
         },
 
-        subscribe: ({ channelId, onEvent: listener }): Unsubscribe => {
+        // Хранилище держит весь разговор массивом — догрузка здесь просто его срез.
+        // before не нашёлся (гипотетически: сообщений сегодня не удаляют) — курсору не
+        // от чего считать, и это тот же законный пустой ответ, что и у настоящего бэкенда.
+        loadOlderMessages: ({ channelId, before, limit: pageLimit }) => {
+            const snapshot = readState().channels[channelId];
+            const index = snapshot
+                ? snapshot.messages.findIndex((message) => message.messageId === before.messageId)
+                : -1;
+            if (!snapshot || index === -1) {
+                return delay({ messages: [], hasMore: false });
+            }
+            const pageSize = pageLimit ?? MESSAGE_PAGE;
+            const from = Math.max(0, index - pageSize);
+            return delay({ messages: snapshot.messages.slice(from, index), hasMore: from > 0 });
+        },
+
+        /** Тот же приём, что у updateMember: нашли участника в общем состоянии, поправили поле, разослали снимок целиком. */
+        markSeen: async ({ channelId, memberId, message }) => {
+            const updated = await mutate(channelId, (current) => {
+                const member = current.members.find((item) => item.memberId === memberId);
+                if (!member) {
+                    throw new ChannelError('member-not-found', 'Такого корабля в канале нет');
+                }
+                member.lastSeen = { messageId: message.messageId, at: message.sentAt };
+                return { ...member };
+            });
+            emit(channelId, { type: 'member-updated', member: updated });
+            return delay(undefined);
+        },
+
+        /**
+         * Хранилище держит разговор целиком, и точный подсчёт (с разбором своих и системных
+         * записей) был бы здесь не труднее, чем у ChannelSnapshot. Но счёт нарочно такой же
+         * простой и слепой к содержимому, как у firebaseBackend.ts (см. там же и в контракте,
+         * почему): держать два разных поведения по разные стороны одного контракта — плодить
+         * разницу, которую после придётся объяснять, а не саму возможность посчитать точнее.
+         */
+        countUnread: ({ channelId, after }) => {
+            const snapshot = readState().channels[channelId];
+            const count = snapshot ? snapshot.messages.filter((message) => message.sentAt > after).length : 0;
+            return delay({ count });
+        },
+
+        subscribe: ({ channelId, userId, onEvent: listener }): Unsubscribe => {
+            // Тому, кому положен вход, а не рейд (посторонний или чужой вошедший — см.
+            // needsPreview выше), события не идут вовсе — той же политикой, что и у настоящего
+            // бэкенда теперь и на сам канал (см. firebaseBackend.ts, subscribe: там для
+            // чужого все три подписки проваливаются одинаково, permission-denied, включая
+            // документ канала, — раньше документ был публичным и его перемены доходили живьём,
+            // сейчас нет). Экран входа у не-участника поэтому не оживает без перезагрузки —
+            // ровно то же самое видит теперь и вошедший на настоящем бэкенде. Решаем один раз,
+            // на весь срок подписки, по снимку на этот миг: вступление в канал заводит новую
+            // подписку (см. useChannel.ts, переподписка по myId), а не оживляет старую.
+            if (needsPreview(readState().channels[channelId], userId)) {
+                return () => {};
+            }
             const forChannel = listeners.get(channelId) ?? new Set();
             forChannel.add(listener);
             listeners.set(channelId, forChannel);
@@ -508,5 +848,10 @@ export function createLocalBackend(): ChannelBackend {
                 }
             };
         },
+
+        // Настоящему серверу тут неоткуда взяться — соседняя вкладка не роняет связь, — и всё
+        // же слушаем navigator.onLine, а не отвечаем «на связи» всегда: иначе полоску «нет связи»
+        // (см. App.tsx) нечем было бы проверить браузерным прогоном (context.setOffline).
+        watchConnection: ({ onChange }) => watchOnlineStatus(onChange),
     };
 }

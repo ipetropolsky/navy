@@ -8,7 +8,7 @@ const MAX_QUEUE_SEGMENTS = 40;
  * Лампа сигнальщика: transmit() ставит символы в очередь,
  * on — текущее состояние лампы (мягкое вкл/выкл по таймингам Морзе).
  */
-export default function useMorseLamp(): { on: boolean; transmit: (text: string) => void } {
+export default function useMorseLamp(): { on: boolean; transmit: (text: string, restart?: boolean) => void } {
     const [on, setOn] = useState(false);
     const queueRef = useRef<LampSegment[]>([]);
     const runningRef = useRef(false);
@@ -31,12 +31,23 @@ export default function useMorseLamp(): { on: boolean; transmit: (text: string) 
     }, []);
 
     const transmit = useCallback(
-        (text: string) => {
-            const queue = queueRef.current;
+        (text: string, restart = false) => {
             // eslint-disable-next-line @typescript-eslint/no-misused-spread -- передаём по кодпоинтам, эмодзи уходят в fallback-мигание
-            queue.push(...[...text].flatMap(charToSegments));
-            if (queue.length > MAX_QUEUE_SEGMENTS) {
-                queue.splice(0, queue.length - MAX_QUEUE_SEGMENTS);
+            const segments = [...text].flatMap(charToSegments);
+            if (restart) {
+                // Передачу переставили в другое место текста: очередь заменяется целиком.
+                // Обрезать её тут нечем и незачем — кусок приходит отмеренный, длиной
+                // в несколько знаков (см. `hooks/reception`).
+                queueRef.current = segments;
+            } else {
+                const queue = queueRef.current;
+                queue.push(...segments);
+                // Копится очередь от своего же набора и растёт быстрее, чем лампа успевает
+                // её проигрывать. Отрезаем начало: отставшее на полминуты мигание — это уже
+                // не отклик на набор, а сигнал сам по себе.
+                if (queue.length > MAX_QUEUE_SEGMENTS) {
+                    queue.splice(0, queue.length - MAX_QUEUE_SEGMENTS);
+                }
             }
             if (!runningRef.current) {
                 runningRef.current = true;

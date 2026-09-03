@@ -1,11 +1,12 @@
-import { KeyboardEvent, MouseEvent, PointerEvent, useEffect, useLayoutEffect, useRef } from 'react';
+import { KeyboardEvent, MouseEvent, PointerEvent, memo, useEffect, useLayoutEffect, useRef } from 'react';
 
 import Avatar from '@/components/ships/Avatar';
 import CodePennant from '@/components/ships/CodePennant';
 import MemberName from '@/components/ships/MemberName';
 import { useSnackbar } from '@/components/ui/Snackbar';
-import { AuthorLook, Member, MemberRef, Message, authorLook } from '@/types/channel';
+import { PRELOAD_ABOVE } from '@/config/network';
 import { Press, drifted, isTap, selectedSince, startPress } from '@/utils/tap';
+import { AuthorLook, Member, MemberRef, Message, authorLook } from '@shared/types/channel';
 
 import MessageBody from '@/components/chat/MessageBody';
 import ReplyQuote from '@/components/chat/ReplyQuote';
@@ -32,6 +33,18 @@ interface MessageListProps {
      * в котором корабль и надо было увидеть, — и открывают её из списка на связи.
      */
     onHail: (memberId: string) => void;
+    /**
+     * Отправить своё сообщение заново — по клику на значок (!) у не ушедшего (см.
+     * `Message.delivery`, `ChannelController.retryMessage`, docs/FIREBASE.md «Статус
+     * отправки»).
+     */
+    onRetry: (messageId: string) => void;
+    /** Есть ли выше messages ещё лента — то же самое, что `ChannelController.hasMoreMessages`. */
+    hasMoreMessages: boolean;
+    /** Страница уже в пути: пока идёт, вместо даты наверху стоит «Загрузка…». */
+    loadingOlder: boolean;
+    /** Позвать следующую страницу ленты выше уже показанного. */
+    onLoadOlder: () => void;
 }
 
 /**
@@ -45,7 +58,17 @@ const STICK_SLOP = 24;
 const NOTICE_TITLE = 'Техническое сообщение';
 
 /** Лента сообщений в стиле Telegram: группировка по автору, ответы, тап по сообщению — ответить. */
-export default function MessageList({ messages, members, myId, onReply, onHail }: MessageListProps) {
+function MessageList({
+    messages,
+    members,
+    myId,
+    onReply,
+    onHail,
+    onRetry,
+    hasMoreMessages,
+    loadingOlder,
+    onLoadOlder,
+}: MessageListProps) {
     const listRef = useRef<HTMLDivElement>(null);
     const notify = useSnackbar();
 
@@ -143,6 +166,73 @@ export default function MessageList({ messages, members, myId, onReply, onHail }
             observer.disconnect();
         };
     }, []);
+
+    /**
+     * Когда звать следующую страницу — по прокрутке, а не по числу загруженного: строчки
+     * разной высоты, и треть ленты (см. `PRELOAD_ABOVE`) меряется экранами, а не репликами.
+     *
+     * Тройка входов, от которых это зависит, держится ссылками: слушатель заводится один раз,
+     * а не переподписывается на каждый пришедший снимок или каждую смену loadingOlder.
+     */
+    const hasMoreRef = useRef(hasMoreMessages);
+    hasMoreRef.current = hasMoreMessages;
+    const loadingOlderRef = useRef(loadingOlder);
+    loadingOlderRef.current = loadingOlder;
+    const onLoadOlderRef = useRef(onLoadOlder);
+    onLoadOlderRef.current = onLoadOlder;
+
+    useEffect(() => {
+        const list = listRef.current;
+        if (!list) {
+            return undefined;
+        }
+        const watchPreload = (): void => {
+            if (!hasMoreRef.current || loadingOlderRef.current) {
+                return;
+            }
+            if (list.scrollTop <= PRELOAD_ABOVE * list.scrollHeight) {
+                onLoadOlderRef.current();
+            }
+        };
+        list.addEventListener('scroll', watchPreload, { passive: true });
+        // Первая страница может не заполнить окошко (короткий разговор после открытия
+        // длинного) — тогда прокрутки не будет вовсе, а без явного вызова догрузка
+        // не позвалась бы никогда.
+        watchPreload();
+        return () => list.removeEventListener('scroll', watchPreload);
+    }, []);
+
+    /**
+     * Сотня сообщений, вставленных наверх, меняет высоту ленты. Якорь низа (`.bottomAnchor`)
+     * тут не спасает: опорным узлом браузер берёт только то, что видно, а якорь у отмотанной
+     * вверх ленты за экраном — держать ею нечего. Замер это подтвердил: без своей поправки
+     * лента подскакивала (см. проверку «подгрузка старой страницы не двигает то, что уже
+     * видно» в tests/channel.spec.ts).
+     *
+     * Поэтому сдвиг досчитываем сами: высоту запоминаем после каждой отрисовки, а на следующей,
+     * если первое сообщение сменилось (значит, догрузка что-то вставила выше него), двигаем
+     * scrollTop ровно на прирост высоты — вид остаётся там же, где его оставил человек.
+     *
+     * Без списка зависимостей: застать прирост высоты и запомнить его нужно после всякой
+     * отрисовки, а не только после смены messages, — самой высоте случается меняться и от
+     * чужого события, пришедшего между отрисовками с догрузкой.
+     */
+    const lastHeightRef = useRef(0);
+    const firstIdRef = useRef<string | null>(null);
+
+    useLayoutEffect(() => {
+        const list = listRef.current;
+        if (!list) {
+            return;
+        }
+        const firstId = messages[0]?.messageId ?? null;
+        const prepended = firstIdRef.current !== null && firstId !== firstIdRef.current;
+        if (prepended) {
+            list.scrollTop += list.scrollHeight - lastHeightRef.current;
+        }
+        firstIdRef.current = firstId;
+        lastHeightRef.current = list.scrollHeight;
+    });
 
     /** С чего началось нажатие: откуда и при каком выделении (см. `@/utils/tap`). */
     const pressRef = useRef<Press | null>(null);
@@ -259,6 +349,10 @@ export default function MessageList({ messages, members, myId, onReply, onHail }
      * и аватаркой. Сама запись о переоснащении остаётся в прежней цепочке: она про то,
      * что случилось с тем кораблём, а новый начинается после неё.
      */
+    // Цитируемое ищем по указателю, а не перебором: перебор внутри перебора — это квадрат
+    // от длины разговора, и на сотнях реплик он уже заметен.
+    const byMessageId = new Map(messages.map((message) => [message.messageId, message]));
+
     const eras = new Map<string, number>();
     const groupKeys = messages.map((message) => {
         const { memberId } = message.author;
@@ -276,134 +370,190 @@ export default function MessageList({ messages, members, myId, onReply, onHail }
 
     return (
         <div ref={listRef} className={styles.list}>
-            {messages.length > 0 && <div className={styles.dateChip}>{formatDate(messages[0].sentAt)}</div>}
-            {messages.map((message, index) => {
-                const own = message.author.memberId === myId;
-                const author = lookOf(message.author);
-                // На рейде ли он ещё. Оклик есть только у тех, кто есть: окликать некого,
-                // и мигать в кадре нечему — корабль ушёл.
-                const afloat = byId.has(message.author.memberId);
-                const firstOfGroup = index === 0 || groupKeys[index - 1] !== groupKeys[index];
-                const lastOfGroup = index === messages.length - 1 || groupKeys[index + 1] !== groupKeys[index];
-                // Место под аватарку держим у всякой чужой строки, системной в том числе:
-                // системная запись стоит в цепочке своего корабля и с его аватаркой.
-                const avatar = !own && (
-                    <div className={styles.avatarCell}>
-                        {lastOfGroup && author && (
-                            <Avatar
-                                number={author.hullNumber}
-                                name={author.name}
-                                action={
-                                    afloat
-                                        ? {
-                                              title: `Окликнуть «${author.name}»`,
-                                              onClick: () => onHail(message.author.memberId),
-                                          }
-                                        : undefined
-                                }
-                            />
-                        )}
-                    </div>
-                );
-
-                /*
-                 * Системная запись стоит на месте пузыря и живёт по тем же правилам: своя
-                 * плашка, время в углу, ответ по нажатию. Отличается она одним цветом —
-                 * ни размером, ни отступами, ни скруглениями: это такое же сообщение канала,
-                 * и выглядеть заплаткой в ленте ему незачем.
-                 */
-                const system = message.kind === 'system';
-                const plaque = system
-                    ? { own: styles.systemNoteOwn, other: styles.systemNote }
-                    : { own: styles.bubbleOwn, other: styles.bubble };
-
-                /*
-                 * Позывной у служебной строчки стоит всегда — и у своей, и у второй подряд
-                 * в цепочке. Фраза в ней безличная («Сменил позывной»), и без имени над ней
-                 * непонятно, кто сменил; у реплики такой беды нет — там кто говорит, видно
-                 * по стороне ленты и по аватарке.
-                 *
-                 * Рядом с позывным — ответный вымпел: он и помечает строчку служебной вместо
-                 * прежних полоски и мелкого кегля. Нажатие по нему говорит, что он значит,
-                 * и дальше пузыря не идёт: нажатие по самому пузырю — это ответ на строчку,
-                 * а вымпел не про ответ.
-                 */
-                const noticeHead = system && author && (
-                    <span className={styles.noticeHead}>
-                        <MemberName name={author.name} color={author.color} />
-                        <button
-                            type="button"
-                            className={styles.pennantButton}
-                            aria-label={NOTICE_TITLE}
-                            title={NOTICE_TITLE}
-                            // Нажатие по вымпелу не утапливает плашку: оно про вымпел, а не про
-                            // ответ, и плашка на него отзываться не должна. Останавливаем именно
-                            // нажатие, а не только щелчок ниже: утопление плашки заводится
-                            // с `pointerdown`, и до `onClick` она успела бы моргнуть.
-                            onPointerDown={(event) => event.stopPropagation()}
-                            onClick={(event) => {
-                                event.stopPropagation();
-                                notify(NOTICE_TITLE);
-                            }}
-                        >
-                            <CodePennant />
-                        </button>
-                    </span>
-                );
-
-                const thread = system ? undefined : message.thread;
-                const replyTo = thread
-                    ? messages.find((candidate) => candidate.messageId === thread.messageId)
-                    : undefined;
-
-                return (
-                    <div key={message.messageId} className={own ? styles.rowOwn : styles.row}>
-                        {avatar}
-                        <div
-                            role="button"
-                            tabIndex={0}
-                            className={own ? plaque.own : plaque.other}
-                            onPointerDown={handlePress}
-                            onClick={(event) => handleTap(event, message)}
-                            onKeyDown={(event) => handleKey(event, message)}
-                            title="Ответить"
-                        >
-                            {noticeHead}
-                            {!system && !own && firstOfGroup && author && (
-                                <MemberName name={author.name} color={author.color} />
-                            )}
-                            {replyTo && (
-                                <span className={styles.replyCell}>
-                                    <ReplyQuote
-                                        author={lookOf(replyTo.author)}
-                                        text={<MessageBody message={replyTo} />}
-                                    />
-                                </span>
-                            )}
-                            {/*
-                             * Фраза обёрнута в один блок нарочно: плашка выкладывает содержимое
-                             * колонкой, и без обёртки каждый кусок строчки — текст, помеченное
-                             * слово — вставал бы на свою строку.
-                             */}
-                            <span className={styles.text}>
-                                <MessageBody message={message} />
-                                <span className={styles.time}>{formatTime(message.sentAt)}</span>
-                            </span>
-                        </div>
-                    </div>
-                );
-            })}
             {/*
-             * Якорь низа: полоска в пиксель под последней строчкой. Она одна в ленте помечена
-             * `overflow-anchor: auto`, поэтому именно за неё браузер держится, когда содержимое
-             * над ней меняется, — новое сообщение вставляется сверху от якоря, а вид остаётся
-             * на месте. Прокрутки при этом нет вовсе: место держит раскладка, до кадра,
-             * а не скрипт после него.
-             *
-             * Стоит в конце списка, а не в начале с перевёрнутым порядком: лента обязана лежать
-             * в DOM по времени — от этого зависят и выделение с копированием, и чтение вслух.
+             * Строчки лежат отдельным блоком внутри ленты, а не прямо в ней: поля и просветы
+             * между ними живут на нём (см. .rows в стилях).
              */}
-            <div className={styles.bottomAnchor} />
+            <div className={styles.rows}>
+                {messages.length > 0 && (
+                    // Место занято в любом случае, поэтому «Загрузка…» встаёт туда же, где обычно
+                    // дата: подставь дату сразу — лента дёрнулась бы на высоту чипа при её появлении.
+                    <div className={styles.dateChip}>{loadingOlder ? 'Загрузка…' : formatDate(messages[0].sentAt)}</div>
+                )}
+                {messages.map((message, index) => {
+                    const own = message.author.memberId === myId;
+                    const author = lookOf(message.author);
+                    // На рейде ли он ещё. Оклик есть только у тех, кто есть: окликать некого,
+                    // и мигать в кадре нечему — корабль ушёл.
+                    const afloat = byId.has(message.author.memberId);
+                    const firstOfGroup = index === 0 || groupKeys[index - 1] !== groupKeys[index];
+                    const lastOfGroup = index === messages.length - 1 || groupKeys[index + 1] !== groupKeys[index];
+                    // Место под аватарку держим у всякой чужой строки, системной в том числе:
+                    // системная запись стоит в цепочке своего корабля и с его аватаркой.
+                    const avatar = !own && (
+                        <div className={styles.avatarCell}>
+                            {lastOfGroup && author && (
+                                <Avatar
+                                    number={author.hullNumber}
+                                    name={author.name}
+                                    action={
+                                        afloat
+                                            ? {
+                                                  title: `Окликнуть «${author.name}»`,
+                                                  onClick: () => onHail(message.author.memberId),
+                                              }
+                                            : undefined
+                                    }
+                                />
+                            )}
+                        </div>
+                    );
+
+                    /*
+                     * Системная запись стоит на месте пузыря и живёт по тем же правилам: своя
+                     * плашка, время в углу, ответ по нажатию. Отличается она одним цветом —
+                     * ни размером, ни отступами, ни скруглениями: это такое же сообщение канала,
+                     * и выглядеть заплаткой в ленте ему незачем.
+                     */
+                    const system = message.kind === 'system';
+                    const plaque = system
+                        ? { own: styles.systemNoteOwn, other: styles.systemNote }
+                        : { own: styles.bubbleOwn, other: styles.bubble };
+
+                    /*
+                     * Статус доставки — только у своей же реплики: служебная запись пишется
+                     * сервером напрямую и через ящик неотправленного не проходит никогда,
+                     * а у чужой реплики delivery не бывает подавно — это её собственный статус
+                     * у отправителя, не то, что видно со стороны (см. Message.delivery,
+                     * backend/outbox.ts).
+                     */
+                    const delivery = !system && own ? message.delivery : undefined;
+
+                    /*
+                     * Позывной у служебной строчки стоит всегда — и у своей, и у второй подряд
+                     * в цепочке. Фраза в ней безличная («Сменил позывной»), и без имени над ней
+                     * непонятно, кто сменил; у реплики такой беды нет — там кто говорит, видно
+                     * по стороне ленты и по аватарке.
+                     *
+                     * Рядом с позывным — ответный вымпел: он и помечает строчку служебной вместо
+                     * прежних полоски и мелкого кегля. Нажатие по нему говорит, что он значит,
+                     * и дальше пузыря не идёт: нажатие по самому пузырю — это ответ на строчку,
+                     * а вымпел не про ответ.
+                     */
+                    const noticeHead = system && author && (
+                        <span className={styles.noticeHead}>
+                            <MemberName name={author.name} color={author.color} />
+                            <button
+                                type="button"
+                                className={styles.pennantButton}
+                                aria-label={NOTICE_TITLE}
+                                title={NOTICE_TITLE}
+                                // Нажатие по вымпелу не утапливает плашку: оно про вымпел, а не про
+                                // ответ, и плашка на него отзываться не должна. Останавливаем именно
+                                // нажатие, а не только щелчок ниже: утопление плашки заводится
+                                // с `pointerdown`, и до `onClick` она успела бы моргнуть.
+                                onPointerDown={(event) => event.stopPropagation()}
+                                onClick={(event) => {
+                                    event.stopPropagation();
+                                    notify(NOTICE_TITLE);
+                                }}
+                            >
+                                <CodePennant />
+                            </button>
+                        </span>
+                    );
+
+                    const thread = system ? undefined : message.thread;
+                    const replyTo = thread ? byMessageId.get(thread.messageId) : undefined;
+
+                    return (
+                        <div key={message.messageId} className={own ? styles.rowOwn : styles.row}>
+                            {avatar}
+                            <div
+                                role="button"
+                                tabIndex={0}
+                                className={own ? plaque.own : plaque.other}
+                                onPointerDown={handlePress}
+                                onClick={(event) => handleTap(event, message)}
+                                onKeyDown={(event) => handleKey(event, message)}
+                                title="Ответить"
+                            >
+                                {noticeHead}
+                                {!system && !own && firstOfGroup && author && (
+                                    <MemberName name={author.name} color={author.color} />
+                                )}
+                                {replyTo && (
+                                    <span className={styles.replyCell}>
+                                        <ReplyQuote
+                                            author={lookOf(replyTo.author)}
+                                            text={<MessageBody message={replyTo} />}
+                                        />
+                                    </span>
+                                )}
+                                {/*
+                                 * Фраза обёрнута в один блок нарочно: плашка выкладывает содержимое
+                                 * колонкой, и без обёртки каждый кусок строчки — текст, помеченное
+                                 * слово — вставал бы на свою строку.
+                                 */}
+                                <span className={styles.text}>
+                                    <MessageBody message={message} />
+                                    {delivery?.status === 'pending' && (
+                                        <span
+                                            className={styles.deliveryPending}
+                                            role="status"
+                                            aria-label="Отправляется"
+                                            title="Отправляется"
+                                        />
+                                    )}
+                                    {delivery?.status === 'failed' && (
+                                        <button
+                                            type="button"
+                                            className={styles.deliveryFailed}
+                                            aria-label="Не отправлено. Нажмите, чтобы отправить снова"
+                                            title={
+                                                delivery.error?.message ??
+                                                'Не отправлено. Нажмите, чтобы отправить снова'
+                                            }
+                                            // Тот же приём, что и у вымпела над служебной строчкой
+                                            // (см. pennantButton выше): нажатие по значку — про сам
+                                            // значок, а не про ответ на сообщение, которым отвечает
+                                            // вся плашка.
+                                            onPointerDown={(event) => event.stopPropagation()}
+                                            onClick={(event) => {
+                                                event.stopPropagation();
+                                                onRetry(message.messageId);
+                                            }}
+                                        >
+                                            !
+                                        </button>
+                                    )}
+                                    <span className={styles.time}>{formatTime(message.sentAt)}</span>
+                                </span>
+                            </div>
+                        </div>
+                    );
+                })}
+                {/*
+                 * Якорь низа: полоска в пиксель под последней строчкой. Она одна в ленте помечена
+                 * `overflow-anchor: auto`, поэтому именно за неё браузер держится, когда содержимое
+                 * над ней меняется, — новое сообщение вставляется сверху от якоря, а вид остаётся
+                 * на месте. Прокрутки при этом нет вовсе: место держит раскладка, до кадра,
+                 * а не скрипт после него.
+                 *
+                 * Стоит в конце списка, а не в начале с перевёрнутым порядком: лента обязана лежать
+                 * в DOM по времени — от этого зависят и выделение с копированием, и чтение вслух.
+                 */}
+                <div className={styles.bottomAnchor} />
+            </div>
         </div>
     );
 }
+
+/**
+ * Лента перерисовывается только по своим входным данным.
+ *
+ * Растёт она без предела — сотни пузырей с аватарками, цитатами и вымпелами, — а стоит внутри
+ * коробки, которую человек постоянно тянет за кромку. Размер ленты задаёт раскладка, и от него
+ * в разметке пузырей не меняется ничего: перерисовывать её на каждый шаг пальца незачем.
+ */
+export default memo(MessageList);

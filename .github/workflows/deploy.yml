@@ -3,6 +3,13 @@ name: Build & Deploy to GitHub Pages
 on:
     push:
         branches: ['master']
+    # Запуск руками: настройки Firebase живут не в репозитории, а в переменных, и меняются
+    # без коммита — а Pages держит ту сборку, что уехала последней. Без этой строчки после
+    # правки переменной пришлось бы выдумывать пустой коммит, чтобы выложить то же самое,
+    # но с другими настройками. Ветку при запуске выбирают в интерфейсе Actions; сама кнопка
+    # появляется только когда воркфлоу с этой строчкой лежит в ветке по умолчанию — так
+    # устроен GitHub, и в ветке рядом её ещё не будет.
+    workflow_dispatch:
 
 permissions:
     contents: read
@@ -29,11 +36,44 @@ jobs:
             - name: Install
               run: npm ci
 
+            # Свой package.json и своя установка: node_modules/firebase-admin и firebase-functions
+            # лежат в functions/, а не в корне, и npm ci из корня их не ставит. Без этого шага
+            # Check ниже не разрешит 'firebase-admin/app' и подобные импорты в functions/src —
+            # ts-check из корня проверяет и этот каталог тоже (см. tsconfig.json).
+            - name: Install functions
+              run: npm ci --prefix functions
+
             - name: Check
               run: npm run check
 
+            # Отдельная сборка функций: npm run build ниже собирает только клиентский бандл
+            # (vite), а то, что реально уезжает в Cloud Functions, собирает свой tsc со своим
+            # tsconfig.json (module: NodeNext) — и без этого шага поломка именно этой сборки
+            # осталась бы незамеченной до самого деплоя функций.
+            - name: Build functions
+              run: npm --prefix functions run build
+
+            # Настройки Firebase приезжают из настроек репозитория: Settings → Secrets and
+            # variables → Actions. Страница одна, вкладки две, и заглядываем мы в обе —
+            # сначала в Variables, потом в Secrets: незаданная переменная в выражении пуста,
+            # а пустое `||` уходит вправо.
+            #
+            # Класть их правильно в Variables. Секрет тут ничего не прячет: всё, что начинается
+            # на VITE_, уезжает в бандл к каждому, кто откроет страницу, — секретность кончается
+            # ровно на логе сборки, где значения станут звёздочками и перестанут читаться глазами.
+            # Но перепутанная вкладка — не та ошибка, за которую стоит платить выкладкой:
+            # без ключей сборка теперь отказывает вовсе (assertBackend в vite.config.ts),
+            # и красная выкладка из-за соседней вкладки никому не нужна.
             - name: Build
               run: npm run build
+              env:
+                  VITE_BACKEND: ${{ vars.VITE_BACKEND || secrets.VITE_BACKEND }}
+                  VITE_FIREBASE_API_KEY: ${{ vars.VITE_FIREBASE_API_KEY || secrets.VITE_FIREBASE_API_KEY }}
+                  VITE_FIREBASE_AUTH_DOMAIN: ${{ vars.VITE_FIREBASE_AUTH_DOMAIN || secrets.VITE_FIREBASE_AUTH_DOMAIN }}
+                  VITE_FIREBASE_PROJECT_ID: ${{ vars.VITE_FIREBASE_PROJECT_ID || secrets.VITE_FIREBASE_PROJECT_ID }}
+                  VITE_FIREBASE_STORAGE_BUCKET: ${{ vars.VITE_FIREBASE_STORAGE_BUCKET || secrets.VITE_FIREBASE_STORAGE_BUCKET }}
+                  VITE_FIREBASE_MESSAGING_SENDER_ID: ${{ vars.VITE_FIREBASE_MESSAGING_SENDER_ID || secrets.VITE_FIREBASE_MESSAGING_SENDER_ID }}
+                  VITE_FIREBASE_APP_ID: ${{ vars.VITE_FIREBASE_APP_ID || secrets.VITE_FIREBASE_APP_ID }}
 
             - name: Upload Pages artifact
               uses: actions/upload-pages-artifact@v4

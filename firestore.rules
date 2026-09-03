@@ -1,0 +1,255 @@
+rules_version = '2';
+
+// Правила безопасности «Кильватера».
+//
+// Документ канала, участники, брони мест и лента — только тому, кто сам стоит на этом рейде
+// (isMember): постороннему и чужому вошедшему они не видны вовсе. Название канала и то, закрыт
+// ли он, узнают отдельной функцией (previewChannel, см. functions/src/index.ts и preview.ts) —
+// она же при входе в закрытый канал сверяет код доступа. Правило Firestore не умеет открыть
+// в документе одно поле, оставив остальные закрытыми (в частности, сам код доступа), а функция
+// с Admin SDK может отдать только то, что сама решит.
+// Писать — только вошедший и только про себя. Рейд не пишет никто: участия и брони мест заводит
+// серверный код, а он ходит мимо правил (Admin SDK). Закрытость канала и код доступа — исключение:
+// их задаёт клиент сам, один раз, при создании канала (см. closedSane ниже) — сервер здесь ни
+// при чём, потому что решать пока нечего, само значение либо годится, либо нет.
+//
+// Правило — последний рубеж, а не первый: оно не заменяет проверок в бэкенде, оно ловит того,
+// кто пришёл мимо приложения. Поэтому проверяет оно только то, на что хватает одного взгляда
+// на запись: кто пишет, своё ли, не длиннее ли предела. Всё, что зависит от состояния рейда, —
+// свободно ли место, занят ли позывной, кто старший, — правилом не выражается вовсе; такое
+// пишет сервер (см. docs/FIREBASE.md, «Правила рейда живут на сервере»).
+//
+// Проверяются правила не глазами: firestore/rules.test.ts, `npm run test:emulator`.
+
+service cloud.firestore {
+    match /databases/{database}/documents {
+        // Пределы длины продублированы числами: импортов в языке правил нет. Разъехаться
+        // с `shared/types/channel.ts` им не даёт юнит — он читает этот файл и сверяет числа.
+        function maxTitle() { return 40; }
+        function maxSlug() { return 40; }
+        function maxText() { return 500; }
+        function maxName() { return 20; }
+        function maxHull() { return 3; }
+        // Цвет — «#8ecae6», семь символов; шестнадцати хватит с запасом.
+        function maxColor() { return 16; }
+        // Код доступа закрытого канала — фраза, а не пароль; тридцати двух символов хватит
+        // с большим запасом.
+        function maxCode() { return 32; }
+
+        function signedIn() { return request.auth != null; }
+        function me() { return request.auth.uid; }
+        function isMe(userId) { return signedIn() && request.auth.uid == userId; }
+
+        function channelData(channelId) {
+            return get(/databases/$(database)/documents/channels/$(channelId)).data;
+        }
+
+        // Старший на рейде. Корабль и личность — одно лицо (memberId === userId), поэтому
+        // сравнивать есть с чем. Нет канала или нет старшего — старших нет вовсе.
+        function isOwner(channelId) {
+            return signedIn() && channelData(channelId).get(['owner', 'memberId'], '') == me();
+        }
+
+        // Стоит ли обратившийся на этом рейде. Лишнее чтение на каждое обращение — цена
+        // за то, чтобы участников, брони мест и ленту не читал и не писал в них посторонний
+        // (см. общий комментарий вверху файла).
+        function isMember(channelId) {
+            return signedIn() && exists(/databases/$(database)/documents/channels/$(channelId)/members/$(me()));
+        }
+
+        // Правка перечисленных полей и ничего больше.
+        function onlyChanges(fields) {
+            return request.resource.data.diff(resource.data).affectedKeys().hasOnly(fields);
+        }
+
+        // Снимок вида при сообщении: как корабль выглядел, когда говорил. `hasOnly` видит
+        // только верхний ярус ключей, поэтому вложенное приходится оговаривать отдельно —
+        // иначе мимо предела в 500 символов проезжает документ почти в мегабайт, публичный
+        // и неудаляемый.
+        function lookSane(author) {
+            return !('look' in author) || (
+                author.look.keys().hasOnly(['name', 'hullNumber', 'color'])
+                && author.look.get('name', '').size() <= maxName()
+                && author.look.get('hullNumber', '').size() <= maxHull()
+                && author.look.get('color', '').size() <= maxColor()
+            );
+        }
+
+        // Ответ на реплику — ссылка, а не место для груза.
+        function threadSane(message) {
+            return !('thread' in message) || (
+                message.thread.keys().hasOnly(['messageId'])
+                && message.thread.messageId is string
+            );
+        }
+
+        // Серверное время ставит сервер. Без этого `serverAt` — обычное поле, и стоять в нём
+        // может что угодно, а по нему разбирают случаи и будут сортировать ленту.
+        function stamped() {
+            return request.resource.data.serverAt == request.time;
+        }
+
+        // closed и code при создании канала ходят строго парой: открытый канал — ни того,
+        // ни другого поля вовсе (как и `owner` — нет значения, пока нечего в нём хранить),
+        // закрытый — closed == true и непустой code в пределах длины. «Закрыт, но кода нет»
+        // или «код есть у открытого» смысла не несут, поэтому и не допускаются.
+        function closedSane(data) {
+            return (!('closed' in data) && !('code' in data))
+                || (
+                    data.closed == true
+                    && data.code is string
+                    && data.code.size() > 0
+                    && data.code.size() <= maxCode()
+                );
+        }
+
+        // Личность. Читает и пишет только она сама: здесь лежит почта, а на рейде человека
+        // представляет корабль, а не аккаунт.
+        match /users/{userId} {
+            allow get: if isMe(userId);
+            allow list: if false;
+            allow create, update: if isMe(userId)
+                && request.resource.data.keys().hasOnly(['createdAt', 'account', 'serverAt'])
+                && request.resource.data.createdAt is number
+                && request.resource.data.account.keys().hasOnly(['name', 'email'])
+                && stamped();
+            // Личность не стирается: за ней тянутся корабли в каналах, и убрать их правилом нечем.
+            allow delete: if false;
+
+            // Реестр участий пишется той же транзакцией, что и сам корабль, — то есть сервером.
+            match /channels/{channelId} {
+                allow read: if isMe(userId);
+                allow write: if false;
+            }
+
+            // Личная история кораблей: чем и в каком канале выходили. Пишет и читает только
+            // хозяин, а запись, попав сюда, остаётся как есть — переписывать в истории нечего,
+            // разве что завести новую.
+            match /ships/{shipId} {
+                allow read: if isMe(userId);
+                allow create: if isMe(userId)
+                    && request.resource.data.keys().hasOnly(
+                        ['name', 'hullNumber', 'shipKind', 'color', 'channelId', 'createdAt', 'serverAt']
+                    )
+                    && request.resource.data.name is string
+                    && request.resource.data.name.size() <= maxName()
+                    && request.resource.data.hullNumber is string
+                    && request.resource.data.hullNumber.size() <= maxHull()
+                    && request.resource.data.shipKind is string
+                    && request.resource.data.color is string
+                    && request.resource.data.color.size() <= maxColor()
+                    && request.resource.data.channelId is string
+                    && request.resource.data.createdAt is number
+                    && stamped();
+                allow update, delete: if false;
+            }
+        }
+
+        // Бронь адреса. Заводится вместе с каналом, не переписывается, освобождается только
+        // при переименовании — старшим и вместе с новой. `get` без `list`: по ссылке адрес
+        // находят, а перебрать все — незачем и нельзя.
+        match /slugs/{slug} {
+            allow get: if true;
+            allow list: if false;
+            allow create: if signedIn()
+                && request.resource.data.keys().hasOnly(['channelId', 'createdAt'])
+                && request.resource.data.channelId is string
+                // Канал должен существовать после этой же записи — то есть бронь пишется
+                // в одной транзакции с ним. Иначе адрес занимается под несуществующий канал,
+                // и освободить его потом нельзя ничем: у канала, которого нет, нет и старшего,
+                // а значит, некому и удалить бронь. Один такой заход выжигает адрес навсегда.
+                && existsAfter(/databases/$(database)/documents/channels/$(request.resource.data.channelId));
+            // Занятый адрес не переезжает на другой канал: это и есть уникальность.
+            allow update: if false;
+            allow delete: if isOwner(resource.data.channelId);
+        }
+
+        match /channels/{channelId} {
+            // Участнику — весь документ, посторонним и чужим вошедшим — никому: по ссылке
+            // в канал по-прежнему приходят, но название и закрытость им отдаёт previewChannel,
+            // а не этот документ напрямую (см. общий комментарий вверху файла). Списком —
+            // никому, иначе рейды перебираются один за другим.
+            allow get: if isMember(channelId);
+            allow list: if false;
+
+            // Старшинство при заведении не назначается: старшего выбирает сервер, когда
+            // на рейд встаёт первый корабль. Поэтому `owner` в списке полей нет.
+            //
+            // closed/code — необязательная пара, см. closedSane; оба неизменны после создания
+            // (их нет в onlyChanges у update ниже) — отпереть канал заново или сменить код
+            // можно только заведя канал заново, под новым адресом.
+            allow create: if signedIn()
+                && request.resource.data.keys().hasOnly(['slug', 'title', 'createdAt', 'serverAt', 'closed', 'code'])
+                && request.resource.data.title is string
+                && request.resource.data.title.size() <= maxTitle()
+                && request.resource.data.slug is string
+                && request.resource.data.slug.size() <= maxSlug()
+                && request.resource.data.createdAt is number
+                && closedSane(request.resource.data)
+                && stamped();
+
+            // Переименование — дело старшего, и только переименование: старшинство передаёт
+            // сервер, мимо правил.
+            allow update: if isOwner(channelId)
+                && onlyChanges(['slug', 'title', 'serverAt'])
+                && request.resource.data.title is string
+                && request.resource.data.title.size() <= maxTitle()
+                && request.resource.data.slug is string
+                && request.resource.data.slug.size() <= maxSlug()
+                && stamped();
+
+            // Канал не стирается: за ним лента, корабли и брони, а правилом их не убрать.
+            allow delete: if false;
+
+            // Корабль. Ставит и снимает его сервер: и место, и свободный позывной, и номер
+            // зависят от того, что в этот миг на рейде.
+            match /members/{memberId} {
+                // Позывные — только тому, кто сам стоит на этом рейде: посторонний и чужой
+                // вошедший до списка вообще не доходят (см. общий комментарий вверху файла) —
+                // им previewChannel отдаёт только название канала и его закрытость.
+                allow read: if isMember(channelId);
+                allow create, delete: if false;
+                // Своё у человека здесь одно — докуда он дочитал.
+                allow update: if isMe(memberId)
+                    && onlyChanges(['lastSeen'])
+                    && request.resource.data.lastSeen.messageId is string
+                    && request.resource.data.lastSeen.at is number;
+            }
+
+            // Бронь места. Писать клиенту нечем: бронь не проверка, а ограничение, и держит
+            // его сервер. Читать — той же общей политикой, что и участники выше, хотя само
+            // приложение сюда и не заглядывает (место видно по кораблям, не по брони): канал,
+            // закрытый наполовину, — не закрытый канал.
+            match /berths/{berthId} {
+                allow read: if isMember(channelId);
+                allow write: if false;
+            }
+
+            match /messages/{messageId} {
+                // Не участнику — ничего: лента и есть тот самый чат, до которого посторонний
+                // (в том числе чужой вошедший, не стоящий на этом рейде) не должен доходить
+                // вовсе (см. общий комментарий вверху файла).
+                allow read: if isMember(channelId);
+
+                // Пишет только стоящий на рейде и только от своего имени. Записи самого
+                // канала («встал на рейд», «уходит») пишутся сервером в одной транзакции
+                // с событием, поэтому ни `kind`, ни `notice` клиенту не разрешены: иначе
+                // строчку канала можно подделать.
+                allow create: if isMember(channelId)
+                    && request.resource.data.keys().hasOnly(['author', 'sentAt', 'serverAt', 'text', 'thread'])
+                    && request.resource.data.keys().hasAll(['author', 'sentAt', 'serverAt', 'text'])
+                    && request.resource.data.author.keys().hasOnly(['memberId', 'look'])
+                    && request.resource.data.author.memberId == me()
+                    && lookSane(request.resource.data.author)
+                    && threadSane(request.resource.data)
+                    && request.resource.data.text is string
+                    && request.resource.data.text.size() <= maxText()
+                    && request.resource.data.sentAt is number
+                    && stamped();
+
+                // Сказанное не переписывается и не стирается.
+                allow update, delete: if false;
+            }
+        }
+    }
+}

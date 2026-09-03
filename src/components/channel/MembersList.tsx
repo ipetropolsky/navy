@@ -3,13 +3,13 @@ import { KeyboardEvent, MouseEvent, PointerEvent, useRef } from 'react';
 import Avatar from '@/components/ships/Avatar';
 import MemberName from '@/components/ships/MemberName';
 import Pennant from '@/components/ships/Pennant';
-import Actions from '@/components/ui/Actions';
 import Button from '@/components/ui/Button';
 import IconButton from '@/components/ui/IconButton';
+import Sheet from '@/components/ui/Sheet';
 import { useSnackbar } from '@/components/ui/Snackbar';
 import { LeaveIcon, LinkIcon } from '@/components/ui/icons';
-import { Member, SHIP_KIND_LABELS } from '@/types/channel';
 import { Press, isTap, startPress } from '@/utils/tap';
+import { Member, SHIP_KIND_LABELS } from '@shared/types/channel';
 
 import styles from './MembersList.module.less';
 
@@ -65,7 +65,8 @@ interface MembersListProps {
  * когда сам список становится узок (@container в стилях). Разметка про это не знает, и порога
  * «телефон ли это» здесь нет — дело только в ширине блока, в котором список показывают.
  *
- * Сам по себе список — только колонка со своей прокруткой. Показывает его слой в блоке
+ * Сам по себе список — колонка из двух частей: строчки со своей прокруткой и полоса кнопок
+ * под ними. Показывает его слой в блоке
  * разговора: он выезжает снизу тем же движением, что и форма своего корабля, и встаёт ровно
  * туда, где только что была лента. Шторкой поверх всего список не показывают нарочно — шторка
  * гасит под собой экран, а список кораблей про рейд, и гасить рейд ради него незачем
@@ -133,8 +134,31 @@ export default function MembersList({
     };
 
     return (
-        <div className={styles.list}>
-            <div className={styles.title}>На связи</div>
+        <Sheet
+            title={<div className={styles.name}>На связи</div>}
+            /* Ряд кнопок тот же, что внизу форм и карточки корабля: одна механика на всё
+               приложение — как они делят ширину и когда переносятся. */
+            actions={
+                <>
+                    <Button variant="secondary" onClick={onCopyLink}>
+                        <LinkIcon />
+                        {/* На широком списке подписи целиком, узкому хватает первого слова: рейд
+                            и так один, тот самый, чей список открыт, — а вдвоём полные подписи
+                            в строку не помещаются, и кнопки уезжают каждая на свою строчку.
+                            Решает это ширина самого списка, а не окна (@container, см. стили). */}
+                        <span>
+                            Координаты<span className={styles.wide}> рейда</span>
+                        </span>
+                    </Button>
+                    <Button variant="danger" onClick={onLeave}>
+                        <LeaveIcon />
+                        <span>
+                            Уйти<span className={styles.wide}> с рейда</span>
+                        </span>
+                    </Button>
+                </>
+            }
+        >
             <div className={styles.hint}>Каждый корабль говорит из своей вкладки</div>
             {members.map((member) => {
                 const mine = member.memberId === myId;
@@ -227,29 +251,6 @@ export default function MembersList({
                     </div>
                 );
             })}
-
-            {/* Ряд кнопок тот же, что внизу форм и карточки корабля: одна механика на всё
-                приложение — как они делят ширину и когда переносятся. Прилипший, потому что
-                список длинный: с десятком кораблей выход уезжает под обрез, и человек листает
-                до конца, чтобы его найти. */}
-            <Actions pinned>
-                <Button variant="secondary" onClick={onCopyLink}>
-                    <LinkIcon />
-                    {/* На широком списке подписи целиком, узкому хватает первого слова: рейд
-                        и так один, тот самый, чей список открыт, — а вдвоём полные подписи
-                        в строку не помещаются, и кнопки уезжают каждая на свою строчку.
-                        Решает это ширина самого списка, а не окна (@container, см. стили). */}
-                    <span>
-                        Координаты<span className={styles.wide}> рейда</span>
-                    </span>
-                </Button>
-                <Button variant="danger" onClick={onLeave}>
-                    <LeaveIcon />
-                    <span>
-                        Уйти<span className={styles.wide}> с рейда</span>
-                    </span>
-                </Button>
-            </Actions>
-        </div>
+        </Sheet>
     );
 }

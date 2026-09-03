@@ -6,13 +6,29 @@ import {
     useEffect,
     useLayoutEffect,
     useMemo,
+    useReducer,
     useRef,
     useState,
 } from 'react';
 
-import { ChannelDraft, ChannelError, MemberDraft, backend, freeBerths, suggestBerth } from '@/backend';
+import {
+    Berth,
+    Message,
+    MorseFeed,
+    ShipKind,
+    Side,
+    authorLook,
+    isManoeuvre,
+    isSameBerth,
+    otherSide,
+} from '@shared/types/channel';
+
+import { ChannelDraft, ChannelError, MemberDraft, backend, freeBerths, placeShip, suggestBerth } from '@/backend';
 import { DEMO_CHANNEL_SLUG } from '@/backend/seed';
-import SeaScene from '@/components/SeaScene/SeaScene';
+import SeaScene, { BerthChoice } from '@/components/SeaScene/SeaScene';
+import { manoeuvreSeconds } from '@/components/SeaScene/shipMotion';
+import SignIn from '@/components/auth/SignIn';
+import ClosedChannel from '@/components/channel/ClosedChannel';
 import CreateChannel from '@/components/channel/CreateChannel';
 import LeaveRaid from '@/components/channel/LeaveRaid';
 import MemberForm from '@/components/channel/MemberForm';
@@ -21,22 +37,28 @@ import ShipCard from '@/components/channel/ShipCard';
 import Composer from '@/components/chat/Composer';
 import MessageList from '@/components/chat/MessageList';
 import Button from '@/components/ui/Button';
+import CloseButton from '@/components/ui/CloseButton';
+import Counter from '@/components/ui/Counter';
 import IconButton from '@/components/ui/IconButton';
 import Panel from '@/components/ui/Panel';
 import Shade from '@/components/ui/Shade';
 import { useSnackbar } from '@/components/ui/Snackbar';
 import { LeaveIcon } from '@/components/ui/icons';
-import { FEED_MIN, SHEET_HANDLE } from '@/config/layout';
+import { GATE_PAD, SHEET_HANDLE, SHEET_TOP_GAP } from '@/config/layout';
+import { paced, unpaced } from '@/config/time';
 import { HAIL_SIGNAL, morseDuration } from '@/hooks/morse';
+import { useAuth } from '@/hooks/useAuth';
 import { useChannel } from '@/hooks/useChannel';
-import { chatMagnets, useLayout } from '@/hooks/useLayout';
-import { useSheetDrag } from '@/hooks/useSheetDrag';
+import { useConnection } from '@/hooks/useConnection';
+import { Layout, chatMagnets, useLayout } from '@/hooks/useLayout';
 import { useSlide } from '@/hooks/useSlide';
 import { useSwipe } from '@/hooks/useSwipe';
-import { channelLink, useRoute } from '@/routing';
-import { Berth, Message, MorseFeed, ShipKind, Side, authorLook, isSameBerth, otherSide } from '@/types/channel';
+import { useUnread } from '@/hooks/useUnread';
+import { channelLink, homeLink, useRoute } from '@/routing';
+import { NOTHING_OPEN, reduce } from '@/state/layers';
 import { copyText } from '@/utils/clipboard';
-import { Fling, MagnetSettings, settleMagnet, stepMagnet, trackFling } from '@/utils/magnet';
+import { Fling, rubberBand, settleMagnet, stepMagnet, trackFling } from '@/utils/magnet';
+import { plural } from '@/utils/plural';
 
 import styles from './App.module.less';
 
@@ -48,22 +70,8 @@ import styles from './App.module.less';
  */
 const HAIL_HOLD_MS = morseDuration(HAIL_SIGNAL) + 1200;
 
-/** С каким кораблём открывается форма у того, кто ещё не в строю. */
+/** С каким кораблём открывается форма у того, кто ещё не в строю и ничем прежде не ходил. */
 const DEFAULT_SHIP_KIND: ShipKind = 'pr12412';
-
-/**
- * Где останавливается приспущенная форма корабля: наверху, вполовину и закрыта.
- *
- * Половина — то самое положение, ради которого форму и приспускают: отметки ближних мест
- * жмутся к её кромке, а отойди она на половину своего роста — разъезжаются настолько, чтобы
- * в них попасть. Меньше не помогает, больше не нужно: форму приспускают, чтобы выбрать место,
- * а выбрав — возвращают.
- *
- * Своих точек три, а не столько же, сколько у разговора: доли считаются от роста коробки,
- * и «треть» у формы — это треть трети экрана, восемь десятков пикселей. Столько форма отходит
- * незаметно для рейда, а ступенек добавляет две.
- */
-const FORM_MAGNET: MagnetSettings = { points: [0, '50%', '100%'] };
 
 /**
  * Курс, с которым форма открывается у новичка: монетка. Осмысленного умолчания тут нет —
@@ -73,19 +81,41 @@ const FORM_MAGNET: MagnetSettings = { points: [0, '50%', '100%'] };
 const randomCourse = (): Side => (Math.random() < 0.5 ? 'left' : 'right');
 
 /**
+ * Разрешённый размер разговора: приземление на свободной шкале умеет попасть туда, где
+ * разговору стоять нельзя.
+ *
+ * Провал этот один — между полом и наименьшим размером. Сбоку это «убрать панель» и её минимум:
+ * уже трёхсот пикселей панель не бывает, а ноль значит «нет вовсе», и ничего законного между
+ * ними нет. Свободный магнит про это не знает — точек в провале не поставлено, — и кромку,
+ * оставленную посреди него, делит пополам: доведённая ближе к кромке окна панель уходит,
+ * недоведённая встаёт в свой минимум.
+ *
+ * Строгой шкалы это не касается: там приземление всегда точка, а точки законны все.
+ */
+const legalSize = (size: number, { floor, min }: Layout): number => {
+    if (size <= floor || size >= min) {
+        return size;
+    }
+    return size - floor < min - size ? floor : min;
+};
+
+/**
  * Три состояния сервиса, и выбираются они по адресу и по тому, кто эта вкладка:
  *   нет channelId              — главная: пустое море и создание канала;
  *   channelId без memberId     — канал открыт, но корабль ещё не в строю: ставим его;
  *   channelId и memberId       — сам чат.
  *
- * Среднее из трёх начинается закрытым: на месте разговора одна кнопка «Встать на рейд»,
- * и до нажатия по ней человек — гость. Рейд ему видно как обычно, а больше ничего: ни разговора,
- * ни списка кораблей, ни нажатий по кораблям в кадре. Исключение одно — канал, заведённый
- * в этой же вкладке: там форма открыта сразу (см. `ownChannel`).
+ * Среднее из трёх начинается закрытым: на месте разговора либо кнопка «Встать на рейд»
+ * (канал открытый), либо код доступа (канал закрытый, см. `ClosedChannel`) — и до входа
+ * в строй человек гость. Рейда ему не видно вовсе: ни разговора, ни списка кораблей,
+ * ни нажатий по кораблям в кадре — бэкенд отдаёт такому только название канала и закрыт
+ * ли он (см. `previewChannel`). Исключение одно — канал, заведённый в этой же вкладке:
+ * там форма открыта сразу (см. `ownChannel`).
  *
  * Раскладка у всех трёх одна: кадр со сценой и разговор — под кадром или сбоку от него,
  * смотря по форме окна (см. hooks/useLayout). Меняется только содержимое разговора, поэтому
- * море не прыгает при переходах, а корабли видно ещё до входа в канал.
+ * море не прыгает при переходах — а вот корабли на нём до входа в канал не видны:
+ * постороннему видна только пустая вода.
  *
  * Поверх этого — второй слой коробки и шторки, и всё это необязательное. Слоем выезжают форма
  * своего корабля и список кораблей: оба про рейд, оба никого не загораживают, и открытыми
@@ -98,25 +128,33 @@ const randomCourse = (): Side => (Math.random() < 0.5 ? 'left' : 'right');
  */
 export default function App() {
     const route = useRoute();
-    const channelState = useChannel(route.channel, route.memberId);
-    const { channel, myId, typing, loading } = channelState;
+    const auth = useAuth();
+    const { lastLook, rememberLook } = auth;
+    const channelState = useChannel(route.channel, route.memberId, auth.account?.userId ?? null, rememberLook);
+    const { channel, myId, reception, loading, loadError, retryLoad, hasMoreMessages, loadingOlder, loadOlder } =
+        channelState;
+    const connection = useConnection();
+    /**
+     * Вошёл ли человек. Вход спрашивают не ради приличия: корабль принадлежит человеку,
+     * а не вкладке, и завести канал или встать на рейд, никем не назвавшись, теперь нельзя.
+     */
+    const signedIn = Boolean(auth.account);
+    /**
+     * Ждём ли ещё ответа — от канала или от входа. Второе не менее важно: вход отвечает
+     * не мгновенно, и без этого ожидания вошедший на миг видел бы приглашение войти.
+     */
+    const waiting = loading || !auth.known;
     const [replyTo, setReplyTo] = useState<Message | null>(null);
-    // Открыт ли список кораблей. Он выезжает вторым слоем поверх разговора, а не подменяет
-    // собой содержимое: подмена уносила вместе с разговором и место прокрутки, и набранное
-    // в поле, и выделение.
-    const [sheetOpen, setSheetOpen] = useState(false);
-    // Открыта ли форма своего корабля. Она выезжает тем же слоем и тем же движением.
-    const [editing, setEditing] = useState(false);
-    // Чей корабль показан карточкой. Своей карточки нет: свой корабль настраивают, а не
-    // разглядывают, и по нему открывается форма.
-    const [shownId, setShownId] = useState<string | null>(null);
-    // Спрашивают ли сейчас новый курс: шторка прощания с рейдом. Уход — единственное
-    // действие, после которого ничего не остаётся, и курс как раз то, что остаётся.
-    const [leaving, setLeaving] = useState(false);
-    // Открыта ли форма постановки в строй. Закрытая она по умолчанию: пришедший по ссылке
-    // попадает на рейд, а не в анкету, — и до того, как он сам решит встать в строй, канал
-    // о нём не знает ничего. Открывает её единственная кнопка посреди пустой плашки, см. ниже.
-    const [joining, setJoining] = useState(false);
+    /**
+     * Что открыто поверх рейда: список кораблей, форма своего корабля, карточка чужого, прощание
+     * с рейдом, постановка в строй — и подняла ли панель на экран сама открывшаяся в неё форма.
+     *
+     * Одним состоянием и одним набором намерений, см. state/layers: правила переходов там,
+     * и там же они проверены юнитами. Здесь остаётся сказать, что случилось («нажали название
+     * канала»), и доиграть разницу — движение панели, замеры, фокус.
+     */
+    const [layers, act] = useReducer(reduce, NOTHING_OPEN);
+    const { list: sheetOpen, form: editing, shownId, leaving, joining, brought: broughtPanel } = layers;
     const notify = useSnackbar();
 
     /**
@@ -152,10 +190,56 @@ export default function App() {
         };
     }, []);
 
+    /**
+     * Кнопка закрытой формы «Встать на рейд», px: то же самое дело, что и `measureComposer`
+     * выше, только про другую плашку.
+     *
+     * Гость видит на месте разговора не разговор, а пустую плашку с одной этой кнопкой,
+     * и коробка под ней должна встать по кнопке, а не долей хода, как настоящий разговор
+     * (см. `gateHeight` ниже). Число меряем, а не записываем: высота кнопки текучая, она
+     * растёт вместе с кеглем шрифта на широком окне (`--font-size-base` в index.less),
+     * и записанное число разошлось бы с ней при первой же правке кегля.
+     */
+    const [gateButtonHeight, setGateButtonHeight] = useState(0);
+    const measureGate = useCallback((node: HTMLButtonElement | null) => {
+        if (!node) {
+            setGateButtonHeight(0);
+            return undefined;
+        }
+        const observer = new ResizeObserver(() => setGateButtonHeight(node.getBoundingClientRect().height));
+        observer.observe(node);
+        return () => {
+            observer.disconnect();
+            setGateButtonHeight(0);
+        };
+    }, []);
+
+    /**
+     * Высота полосы шапки, px: то, докуда доходят шторки и не дальше (см. GH-58).
+     *
+     * Число это не постоянное: шапка растёт вместе с шириной окна — крупнее кегль, крупнее
+     * кнопки (`.fluid()` в App.module.less), — и записанное значение разошлось бы с ней при
+     * первой же смене ширины. Умолчание — `SHEET_TOP_GAP`, тот же запасной рост, каким открыт
+     * первый кадр до того, как ResizeObserver успеет отмерить настоящую полосу.
+     */
+    const [headerHeight, setHeaderHeight] = useState(SHEET_TOP_GAP);
+    const measureHeader = useCallback((node: HTMLDivElement | null) => {
+        if (!node) {
+            setHeaderHeight(SHEET_TOP_GAP);
+            return undefined;
+        }
+        const observer = new ResizeObserver(() => setHeaderHeight(node.getBoundingClientRect().height));
+        observer.observe(node);
+        return () => {
+            observer.disconnect();
+            setHeaderHeight(SHEET_TOP_GAP);
+        };
+    }, []);
+
     // Раскладка целиком: где стоит разговор и какого он размера. Место выбирает форма окна,
     // размер — человек, и всё это сверено с нынешним окном одним местом на все проверки,
     // см. hooks/useLayout. Здесь остаётся только пользоваться готовым.
-    const { layout, resize, hide, show } = useLayout(floor);
+    const { layout, resize, hide, show } = useLayout(floor, headerHeight);
     const { mode, shown, folded, size } = layout;
     const atSide = mode === 'side';
     // Разговор на экране по-настоящему: не убран и не свёрнут свайпом до пола. Свёрнутый
@@ -164,37 +248,33 @@ export default function App() {
     // рост коробки под этим списком. Сам свёрнутый разговор при этом живой: в поле ввода
     // пишут, за ручку его достают обратно, и коридор для свайпа стоит по его кромке (`shown`).
     const talking = shown && !folded;
-    // Ленте не досталось и одной реплики: разговор либо стоит на полу, либо его ведут от пола
-    // вверх и он ещё не дорос. Выглядит он в этом случае одинаково — ручка и плашка ввода, —
-    // а ленты нет вовсе, см. FEED_MIN в config/layout и .contentTight в стилях. Сбоку такого
-    // не бывает: там разговор либо во всю высоту окна, либо убран целиком.
-    const tight = !atSide && size - layout.floor < FEED_MIN;
-
-    const sceneRef = useRef<HTMLDivElement>(null);
-    const toggleChat = useCallback(() => (shown ? hide() : show()), [shown, hide, show]);
 
     /**
-     * Свайп по кадру двигает разговор на соседнее положение: вверх — на ступеньку выше,
-     * вниз — на ступеньку ниже, вплоть до нижней, где от разговора остаётся одна ручка.
+     * Сколько чужих реплик пришло, пока разговор был убран с экрана. Считает их `useUnread`,
+     * здесь остаётся показать: счётчиком на кнопке, которой панель возвращают, и той же цифрой
+     * в её подписи.
      *
-     * Ступенька, а не «убрать-вернуть»: у разговора четыре положения, и палец, ведущий кадр,
-     * ведёт его по тем же, по каким его водит кромка. Кадр при этом растёт и сжимается ровно
-     * настолько, насколько отдал или забрал разговор, — свайп по рейду и есть способ
-     * разглядеть рейд.
-     *
-     * Сбоку свайпа нет: там разговор меряется шириной, и вертикальное движение по кадру
-     * про неё ничего не говорит. Размер панели меняют её кромкой.
+     * Спрашиваем про `shown`, а не про `talking`: свёрнутый до пола разговор ленты не
+     * показывает, это правда, — но и кнопки, на которой стояла бы пилюля, под кадром нет вовсе.
+     * Копить непрочитанное там, где его нечем показать, значит однажды выдать его человеку
+     * пачкой в тот миг, когда он повернёт телефон.
      */
-    const stepChat = useCallback(
-        (direction: 'up' | 'down') => {
-            if (atSide) {
-                return;
-            }
-            resize(stepMagnet(chatMagnets(layout), layout.size, direction === 'up' ? 1 : -1), true);
-        },
-        [atSide, layout, resize]
-    );
-    useSwipe(sceneRef, stepChat);
+    const unread = useUnread(channel, myId, shown);
+
+    const sceneRef = useRef<HTMLDivElement>(null);
+
+    /**
+     * Размер разговора выбрал человек: потянул кромку, повёл свайпом, нажал стрелку, убрал
+     * панель кнопкой.
+     *
+     * Тем самым панель перестаёт быть поднятой ради открытого в неё слоя (`brought` в модели):
+     * задвинуть её потом за человека значило бы забрать то, что он только что выбрал сам.
+     */
+    const chose = useCallback(() => act({ type: 'chose' }), []);
+    const toggleChat = useCallback(() => {
+        chose();
+        return shown ? hide() : show();
+    }, [chose, shown, hide, show]);
 
     /**
      * Переезд разговора из раскладки в раскладку.
@@ -264,6 +344,16 @@ export default function App() {
     const inChat = Boolean(channel && me);
 
     /**
+     * Код закрытого канала, подтверждённый на экране «Закрытая частота» (см. `ClosedChannel`,
+     * `handleCheckCode`). null — код ещё не спрашивали или на канал только что пришли заново
+     * (см. эффект прихода ниже: он же и сбрасывает `verifiedCode` при смене route.channel).
+     *
+     * Держим его здесь, а не в самой форме кода: подтверждённый код нужен ещё раз — уже
+     * не подсказкой, а взаправду, — когда дойдёт до самого входа (см. `handleMemberSubmit`).
+     */
+    const [verifiedCode, setVerifiedCode] = useState<string | null>(null);
+
+    /**
      * Канал, заведённый в этой самой вкладке. Тому, кто только что его создал, форму корабля
      * открываем сразу: он пришёл ставить свой корабль, а не смотреть на пустую воду, и закрытая
      * форма была бы лишним нажатием там, где ответ известен заранее.
@@ -273,27 +363,57 @@ export default function App() {
      */
     const ownChannel = useRef<string | null>(null);
     useEffect(() => {
-        setJoining(route.channel !== null && route.channel === ownChannel.current);
+        act({ type: 'arrive', own: route.channel !== null && route.channel === ownChannel.current });
+        // Код спрашивают заново на каждом канале: подтверждённый на одном не должен молча
+        // сойти за подтверждённый на другом, на который перешли, не покидая вкладку.
+        setVerifiedCode(null);
     }, [route.channel]);
     // Встал в строй — форма своё отработала и закрывается. Отсюда, а не из отправки: уйти
     // с рейда можно и потом, и вернуться человек должен ровно туда, куда пришёл, — на рейд
     // с закрытой формой, а не в анкету.
     useEffect(() => {
         if (inChat) {
-            setJoining(false);
+            act({ type: 'joined' });
         }
     }, [inChat]);
 
+    // Форма постановки в строй во весь рост: её раскрывают кнопкой, и раскрыть её может только
+    // вошедший — гостю на этом месте стоит сам вход, а не форма.
+    const joinOpen = !waiting && Boolean(channel) && signedIn && !me && joining;
+
+    const channelClosed = Boolean(channel?.channel.closed);
     /**
-     * Закрытая форма: канал открыт, а человек в нём ещё никто — и не начинал им становиться.
-     * Видно ему при этом только сам рейд: разговора нет (его и не с кем вести), списка кораблей
-     * нет, и корабли в кадре не нажимаются. Пока человек не встал в строй, канал о нём не знает
-     * ничего — и он о канале ровно столько же.
+     * Вместо формы постановки в строй — код доступа: канал закрыт, а подтверждённого кода
+     * ещё нет. `verifiedCode` тем самым не спрашивает его заново и после «Отмены»: код
+     * подтверждают один раз за приход на канал, а не при каждом открытии формы.
+     *
+     * `!joining` здесь — для того, кто канал завёл сам: код он только что придумал, спрашивать
+     * незачем, а `joining` у него и так уже true к этой минуте (см. `arrive` в state/layers.ts,
+     * `own`) — этим условием экран кода и обходит его стороной, не заглядывая в `ownChannel`
+     * ещё раз напрямую.
      */
-    const atGate = !loading && Boolean(channel) && !me && !joining;
-    // Она же открытая: форма постановки в строй во весь рост. Второе состояние того же самого —
-    // третьего у входа нет.
-    const joinOpen = !loading && Boolean(channel) && !me && joining;
+    const needsCode = channelClosed && verifiedCode === null && !joining;
+
+    /**
+     * У входа: канал открыт, а корабля на нём у человека нет — и форма, которой его заводят,
+     * не раскрыта. Видно ему при этом только сам рейд: разговора нет (его и не с кем вести),
+     * списка кораблей нет, и корабли в кадре не нажимаются. Пока человек не встал в строй,
+     * канал о нём не знает ничего — и он о канале ровно столько же.
+     *
+     * Про вход тут нарочно не спрашиваем. Не вошедший вовсе — тот же случай, только глубже:
+     * рейда по ссылке ему не видно вовсе (правила чтения закрыты участникам, см.
+     * firestore.rules; previewChannel отдаёт только название канала и `closed`) — и уж точно
+     * не карточки чужих кораблей. Стояло здесь `signedIn`, и
+     * гость выпадал из этого состояния целиком: `atGate` у него ложный, а значит нажатия
+     * по кораблям (см. `onShowShip` ниже) ему доставались наравне с теми, кто в строю.
+     * Проверено — карточка открывалась (tests-firebase/channel.spec.ts, «канал по ссылке
+     * без входа»); местный набор такого поймать не мог: там вкладка всегда «вошедшая»,
+     * см. `createLocalEntrance`.
+     *
+     * Заодно закрывается и выход из аккаунта с раскрытой формой: `joinOpen` без входа ложен,
+     * и вышедший оказывается ровно там же, где гость, — у входа.
+     */
+    const atGate = !waiting && Boolean(channel) && !me && !joinOpen;
     // Форма своего корабля: выезжает снизу поверх разговора и уходит туда же. Пока едет —
     // остаётся на экране, см. useSlide.
     const formOpen = editing && inChat;
@@ -307,23 +427,24 @@ export default function App() {
      * никого не загораживает: сцена остаётся живой, а список приезжает туда же, куда приезжает
      * форма своего корабля, и уходит тем же движением.
      *
-     * Слой этот один на двоих: разом список с формой не открываются — «Настроить корабль»
-     * в списке закрывает список, а название канала в шапке закрывает форму (см. `handleShips`).
+     * Слоёв в коробке стопка, и список — нижний из них: открытая поверх форма его не закрывает,
+     * а накрывает собой. Ушла форма — список остался ровно там, где был, вместе с прокруткой
+     * и без своего движения: показывать выезд снизу тому, кто и не уезжал, незачем.
      */
-    const listOpen = sheetOpen && inChat && !editing;
+    const listOpen = sheetOpen && inChat;
     const listSlide = useSlide(listOpen);
 
     // Место на рейде выбирают в форме корабля и только в ней: это её поле, просто вынесенное
     // на воду. На главной канала ещё нет, вставать некуда и не в чем — там рейд пустой
     // и ничего не предлагает. Закрытая форма мест тоже не показывает: выбирать их незачем,
     // пока не решено вставать.
-    const picking = joinOpen || (!loading && Boolean(channel) && editing);
+    const picking = joinOpen || (!waiting && Boolean(channel) && editing);
 
     // Какой корабль выбран в форме. Держим здесь, а не в самой форме: от размера зависит,
     // куда этот корабль вообще влезет, и точки свободных мест на воде обязаны это знать.
     // Пока форма закрыта, выбор ничей — как и выбранное место, см. ниже.
     const [pickedKind, setPickedKind] = useState<ShipKind | null>(null);
-    const shipKind = pickedKind ?? me?.shipKind ?? DEFAULT_SHIP_KIND;
+    const shipKind = pickedKind ?? me?.shipKind ?? lastLook?.shipKind ?? DEFAULT_SHIP_KIND;
 
     // Курс — здесь по той же причине: его показывает стрелка на выбранном месте, и оттуда же
     // его меняют повторным нажатием. Начальный достаётся от своего корабля, а новичку — монеткой:
@@ -387,18 +508,35 @@ export default function App() {
      * на выбранном месте нарисована стрелка курса, и менять курс естественнее там же, где он
      * и показан. Место при этом остаётся выбранным — уйти с него можно, ткнув в другое.
      */
-    const handlePickBerth = (berth: Berth) => {
-        if (pickedBerth && isSameBerth(berth, pickedBerth)) {
-            setPickedFacing(otherSide(facing));
-            return;
-        }
-        setPickedBerth(berth);
-    };
+    const handlePickBerth = useCallback(
+        (berth: Berth) => {
+            if (pickedBerth && isSameBerth(berth, pickedBerth)) {
+                setPickedFacing(otherSide(facing));
+                return;
+            }
+            setPickedBerth(berth);
+        },
+        [pickedBerth, facing]
+    );
+
+    // Выбор мест уходит в кадр одним свойством и тоже запоминанием: кадр перерисовывается
+    // только когда меняется то, что на нём нарисовано, а не всякий раз, когда приложению
+    // случилось отрисоваться.
+    const berths: BerthChoice | undefined = useMemo(
+        () => (picking ? { options: berthOptions, picked: pickedBerth, facing, onPick: handlePickBerth } : undefined),
+        [picking, berthOptions, pickedBerth, facing, handlePickBerth]
+    );
 
     // Показать карточку чужого корабля. Список кораблей при этом не трогаем: карточка ложится
     // поверх него (см. cover у Shade), и закрыв её, человек возвращается туда, откуда открыл.
     // Открытая из кадра, она ложится поверх пустого места — там закрывать и нечего.
-    const handleShowShip = useCallback((memberId: string) => setShownId(memberId), []);
+    const handleShowShip = useCallback((memberId: string) => act({ type: 'show-ship', memberId }), []);
+
+    // Выход. Отказ здесь редкость, но молчать о нём нельзя: человек нажал и ждёт, что
+    // строчка с его именем пропадёт, — а она осталась.
+    const handleSignOut = () => {
+        void auth.signOut().catch(() => notify('Не вышло выйти. Попробуйте ещё раз'));
+    };
 
     const handleCreate = async (draft: ChannelDraft) => {
         const { channel: created } = await backend.createChannel({ channel: draft });
@@ -407,18 +545,67 @@ export default function App() {
         route.openChannel(created.slug);
     };
 
+    // Проверка кода закрытого канала (см. `ClosedChannel`). Отказ уходит наверх как есть —
+    // компонент сам покажет его снекбаром, — а успех раскрывает форму постановки в строй тем же
+    // намерением, каким её раскрывает кнопка «Встать на рейд» у открытого канала.
+    const handleCheckCode = async (code: string) => {
+        if (!channel) {
+            return;
+        }
+        await backend.checkAccessCode({ channelId: channel.channel.channelId, code });
+        setVerifiedCode(code);
+        act({ type: 'open-join' });
+    };
+
+    /**
+     * Сколько займёт манёвр, который сейчас начнётся, с. Считает его вкладка, а не сервер:
+     * ход живёт в кадре, и знает о нём кадр (см. `manoeuvreSeconds`). Уходит оценка вместе
+     * с заявкой и ложится в участие — по ней вошедшие посреди манёвра доигрывают его
+     * с середины (см. `Manoeuvre`).
+     *
+     * Место здесь предсказывается тем же `placeShip`, каким его назначит бэкенд: правила
+     * общие, состав тот же, и в подавляющем большинстве случаев выйдет то же самое место.
+     * Разойдётся — манёвр окажется чуть длиннее или короче оценки, и это неважно: она
+     * отвечает на вопрос «идёт он ещё или уже кончился», а не рисует кадры.
+     *
+     * Ничего не поменялось — манёвра нет вовсе: остаться на месте и переоснаститься кораблю
+     * можно, не снимаясь с якоря, и записывать тут нечего.
+     */
+    const manoeuvreOf = (draft: MemberDraft): { seconds: number } | undefined => {
+        const others = members.filter((member) => member.memberId !== myId);
+        const place = placeShip(draft.shipKind, others, draft.berth, draft.facing);
+        if (!place) {
+            return undefined;
+        }
+        const after = { place, shipKind: draft.shipKind };
+        if (me && !isManoeuvre(me, after)) {
+            return undefined;
+        }
+        return {
+            seconds: unpaced(
+                manoeuvreSeconds(
+                    me ?? undefined,
+                    after,
+                    others.map((member) => member.place)
+                )
+            ),
+        };
+    };
+
     const handleMemberSubmit = async (draft: MemberDraft) => {
         const withBerth = { ...draft, berth: pickedBerth ?? undefined };
+        const withManoeuvre = { ...withBerth, manoeuvre: manoeuvreOf(withBerth) };
         if (editing) {
-            await channelState.updateMe(withBerth);
-            setEditing(false);
+            await channelState.updateMe(withManoeuvre);
+            act({ type: 'close-form' });
         } else {
-            await channelState.join(withBerth);
+            await channelState.join(withManoeuvre, verifiedCode ?? undefined);
         }
     };
 
-    const typingMember =
-        typing && typing.memberId !== myId ? members.find((member) => member.memberId === typing.memberId) : null;
+    // Чью реплику сейчас принимают. Корабль мог за это время сняться с рейда — тогда сказать
+    // о нём в шапке нечего, и строчка возвращается к обычной.
+    const sendingMember = reception ? members.find((member) => member.memberId === reception.memberId) : null;
     // Отвечать можно и тому, кто уже снялся с рейда: тогда позывной с цветом берутся
     // из снимка при сообщении, а не из состава (см. `authorLook`).
     const replyToAuthor = replyTo
@@ -455,26 +642,107 @@ export default function App() {
         return () => window.clearTimeout(timer);
     }, [hail]);
 
-    // Лампа мигает у того, кто печатает, — и у своего корабля тоже: событие о печати
-    // приходит от бэкенда одинаково, своё оно или чужое.
-    const morseFeeds: Partial<Record<string, MorseFeed>> = {};
-    if (typing) {
-        morseFeeds[typing.memberId] = typing.feed;
-    }
-    // Оклик поверх печати: окликнули печатающего — лампа передаст и то и другое, очередь у неё
-    // общая. А вот запись о печати затёрла бы оклик молча, поэтому он и ставится последним.
-    if (hail) {
-        morseFeeds[hail.memberId] = hail.feed;
-    }
+    // Свой набор: пока человек печатает, его корабль мигает лампой по набранному. Дальше этой
+    // вкладки набор не идёт вовсе — соседним он покажется тогда же, когда придёт сообщение,
+    // и уже приёмом (см. `useReception`).
+    //
+    // Кусками, а не по буквам: приходят они из плашки ввода уже собранными за треть секунды,
+    // и вставленное разом сообщение приходит одним куском — посимвольного потока в этом случае
+    // нет вовсе. Лампе это всё равно: она дописывает кусок в свою очередь и проигрывает подряд,
+    // ни на какие части его не деля — делить есть смысл там, где надо поспевать за чужой
+    // печатью, а здесь печатают прямо тут.
+    const [typed, setTyped] = useState<{ memberId: string; feed: MorseFeed } | null>(null);
+    const handleTyped = useCallback(
+        (chars: string) => {
+            if (myId) {
+                setTyped((prev) => ({ memberId: myId, feed: { seq: (prev?.feed.seq ?? 0) + 1, text: chars } }));
+            }
+        },
+        [myId]
+    );
+    // Снимается набор, отмигав своё, — по той же причине, что и оклик: висящий в состоянии
+    // повод передавать достался бы кораблю, собранному заново, и тот мигнул бы сам по себе.
+    useEffect(() => {
+        if (!typed) {
+            return undefined;
+        }
+        const timer = window.setTimeout(() => setTyped(null), paced(morseDuration(typed.feed.text)));
+        return () => window.clearTimeout(timer);
+    }, [typed]);
+
+    // Лампа мигает у того, чью реплику принимают, и у своего корабля — пока по нему печатают.
+    //
+    // Собирается запоминанием: это входное свойство кадра, и новый объект на каждую отрисовку
+    // означал бы, что кадр перерисовывается вместе со всем приложением — в том числе на каждом
+    // шаге пальца по кромке разговора, где до ламп никому нет дела.
+    const morseFeeds = useMemo(() => {
+        const feeds: Partial<Record<string, MorseFeed>> = {};
+        if (reception) {
+            feeds[reception.memberId] = reception.feed;
+        }
+        if (typed) {
+            feeds[typed.memberId] = typed.feed;
+        }
+        // Оклик поверх остального: окликнули того, чью реплику как раз принимают, — лампа
+        // передаст и то и другое, очередь у неё общая. А вот приём затёр бы оклик молча,
+        // поэтому оклик и ставится последним.
+        if (hail) {
+            feeds[hail.memberId] = hail.feed;
+        }
+        return feeds;
+    }, [reception, typed, hail]);
+
+    // Лента с подменённым текстом принимаемой реплики: в ней стоит ровно столько, сколько
+    // успело напечататься. Подменяем, а не храним отдельно, — сообщение в канале уже лежит
+    // целиком, и вторая его копия разошлась бы с первой на ответах, цитатах и порядке.
+    const shownMessages = useMemo(() => {
+        const messages = channel?.messages ?? [];
+        if (!reception) {
+            return messages;
+        }
+        return messages.map((message) =>
+            message.messageId === reception.messageId && message.kind !== 'system'
+                ? { ...message, text: reception.shown }
+                : message
+        );
+    }, [channel, reception]);
 
     const handleSend = (text: string) => {
-        // Отказ показываем снекбаром: у бэкенда для него уже есть человеческий текст,
-        // а молча проглотить его нельзя — человек решит, что сообщение ушло.
+        // Ответ снимаем сразу, не дожидаясь бэкенда: сообщение уже видно в ленте — крутилкой
+        // или сразу значком (!), смотря по тому, есть ли связь (см. Message.delivery,
+        // MessageList) — и держать шторку ответа открытой до подтверждения сервера незачем.
+        setReplyTo(null);
+        // Снекбаром показываем только то, что бэкенд бросает исключением, — длину или подобную
+        // проверку до попытки записи. Отказ сети или сервера сюда больше не долетает: такое
+        // сообщение возвращается обычным ответом, просто со status: 'failed' в delivery,
+        // и в ленте у него свой значок (!) с повтором по клику, а не снекбар.
         void channelState
             .sendMessage({ text, thread: replyTo ? { messageId: replyTo.messageId } : undefined })
-            .then(() => setReplyTo(null))
             .catch((failure: unknown) =>
                 notify(failure instanceof ChannelError ? failure.message : 'Не вышло отправить')
+            );
+    };
+
+    // Клик по значку (!) в ленте — отправить снова тем же messageId (см. MessageList,
+    // Message.delivery). Отказ здесь редкий — почти всегда «дошло само» между значком и кликом
+    // (retryMessage это и проверяет), — но снекбаром, как и у всего остального, а не молча.
+    const handleRetryMessage = (messageId: string) => {
+        void channelState
+            .retryMessage(messageId)
+            .catch((failure: unknown) =>
+                notify(failure instanceof ChannelError ? failure.message : 'Не вышло отправить')
+            );
+    };
+
+    // Отказ снекбаром, а не молча: без него «высадить может только старший» видит один бэкенд,
+    // а старший на экране решает, что нажатие потерялось, и жмёт снова. Причина у ChannelError
+    // уже человеческая и своя на каждый код — «не старший» и «нет связи» читаются по-разному,
+    // это разбирает toChannelError, здесь остаётся её только показать.
+    const handleKick = (memberId: string) => {
+        void channelState
+            .kick(memberId)
+            .catch((failure: unknown) =>
+                notify(failure instanceof ChannelError ? failure.message : 'Не вышло высадить корабль')
             );
     };
 
@@ -489,23 +757,104 @@ export default function App() {
         }
     };
 
-    // Список кораблей открывается названием канала. Пока открыта форма своего корабля,
-    // списка не видно (он бы её накрыл), и то же нажатие возвращает от формы к списку —
-    // из него форму и открыли.
-    //
-    // Убранный разговор при этом возвращается на экран: список живёт слоем в его блоке,
-    // а убранный блок стоит за кромкой окна — открывать список в него значит открывать
-    // в никуда. Свёрнутый до ручки — то же самое: полоска в двадцать точек списку не жильё.
-    // Форма своего корабля так не делает нарочно: её зовут нажатием по своему кораблю в кадре,
-    // и разговор она с собой не тащит (см. `back` в hooks/useLayout).
-    const handleShips = () => {
-        const opening = editing || !sheetOpen;
-        setEditing(false);
-        setSheetOpen(opening);
-        if (opening && !talking) {
+    /**
+     * Коробка под открывшийся слой — форму своего корабля или список кораблей.
+     *
+     * Слой стоит в той же коробке, что и разговор, и ровно её размера. Поэтому убранную панель
+     * возвращаем на экран: открывать слой в коробку, которой на экране нет, значит открывать
+     * его в никуда. Свёрнутый до ручки разговор — то же самое: полоска с плашкой ввода
+     * ни списку, ни форме не жильё. Возвращается коробка в тот размер, в каком её оставили
+     * (`back` в hooks/useLayout).
+     *
+     * Само движение слоя от этого не зависит вовсе: он всегда выезжает снизу, из-за нижней
+     * кромки окна, и по дороге закрывает собой и плашку ввода, и то, что стояло в коробке
+     * до него. Открытая коробка, свёрнутая, убранная — картинка одна и та же, и гадать,
+     * что покажут на этот раз, человеку не приходится. Коробка в это время едет к своему
+     * размеру за его спиной.
+     *
+     * Одно движение тут не про красоту, а про предсказуемость: выбирать его по положению коробки
+     * значит выбирать по признаку `talking`, а тот считается от пола, меряемого плашкой ввода
+     * на месте, — и один и тот же жест давал бы то одну картинку, то другую, смотря когда лёг
+     * замер (GH-50).
+     */
+    useEffect(() => {
+        if (broughtPanel) {
             show();
         }
-    };
+    }, [broughtPanel, show]);
+
+    // Слот опустел — панель, поднятая ради него, задвигается обратно. Отсюда, а не из каждой
+    // закрывалки: слой закрывают и кнопкой в нём, и названием канала в шапке, и свайпом вниз,
+    // и отправкой формы, а движение после всех этих способов одно.
+    const layerOpen = formOpen || listOpen;
+    // Что стоит в коробке вместо разговора с его плашкой ввода — и, значит, во что коробку
+    // сминать нельзя (см. `chatMagnets`). Форма постановки в строй разговором не подпирается
+    // вовсе: до строя его нет.
+    const boxHasForm = layerOpen || joinOpen;
+    useEffect(() => {
+        if (!layerOpen && broughtPanel) {
+            hide();
+        }
+    }, [layerOpen, broughtPanel, hide]);
+
+    // Слой уехал и снялся с экрана — память о поднятой ради него панели больше ни при чём:
+    // следующий слой посмотрит на панель заново. До этого мига она нужна: пока слой уезжает,
+    // именно она держит панель поднятой, чтобы та не опустилась у него из-под ног.
+    useEffect(() => {
+        if (!layerOpen && !formSlide.mounted && !listSlide.mounted) {
+            act({ type: 'layers-gone' });
+        }
+    }, [layerOpen, formSlide.mounted, listSlide.mounted]);
+
+    /**
+     * Свайп по кадру двигает коробку на соседнее положение: вверх — на ступеньку выше,
+     * вниз — на ступеньку ниже, вплоть до нижней, где от разговора остаётся одна ручка.
+     *
+     * Ступенька, а не «убрать-вернуть»: у коробки четыре положения, и палец, ведущий кадр,
+     * ведёт её по тем же, по каким её водит кромка. Кадр при этом растёт и сжимается ровно
+     * настолько, насколько отдала или забрала коробка, — свайп по рейду и есть способ
+     * разглядеть рейд.
+     *
+     * Точки берутся с оглядкой на слой: со стоящей поверх разговора формой нижней ступеньки
+     * нет вовсе — сминать слой в полоску ручки некуда (см. `chatMagnets`).
+     *
+     * Сбоку свайпа нет: там коробка меряется шириной, и вертикальное движение по кадру
+     * про неё ничего не говорит. Размер панели меняют её кромкой.
+     */
+    const stepChat = useCallback(
+        (direction: 'up' | 'down') => {
+            // И сбоку, и у закрытой формы «Встать на рейд» — коробка стоит числом, которое
+            // не про долю хода: сбоку это вся высота окна, у закрытой формы — сама кнопка
+            // (см. `gated` ниже). Шагать по точкам разговора там нечем.
+            //
+            // Спрашиваем именно измеренную кнопку, а не `atGate` целиком: под ним стоят
+            // ещё не вошедший гость и код закрытого канала — а у них кнопки нет вовсе, на её
+            // месте вход или «Закрытая частота», — и коробка встаёт обычным размером. По такой
+            // шагать есть чем, как по разговору.
+            if (atSide || (atGate && gateButtonHeight > 0)) {
+                return;
+            }
+            chose();
+            resize(stepMagnet(chatMagnets(layout, boxHasForm), layout.size, direction === 'up' ? 1 : -1), true);
+        },
+        [atGate, atSide, boxHasForm, chose, gateButtonHeight, layout, resize]
+    );
+    useSwipe(sceneRef, stepChat);
+
+    // Список кораблей открывается названием канала. Поверх списка может стоять форма своего
+    // корабля, и тогда то же нажатие снимает её — возвращает к списку, из которого её и позвали.
+    const handleShips = useCallback(() => act({ type: 'ships', talking }), [talking]);
+
+    /**
+     * Настроить свой корабль: та же форма и из кадра, и из списка кораблей.
+     *
+     * Список за собой не закрываем: форма ложится поверх него, и закрытая — возвращает
+     * человека туда, откуда он её позвал. Карточку чужого корабля, наоборот, закрываем:
+     * до рейда из-под открытой шторки не дотянуться вовсе (под ней по всему окну лежит
+     * затемнение, см. .backdrop в Shade), и останься она поверх выехавшей формы, то накрыла бы
+     * собой ровно то, ради чего по кораблю и нажали.
+     */
+    const handleEditShip = useCallback(() => act({ type: 'edit-ship', talking }), [talking]);
 
     // Уход с рейда спрашивает новый курс — куда корабль пошёл. Молча корабль не пропадает:
     // остальным виден только опустевший рейд, и курс — единственное, что от ушедшего
@@ -513,18 +862,12 @@ export default function App() {
     //
     // Форму своего корабля при этом закрываем: выход есть и в ней, а спрашивать курс поверх
     // настроек корабля, который через секунду уйдёт, незачем.
-    const handleLeave = () => {
-        setEditing(false);
-        setLeaving(true);
-    };
+    const handleLeave = () => act({ type: 'ask-course' });
 
-    const handleLeaveConfirm = (course: string) => {
+    const handleLeaveConfirm = (course: string, nextOwnerId?: string) => {
         void channelState
-            .leave(course)
-            .then(() => {
-                setLeaving(false);
-                setSheetOpen(false);
-            })
+            .leave(course, nextOwnerId)
+            .then(() => act({ type: 'left' }))
             // Отказ бэкенда (например, курс длиннее предела) оставляет шторку открытой:
             // набранное не потеряно, и сказанное снекбаром можно исправить на месте.
             .catch((failure: unknown) =>
@@ -534,72 +877,155 @@ export default function App() {
 
     const status = (): string => {
         if (!channel) {
+            if (loadError) {
+                // Не «канала нет» — открыть не вышло из-за сети или сервера, и это другая
+                // причина: полоска связи (см. ниже) говорит то же самое, а здесь — коротко.
+                return 'нет связи';
+            }
             // На главной канала нет и статусу неоткуда взяться — там строчка работает
             // подзаголовком сервиса.
             return route.channel ? 'канал не найден' : 'Ночной морской чат';
         }
-        if (typingMember) {
-            return `«${typingMember.name}» передаёт…`;
+        if (sendingMember) {
+            return `«${sendingMember.name}» передаёт…`;
         }
         // Строчка нарочно короткая: на телефоне месяц стоит на её высоте, и длинный
         // подзаголовок наезжал бы на него.
         return members.length ? `${members.length} на связи` : 'никого нет';
     };
 
+    /**
+     * Подпись кнопки панели. Непрочитанное входит в неё словами: сама пилюля со счётчиком
+     * читалке не достаётся (см. `ui/Counter`), и без этого убранная панель молчала бы
+     * о новостях всем, кроме глаз.
+     */
+    const panelLabel = (): string => {
+        if (shown) {
+            return 'Убрать панель';
+        }
+        if (unread === 0) {
+            return 'Вернуть панель';
+        }
+        const news = plural(unread, ['новое сообщение', 'новых сообщения', 'новых сообщений']);
+        return `Вернуть панель, ${unread} ${news}`;
+    };
+
     // Нижний слой блока контента: разговор или то, что стоит на его месте, пока разговаривать
     // не с кем. Форма своего корабля выезжает поверх и этот слой не разбирает.
     const baseContent = (
         <>
-            {loading && <div className={styles.waiting}>Выходим на связь…</div>}
+            {waiting && <div className={styles.waiting}>Выходим на связь…</div>}
+            {/* Открыть канал не вышло из-за сети или сервера — не то же самое, что «канала нет»
+                (та ветка ниже — законный ответ «такого адреса не существует»). Показываем
+                кнопку «Ещё раз», а не отправляем создавать канал заново: адрес мог быть верным,
+                просто спросить по нему не вышло.
+
+                Рядом с ней — выход на главную, и он тут обязателен: пока сервер молчит,
+                «Ещё раз» упирается в тот же отказ, и без второй кнопки человек заперт
+                на этом экране — уйти с него нечем, кроме правки адреса руками. */}
+            {!waiting && route.channel && !channel && loadError && (
+                <Panel
+                    title="Канал не открылся"
+                    hint={loadError}
+                    actions={
+                        <>
+                            <Button onClick={retryLoad}>Ещё раз</Button>
+                            <Button variant="secondary" onClick={route.openHome}>
+                                На главную
+                            </Button>
+                        </>
+                    }
+                />
+            )}
             {/* Адрес в ссылке есть, а канала по нему нет: ссылка устарела или в ней опечатка.
                 Показывать здесь форму создания нельзя — человек шёл не создавать, а войти. */}
-            {!loading && route.channel && !channel && (
+            {!waiting && route.channel && !channel && !loadError && (
                 <Panel
                     title="Канала нет"
                     hint={`Канала по адресу «${route.channel}» нет: ссылка устарела или в ней опечатка.`}
                     actions={<Button onClick={route.openHome}>Создать свой канал</Button>}
                 />
             )}
-            {!loading && !route.channel && (
-                <CreateChannel
-                    onCreate={handleCreate}
-                    demoHref={`?channel=${DEMO_CHANNEL_SLUG}`}
-                    onOpenDemo={() => route.openChannel(DEMO_CHANNEL_SLUG)}
-                />
-            )}
+            {/* Главная. Гостю здесь показывать нечего, кроме входа: и свой канал, и демо —
+                действия, а действовать в чате может только тот, за кем стоит человек,
+                а не вкладка. */}
+            {!waiting &&
+                !route.channel &&
+                (signedIn ? (
+                    <CreateChannel
+                        onCreate={handleCreate}
+                        demoHref={`?channel=${DEMO_CHANNEL_SLUG}`}
+                        onOpenDemo={() => route.openChannel(DEMO_CHANNEL_SLUG)}
+                        account={auth.account}
+                        onSignOut={handleSignOut}
+                    />
+                ) : (
+                    <SignIn
+                        hint="Здесь заводят каналы связи и выходят в море под своим позывным. Войдите — и можно ставить корабль на рейд."
+                        onSignIn={auth.signIn}
+                    />
+                ))}
             {/* Форма постановки в строй — это и есть содержимое блока: разговора у того, кто
                 ещё не в строю, нет, и накрывать ей нечего. Переоснащение, наоборот, выезжает
                 поверх разговора — см. ниже.
 
-                Закрытая, она сворачивается до одной кнопки посреди плашки, и рейд остаётся
-                виден как обычно. Держим её при этом на месте, а не разбираем: это одна форма
-                в двух видах, и набранное в ней закрытие переживает. Закрывается она свайпом
-                вниз — тем же, каким её приспускают, чтобы разглядеть рейд (см. `lower` ниже). */}
-            {!loading && channel && !me && (
-                <MemberForm
-                    mode="join"
-                    crew={members}
-                    myId={myId}
-                    shipKind={shipKind}
-                    onShipKind={setPickedKind}
-                    facing={facing}
-                    onFacing={setPickedFacing}
-                    onSubmit={handleMemberSubmit}
-                    open={joining}
-                    onOpen={() => setJoining(true)}
-                    // Кнопки «отмена» у входа нет: обратно форму закрывают не кнопкой,
-                    // а свайпом — тем же, каким её приспускают, чтобы разглядеть рейд.
-                    // Набранное при этом не теряется: форма остаётся на месте и в закрытом виде.
+                Закрытая, она сворачивается до одной кнопки посреди плашки, ничего на сцене
+                не закрывая, — в отличие от шторки (см. `Shade`). Держим её при этом на месте,
+                а не разбираем: это одна форма в двух видах, и набранное в ней закрытие
+                переживает. Закрывается она «Отменой» рядом с «Встать на рейд»: коробку тянут
+                за ручку, и потяг этот про её размер, а не про то, что в ней стоит. */}
+            {/* Гость по ссылке: рейда ему не видно — только название канала в шапке да вход
+                на месте разговора. Встать на рейд, не назвавшись, нельзя: корабль
+                остаётся за человеком, и завтра он вернётся к нему с другого устройства. */}
+            {!waiting && channel && !signedIn && (
+                <SignIn
+                    // Название канала не повторяем: оно стоит строкой выше, в шапке, — а вложенные
+                    // кавычки в «Рейд «Эскадра «Полночь»»» читаются как опечатка.
+                    hint="Войдите, чтобы увидеть, кто на связи, и поставить сюда свой корабль."
+                    onSignIn={auth.signIn}
                 />
             )}
+            {/* Вошедший гость на закрытом канале: вместо формы — код доступа, пока его
+                не подтвердили (см. `needsCode`). Тому, кто канал завёл сам, экран этот
+                не встаётся вовсе — см. комментарий у `needsCode`. */}
+            {!waiting &&
+                channel &&
+                signedIn &&
+                !me &&
+                (needsCode ? (
+                    <ClosedChannel onCheck={handleCheckCode} />
+                ) : (
+                    <MemberForm
+                        mode="join"
+                        crew={members}
+                        myId={myId}
+                        lastColor={lastLook?.color}
+                        shipKind={shipKind}
+                        onShipKind={setPickedKind}
+                        facing={facing}
+                        onFacing={setPickedFacing}
+                        onSubmit={handleMemberSubmit}
+                        open={joining}
+                        onOpen={() => act({ type: 'open-join' })}
+                        // Обратно к закрытому виду — «Отменой». Набранное при этом не теряется:
+                        // форма остаётся на месте и в закрытом виде.
+                        onCancel={() => act({ type: 'close-join' })}
+                        // Закрытой формой меряется её коробка (см. `gateHeight` выше).
+                        gateRef={measureGate}
+                    />
+                ))}
             {channel && me && (
                 <>
                     <MessageList
-                        messages={channel.messages}
+                        messages={shownMessages}
                         members={members}
                         myId={me.memberId}
                         onReply={setReplyTo}
                         onHail={handleHail}
+                        onRetry={handleRetryMessage}
+                        hasMoreMessages={hasMoreMessages}
+                        loadingOlder={loadingOlder}
+                        onLoadOlder={() => void loadOlder()}
                     />
                     <Composer
                         // Плашкой ввода меряется пол разговора: свёрнутый до упора, он стоит
@@ -610,90 +1036,117 @@ export default function App() {
                         onCancelReply={() => setReplyTo(null)}
                         onSend={handleSend}
                         // Фразу об отказе складывает само поле по общей мерке длины
-                        // (`@/utils/limit`), нам остаётся её показать.
+                        // (`@shared/utils/limit`), нам остаётся её показать.
                         onTooLong={notify}
-                        onTyped={channelState.reportTyping}
+                        onTyped={handleTyped}
                     />
                 </>
             )}
         </>
     );
 
+    /**
+     * Закрытая форма «Встать на рейд»: коробка стоит по кнопке, а не по доле хода.
+     *
+     * У гостя на месте разговора нет разговора — только пустая плашка с одной кнопкой
+     * посреди, — и коробка под ней не обязана тянуться на треть окна, как настоящий разговор:
+     * там нечего разглядывать сверх этой кнопки. Число берём у живой разметки
+     * (`gateButtonHeight`, см. `measureGate` выше) и прибавляем поле плашки сверху и снизу
+     * (`GATE_PAD`), тем же образом, каким пол разговора складывается из ручки и плашки ввода.
+     *
+     * Только под кадром: сбоку панель и так стоит во весь рост окна (`.contentSide` в стилях,
+     * `height: auto`) — мерить там нечего, и обычная ширина панели её не касается.
+     *
+     * Пока кнопка не измерена (первая отрисовка, `gateButtonHeight` ещё 0), коробка встаёт
+     * обычным способом — тем же, каким встал бы разговор, — и подбирается под кнопку кадром
+     * позже, как и пол разговора под свежую плашку ответа.
+     *
+     * Тем же нулём мерка сама собой обходит и гостя, и код закрытого канала — оба тоже
+     * `atGate` (см. выше), а кнопки у них нет вовсе: на её месте стоит вход или «Закрытая
+     * частота», — и подгонять коробку не подо что. Она встаёт обычным размером, каким встал бы
+     * разговор, и любая из этих форм помещается в ней целиком.
+     */
+    const gateHeight = gateButtonHeight > 0 ? gateButtonHeight + GATE_PAD * 2 : 0;
+    const gated = atGate && !atSide && gateHeight > 0;
+
     // Коробка разговора: в каком размере она стоит. Обычно это сам разговор — и свёрнутый тоже:
     // сворачиваясь, он не уезжает, а честно садится в свой пол, иначе плашка ввода уехала бы
     // под кромку окна вместе с низом коробки, а видно осталась бы верхушка ленты. А вот убранная
     // кнопкой панель уезжает за кромку целиком, своим размером, — сминать ленту с полем ввода
     // в ноль на глазах незачем. Ей и берём размер возврата.
-    const chatBox = shown ? size : layout.back;
+    //
+    // У закрытой формы «Встать на рейд» — своя мерка, и с долей хода она не спорит: набранный
+    // человеком размер разговора (`size`) остаётся в памяти вкладки как был, и стоит ему
+    // встать в строй — коробка вернётся туда же, откуда её потеснила кнопка.
+    let chatBox = shown ? size : layout.back;
+    if (gated) {
+        chatBox = gateHeight;
+    }
 
     // Насколько коробка разговора ушла за кромку: всё, что от неё не видно. У стоящего
     // разговора, хоть свёрнутого, это ноль; уходит за кромку только убранная панель.
+    //
+    // Своей коробки у слоёв — формы своего корабля и списка кораблей — нет: они стоят в этой же
+    // и ровно её размера. Отсюда всё их поведение разом: тянут кромку — слой меняет размер
+    // вместе с разговором под ним, убирают панель — слой уходит за кромку вместе с ней. Открыть
+    // слой в убранную или свёрнутую панель нельзя — её сперва возвращают на экран
+    // (см. эффект «Панель под открывшийся слой»), иначе форма встала бы в полоску ручки с полем
+    // ввода или вовсе в ничто.
     const chatOff = Math.max(chatBox - size, 0);
 
-    // Коробка слоя — формы своего корабля и списка кораблей. Ростом она в разговор, пока он
-    // на экране по-настоящему, а над свёрнутым и убранным встаёт в тот размер, в каком разговор
-    // был бы: слой ни при чём, если разговор свернули, и показывать список в полоске ручки
-    // с полем ввода — значит не показывать вовсе.
-    const layerBox = talking ? size : layout.back;
-
-    /**
-     * Приспущенная коробка: насколько её увели с места пальцем, px.
-     *
-     * Место на рейде выбирают в форме корабля, а форма занимает под собой ту же треть экрана,
-     * что и разговор, — и отметки ближних мест жмутся к самой её кромке. Чтобы их разглядеть,
-     * форму приспускают свайпом: коробка уходит вниз, кадр раздаётся на освободившееся,
-     * отметки разъезжаются. Отпущенная у своей кромки, коробка встаёт обратно;
-     * утянутая до конца — закрывает форму совсем.
-     *
-     * Едет при этом вся коробка, а не одна форма: под формой стоит разговор, и уйди она одна,
-     * из-под неё показался бы он, а не рейд. Коробка внизу экрана одна на двоих — этим же
-     * она и остаётся.
-     *
-     * Потяг — тот же самый, каким двигают любую шторку (hooks/useSheetDrag): за любое место,
-     * своя прокрутка внутри забирает движение себе, отпущенная коробка приезжает к своей точке.
-     *
-     * Есть он только под кадром. Сбоку коробка стоит панелью у правой кромки, и меняют её
-     * размер полоской на этой кромке — так же, как тянут за границу всякую панель в настольном
-     * приложении (коридор ниже). Потяг за любое место сбоку и не нужен — рейд там и без того
-     * виден целиком, слева от панели, — а спорил он с выделением текста: вдоль строки ходят
-     * оба движения разом. Приспущенное в вертикальном окне при повороте снимается само:
-     * коробка тут числится закрытой, а закрытая свайпа под собой не помнит.
-     */
-    const lower = useSheetDrag({
-        open: (formOpen || joinOpen) && !atSide,
-        magnet: FORM_MAGNET,
-        // Утянутая до конца форма закрывается: переоснащение — обратно к разговору, постановка
-        // в строй — обратно к своей единственной кнопке. Обе закрывалки зовём разом: открыта
-        // всегда ровно одна из двух, и вторая ничего не меняет.
-        onClose: () => {
-            setEditing(false);
-            setJoining(false);
-        },
-    });
-    const lowered = lower.shift ?? 0;
-
-    // Сколько внизу (или сбоку) занято. Обычно это разговор, но второй слой коробки — форма
-    // своего корабля или список кораблей — остаётся на экране, когда разговор убрали: занято
-    // тогда им. Приспущенная
-    // коробка занимает ровно то, что от неё видно, — на том и стоит весь свайп.
+    // Сколько разговор отнял у кадра: снизу и справа. Одно число на всю коробку — и на разговор,
+    // и на стоящий поверх него слой: коробка на экране одна, и занимают её всегда вместе; вторая
+    // сторона в это время в нуле.
     //
-    // Число это и поджимает кадр — на него считаются и высота сцены, и её правая кромка сбоку,
-    // и ширина шторок на сцене. Кадру всё равно, кто именно внизу стоит: важно, сколько места
-    // осталось ему. Без этого убранный разговор отдавал кадру треть экрана прямо под открытой
-    // формой, и рейд разъезжался под неё — отметки ближних мест оказывались ровно под формой,
-    // и выбрать их было нечем.
-    const taken = Math.max((formOpen || listOpen ? layerBox : size) - lowered, 0);
+    // Две мерки, а не «одна плюс раскладка», потому что кадру раскладка безразлична: ему важно,
+    // с какой стороны его поджали и насколько. На эти два числа считаются и высота сцены,
+    // и её правая кромка, и отвод полосы шапки, и ширина шторок на сцене, и по ним же ходит
+    // коридор для свайпа — он держится видимой кромки. Смена раскладки для всех них — обычное
+    // движение: одно число идёт в ноль, второе из нуля, и едут они разом (см. .header в стилях).
+    const take = atSide ? { under: 0, side: size } : { under: gated ? gateHeight : size, side: 0 };
 
-    // Единственный кадр переезда считается так, будто разговора на экране нет вовсе: занято
-    // ничего, на экране ничего, а сама коробка своего размера не теряет. Со следующего кадра
-    // числа возвращаются настоящие — и приезд из-за кромки оказывается тем же самым движением,
-    // каким разговор возвращают кнопкой. Отсюда и главное: кадр отдаёт место не рывком,
-    // а ровно под приезжающую коробку, и щели между ними не бывает ни на одном кадре.
-    // Приспущенное в старом окне в этот кадр тоже не переезжает: мерено оно по прежней оси,
-    // и свайп его снимает сам (см. hooks/useSheetDrag).
-    const takenNow = atEdge ? 0 : taken;
-    const chatNow = atEdge ? 0 : Math.max(size - lowered, 0);
-    const loweredNow = atEdge ? 0 : lowered;
+    // Единственный кадр переезда стоит на прежних числах: коробка в нём уже ушла за свою новую
+    // кромку, а кадр отмерен ровно так, как был отмерен до поворота, — и потому не двигается
+    // вовсе. Со следующего кадра числа становятся новыми, и всё трогается разом: коробка едет
+    // из-за кромки на место, а кадр — из прежних мер в новые, теми же секундами и той же кривой.
+    //
+    // Прежде этот кадр считался так, будто разговора нет вовсе: кадр в нём разом распахивался
+    // во всё окно и следующим движением уступал место коробке. Прыжка выходило два — сперва
+    // вширь, потом обратно.
+    // Прежние числа помнит ссылка, и обновляется она, только пока раскладка та же. Это и есть
+    // вся хитрость: первая отрисовка в новой раскладке (`modeWas` ещё со старой) память не
+    // трогает, и на кадре переезда в ней лежит ровно то, чем кадр был отмерен до поворота.
+    // Обновись она заодно со всем остальным — держать переезду было бы нечего.
+    const takeWas = useRef(take);
+    const taken = atEdge ? takeWas.current : take;
+    if (!atEdge && modeWas.current === mode) {
+        takeWas.current = take;
+    }
+
+    // Раздача мерок. Наборов два, и каждый идёт ровно тем, кто его читает.
+    //
+    // Мерки ненаследуемые (см. @property в index.less): поставленные на приложение, они
+    // на каждый шаг тянущего пальца делали бы недействительными стили всему дереву — полусотне
+    // кораблей, сотне пузырей ленты, — притом что читают их считанные узлы. Ненаследуемая
+    // мерка останавливается на том узле, которому её дали, и стоит замер это разницы в полсотни
+    // раз (2.4 мс против 0.05 на телефоне).
+    //
+    // Отсюда и раздача поимённо: список читающих виден в одном месте — здесь.
+
+    // Сама коробка: её размер и уход за кромку. Читают их коробка разговора и слои в ней —
+    // форма своего корабля и список кораблей: своей коробки у них нет, они стоят в этой же.
+    const boxSize = {
+        '--chat-box': `${chatBox}px`,
+        '--chat-off': `${chatOff}px`,
+    } as CSSProperties;
+
+    // Сколько коробки видно с каждой стороны. Читают эти мерки те, кто стоит по её видимой
+    // кромке: кадр со сценой (из них считаются высота сцены и её правая кромка), полоса шапки
+    // над кадром и коридор для свайпа вдоль самой кромки.
+    const boxEdge = {
+        '--chat-under': `${taken.under}px`,
+        '--chat-side': `${taken.side}px`,
+    } as CSSProperties;
 
     /**
      * Потяг за коридор вдоль кромки разговора — один на обе раскладки.
@@ -726,6 +1179,7 @@ export default function App() {
         dragFrom.current = { pointerId: event.pointerId, at: gripAxis(event), size, open: size, fling: trackFling() };
         event.currentTarget.setPointerCapture(event.pointerId);
         setDragging(true);
+        chose();
     };
 
     const handleGripMove = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -734,8 +1188,16 @@ export default function App() {
             return;
         }
         from.open = from.size + (from.at - gripAxis(event));
+        // Отмечаем то, куда палец увёл коробку, а не то, куда её пустили: скорость меряется
+        // намерением. Брошенная за нижнюю точку коробка обязана долететь до неё с разгона,
+        // а не потерять его на упоре, о который палец тёрся последние полсекунды.
         from.fling.mark(from.open, event.timeStamp);
-        resize(from.open);
+        // Ниже нижней своей точки коробка не идёт: со слоем это не пол, а наименьшая настоящая
+        // доля — сминать список или форму в полоску ручки с полем ввода некуда (см. `chatMagnets`).
+        // Упор при этом не глухой: коробка подаётся за него на дюжину точек с затуханием,
+        // и отпущенная возвращается — видно, что она упёрлась, а не заела.
+        const points = chatMagnets(layout, boxHasForm);
+        resize(rubberBand(from.open, points[0], points[points.length - 1]));
     };
 
     /**
@@ -743,8 +1205,13 @@ export default function App() {
      *
      * Точки в обеих раскладках одни и те же, и считает их раскладка (`chatMagnets`): сбоку
      * они прижаты её пределами, и там, где кадру нельзя отдать меньше шестисот, «две трети»
-     * и «весь ход» сходятся в один упор. Между точками разговор не встаёт: положений у него
-     * ровно столько, сколько точек.
+     * и «весь ход» сходятся в один упор.
+     *
+     * А вот строгость у раскладок разная. Под кадром разговор — шторка, и положений у него
+     * ровно столько, сколько точек. Сбоку он панель, и её ширину подбирают под себя: под длину
+     * строчки, под то, сколько кадра хочется оставить видимым. Точки там притягивают отпущенную
+     * рядом кромку, а поставленную вдали от них оставляют где поставили (см. `settleMagnet`).
+     * Крайние точки пределами остаются в обеих раскладках: это не подсказки, а края хода.
      *
      * Считается приземление не от места, где палец встал, а от того, куда разговор долетел
      * бы по инерции: короткий сильный рывок вниз проскакивает точки насквозь и уводит
@@ -762,15 +1229,14 @@ export default function App() {
         }
         dragFrom.current = null;
         setDragging(false);
-        resize(
-            settleMagnet({
-                from: from.size,
-                to: from.open,
-                velocity: from.fling.speed(event.timeStamp),
-                points: chatMagnets(layout),
-            }),
-            true
-        );
+        const settled = settleMagnet({
+            from: from.size,
+            to: from.open,
+            velocity: from.fling.speed(event.timeStamp),
+            points: chatMagnets(layout, boxHasForm),
+            pointsOnly: !atSide,
+        });
+        resize(legalSize(settled, layout), true);
     };
 
     /**
@@ -797,7 +1263,7 @@ export default function App() {
      * сколько точек, и стрелке взять промежуточное неоткуда.
      */
     const handleGripKey = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-        const points = chatMagnets(layout);
+        const points = chatMagnets(layout, boxHasForm);
         const to = {
             [atSide ? 'ArrowLeft' : 'ArrowUp']: stepMagnet(points, size, 1),
             [atSide ? 'ArrowRight' : 'ArrowDown']: stepMagnet(points, size, -1),
@@ -806,6 +1272,7 @@ export default function App() {
         }[event.key];
         if (to !== undefined) {
             event.preventDefault();
+            chose();
             resize(to, true);
         }
     };
@@ -816,42 +1283,20 @@ export default function App() {
                 styles.app,
                 atSide ? styles.appSide : styles.appUnder,
                 dragging ? styles.appDragging : '',
-                lower.dragging ? styles.appLowering : '',
                 atEdge ? styles.appAtEdge : '',
             ]
                 .filter(Boolean)
                 .join(' ')}
-            // Размеры коробок внизу экрана в вертикальной раскладке и справа в горизонтальной.
-            // Высота это или ширина, говорит раскладка, а не число. Обычно все они совпадают,
-            // и расходятся ровно тогда, когда разговор свёрнут или убран.
-            //
-            // --chat-box — коробка разговора: в каком размере она стоит. Свёрнутый честно
-            //   садится в свой пол — ручку с плашкой ввода; убранная кнопкой панель размера
-            //   не теряет и уезжает за кромку целиком.
-            // --chat-off — насколько коробка разговора за эту кромку ушла. У стоящего разговора
-            //   ноль, у убранной панели — вся она.
-            // --layer-box — коробка слоя: формы своего корабля и списка кораблей. Над свёрнутым
-            //   и убранным разговором это тот размер, в каком разговор был бы (см. `back`
-            //   в hooks/useLayout): показывать список в полоске ручки незачем.
-            // --chat-to — сколько разговора на экране. По нему ходит коридор для свайпа —
-            //   он держится видимой кромки.
-            // --taken-to — сколько на экране занято хоть кем из двоих, разговором или формой.
-            //   Из него считается всё, что поджимает кадр: высота сцены, её правая кромка
-            //   сбоку, ширина шторок на сцене и затемнение под ними.
-            // --lowered — насколько коробку приспустили пальцем. Едет по ней сама коробка,
-            //   и обе её половины разом — разговор и стоящая поверх форма.
-            style={
-                {
-                    '--chat-box': `${chatBox}px`,
-                    '--chat-off': `${chatOff}px`,
-                    '--layer-box': `${layerBox}px`,
-                    '--chat-to': `${chatNow}px`,
-                    '--taken-to': `${takenNow}px`,
-                    '--lowered': `${loweredNow}px`,
-                } as CSSProperties
-            }
+            // Настоящая высота шапки — вниз по дереву, а не только тем двум узлам, что уже несут
+            // boxEdge: до неё дотягивается и шторка (Shade.module.less), а она снаружи и своей
+            // коробки не касается, и в boxEdge её звать незачем.
+            style={{ '--header-height': `${headerHeight}px` } as CSSProperties}
         >
-            <header className={styles.header}>
+            {/* Мерки коробки внизу экрана в вертикальной раскладке и справа в горизонтальной.
+                Высота это или ширина, говорит раскладка, а не число. Коробка одна на всё, что
+                в ней стоит: и на разговор, и на выехавший поверх него слой, — и потому мерки
+                у них общие, просто розданы поимённо (см. boxSize и boxEdge выше). */}
+            <header className={styles.header} style={boxEdge}>
                 <div className={styles.scene} ref={sceneRef}>
                     <SeaScene
                         members={members}
@@ -869,28 +1314,27 @@ export default function App() {
                         // тут стоит дешевле, чем разбор, кто кого сейчас не пускает. Список
                         // кораблей закрывать не надо: он и так не открыт, пока открыта форма.
                         //
-                        // При закрытой форме нажатий нет вовсе: пришедший по ссылке смотрит
-                        // на рейд со стороны, и трогать чужие корабли ему нечем — как и им его.
-                        onEditShip={
-                            atGate
-                                ? undefined
-                                : () => {
-                                      setShownId(null);
-                                      setEditing(true);
-                                  }
-                        }
+                        // У входа нажатий нет вовсе: пришедший по ссылке смотрит на рейд
+                        // со стороны, и трогать чужие корабли ему нечем — как и им его.
+                        // И тот, кто ещё не назвался, — тоже пришедший по ссылке (см. `atGate`).
+                        onEditShip={atGate ? undefined : handleEditShip}
                         // А щелчок по чужому — его карточку: своим на рейде распоряжаются,
                         // чужой разглядывают.
                         onShowShip={atGate ? undefined : handleShowShip}
-                        berths={
-                            picking
-                                ? { options: berthOptions, picked: pickedBerth, facing, onPick: handlePickBerth }
-                                : undefined
-                        }
+                        berths={berths}
                     />
                 </div>
-                <div className={styles.headerBar}>
+                <div className={styles.headerBar} style={boxEdge} ref={measureHeader}>
                     <div className={styles.headerInfo}>
+                        {/* Нет связи — говорим один раз здесь, а не снекбаром на каждое действие
+                            (см. docs/FIREBASE.md, «Что видит человек»): повторённый пять раз
+                            подряд снекбар про отсутствие сети — шум, а не сообщение. Строчка
+                            видна и на главной, до открытия канала: связь нужна раньше, чем канал. */}
+                        {connection.status === 'offline' && (
+                            <div className={styles.connectionStrip} role="status">
+                                Связи нет. Ждём, когда вернётся
+                            </div>
+                        )}
                         {/* Название канала — это и кнопка «кто на связи»: по нажатию открывается
                             список кораблей. Значок стоит в конце названия, а не отдельной кнопкой
                             справа: список — это и есть «кто в этом канале», и спрашивают о нём,
@@ -905,13 +1349,19 @@ export default function App() {
                             Кнопкой блок становится только у своих: список показывают тем,
                             кто уже на рейде, а гостю на входе открывать нечего — ему остаются
                             те же две строчки простым текстом. Их же видно и на главной, где
-                            канала нет вовсе: там на этом месте название сервиса. */}
+                            канала нет вовсе: там на этом месте название сервиса.
+
+                            Своё положение кнопка называет вслух (`aria-expanded`): иначе читалка
+                            объявляет её просто кнопкой с названием канала, не говоря, открыт ли
+                            список. «Открыт» тут значит «список виден»: под формой своего корабля
+                            он накрыт, и то же нажатие возвращает к нему, а не убирает. */}
                         {inChat && channel ? (
                             <button
                                 type="button"
                                 className={styles.chatTitleButton}
                                 onClick={handleShips}
                                 title="Корабли на связи"
+                                aria-expanded={listOpen && !editing}
                             >
                                 <span className={styles.chatTitleLine}>
                                     <span className={styles.chatTitleName}>{channel.channel.title}</span>
@@ -933,7 +1383,38 @@ export default function App() {
                             </button>
                         ) : (
                             <>
-                                <div className={styles.chatTitle}>{channel?.channel.title ?? 'Кильватер'}</div>
+                                {/* Название сервиса уводит на главную, название канала — никуда.
+                                    Разница не в оформлении, а в том, что написано: «Кильватер» —
+                                    это имя всего чата, и вести ему положено на его первый экран,
+                                    а название канала — имя места, в котором человек уже стоит.
+
+                                    Ссылкой, а не кнопкой: это переход по адресу, и вести он должен
+                                    себя как всякий переход — открываться в новой вкладке средним
+                                    щелчком и показывать адрес в строке состояния. Нажатие при этом
+                                    перехватываем, чтобы страница не перезагружалась целиком
+                                    (навигация тут через pushState, см. routing.ts). */}
+                                {!channel && route.channel ? (
+                                    <a
+                                        className={styles.chatTitleHome}
+                                        href={homeLink()}
+                                        onClick={(event) => {
+                                            if (
+                                                event.metaKey ||
+                                                event.ctrlKey ||
+                                                event.shiftKey ||
+                                                event.button !== 0
+                                            ) {
+                                                return;
+                                            }
+                                            event.preventDefault();
+                                            route.openHome();
+                                        }}
+                                    >
+                                        Кильватер
+                                    </a>
+                                ) : (
+                                    <div className={styles.chatTitle}>{channel?.channel.title ?? 'Кильватер'}</div>
+                                )}
                                 <div className={styles.chatStatus}>{loading ? 'связь…' : status()}</div>
                             </>
                         )}
@@ -971,34 +1452,48 @@ export default function App() {
                             создания канала. Кадр там такой же настоящий, и смотреть на него
                             во весь экран хочется не меньше.
 
-                            Под открытой формой своего корабля кнопки нет вовсе. Форма стоит
-                            на том же месте, что и разговор, и держит его собой: убери разговор
-                            из-под неё — на экране не поменяется ничего. Такую кнопку жать
-                            незачем, а увидеть её последствия можно только закрыв форму —
-                            то есть неожиданностью. Разговор при этом остаётся в том положении,
-                            в каком его застали: закрылась форма — вернулось оно же. */}
-                        {atSide && !(inChat && editing) && (
-                            <IconButton onClick={toggleChat} aria-label={shown ? 'Убрать панель' : 'Вернуть панель'}>
-                                <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
-                                    <rect
-                                        x="3"
-                                        y="4"
-                                        width="18"
-                                        height="16"
-                                        rx="2"
-                                        stroke="currentColor"
-                                        strokeWidth="2"
-                                        fill="none"
-                                    />
-                                    <path
-                                        d="M15 4v16"
-                                        stroke="currentColor"
-                                        strokeWidth="2"
-                                        strokeLinecap="round"
-                                        fill="none"
-                                    />
-                                </svg>
-                            </IconButton>
+                            Стоит она и под открытым слоем — формой своего корабля, списком
+                            кораблей: коробка у них с разговором одна, и убирается она целиком,
+                            вместе с тем, что в ней сейчас стоит. Кнопка поэтому означает
+                            ровно то же, что и всегда, — «панель», — и прятать её не за что. */}
+                        {atSide && (
+                            // Счётчик непрочитанного — пилюлей в углу кнопки. Место ему отводит
+                            // это гнездо, а не сама пилюля: где счётчику сидеть, знает тот,
+                            // у чьей кнопки он стоит (см. ui/Counter).
+                            //
+                            // Стоит он ровно на той кнопке, которой панель и возвращают: убранный
+                            // разговор ничем другим о себе не напоминает, а кнопка эта на экране
+                            // всегда. Пропадает счётчик вместе с возвратом панели — не по таймеру
+                            // и не по нажатию: разговор на экране, читать показано, и держать
+                            // цифру дольше было бы враньём.
+                            <span className={styles.panelSlot}>
+                                <IconButton onClick={toggleChat} aria-label={panelLabel()}>
+                                    <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+                                        <rect
+                                            x="3"
+                                            y="4"
+                                            width="18"
+                                            height="16"
+                                            rx="2"
+                                            stroke="currentColor"
+                                            strokeWidth="2"
+                                            fill="none"
+                                        />
+                                        <path
+                                            d="M15 4v16"
+                                            stroke="currentColor"
+                                            strokeWidth="2"
+                                            strokeLinecap="round"
+                                            fill="none"
+                                        />
+                                    </svg>
+                                </IconButton>
+                                {unread > 0 && (
+                                    <span className={styles.panelCount} data-unread={unread}>
+                                        <Counter value={unread} />
+                                    </span>
+                                )}
+                            </span>
                         )}
                     </div>
                 </div>
@@ -1009,58 +1504,25 @@ export default function App() {
                 ни чтению вслух. Свёрнутый до пола разговор, наоборот, остаётся живым: плашка
                 ввода на экране, и писать в неё можно, ничего не разворачивая. */}
             <main
-                className={[styles.content, atSide ? styles.contentSide : '', tight ? styles.contentTight : '']
-                    .filter(Boolean)
-                    .join(' ')}
+                className={[styles.content, atSide ? styles.contentSide : ''].filter(Boolean).join(' ')}
+                style={boxSize}
                 inert={!shown}
             >
-                {/* Ручка для хвата — единственное место, за которое эту коробку тянут.
-                    Что именно она двигает, решает то, что в коробке стоит: форму постановки
-                    в строй приспускают ею самой (lower), а разговор — тем же движением,
-                    что и коридор над ручкой. Кромка у коробки одна, и хват за неё один. */}
-                {!atSide && (
-                    <div
-                        className={styles.sheetHandle}
-                        aria-hidden="true"
-                        {...(joinOpen ? lower.handlers : gripHandlers)}
-                    >
+                {/* Ручка для хвата — единственное место, за которое эту коробку тянут. Движение
+                    у неё одно на всё, что в коробке стоит, и то же самое, что у коридора над
+                    ней: коробка внизу экрана одна, кромка у неё одна, и хват за эту кромку
+                    тоже один. */}
+                {/* Пока коробка стоит по кнопке (`gated`), тянуть её не за что: она не про
+                    размер, а про содержимое, и потяг с этим бы спорил. Ручка здесь просто
+                    не рисуется — не запрещаем каждый обработчик по отдельности, а убираем
+                    саму цель, за которую тянут. */}
+                {!atSide && !gated && (
+                    <div className={styles.sheetHandle} aria-hidden="true" {...gripHandlers}>
                         <span className={styles.sheetGrip} />
                     </div>
                 )}
                 {baseContent}
             </main>
-            {/* Форма своего корабля. Стоит она там же, где разговор, но соседом ему, а не
-                содержимым: форму открывают нажатием по своему кораблю в кадре, и убранный
-                разговор не должен уносить её с собой — вместе с ним она схлопывалась бы в ноль
-                и глохла для указателя (inert). Ростом она поэтому не в разговор, а в свою
-                коробку (--layer-box): убранный разговор нулевой, свёрнутый — с ручку и поле
-                ввода, а форма в обоих случаях встаёт в полный размер. */}
-            {formSlide.mounted && me && (
-                <div
-                    className={[styles.form, editing ? '' : styles.formLeaving].filter(Boolean).join(' ')}
-                    onTransitionEnd={formSlide.onTransitionEnd}
-                >
-                    {/* Ручка у формы — та же рисочка и то же дело: за неё форму приспускают,
-                        чтобы разглядеть рейд. Сбоку ручки нет — панель двигают за её кромку. */}
-                    {!atSide && (
-                        <div className={styles.sheetHandle} aria-hidden="true" {...lower.handlers}>
-                            <span className={styles.sheetGrip} />
-                        </div>
-                    )}
-                    <MemberForm
-                        mode="edit"
-                        crew={members}
-                        myId={myId}
-                        initial={myDraft}
-                        shipKind={shipKind}
-                        onShipKind={setPickedKind}
-                        facing={facing}
-                        onFacing={setPickedFacing}
-                        onSubmit={handleMemberSubmit}
-                        onCancel={() => setEditing(false)}
-                    />
-                </div>
-            )}
             {/* Коридор вдоль кромки разговора: за него меняют его размер. Есть он в обеих
                 раскладках — сбоку вдоль левой кромки, под кадром вдоль верхней, — и это одна
                 и та же полоска, просто повёрнутая: разговор и там и там шторка, которую тянут
@@ -1075,9 +1537,10 @@ export default function App() {
                 и за неё разговор достают обратно тем же свайпом, каким свернули. Нет коридора
                 только у убранного: размера у него ноль, и тянуть не за что — вернуть его можно
                 кнопкой в шапке. */}
-            {shown && (
+            {shown && !gated && (
                 <div
                     className={[styles.grip, atSide ? styles.gripSide : styles.gripUnder].join(' ')}
+                    style={boxEdge}
                     {...gripHandlers}
                     onKeyDown={handleGripKey}
                     role="separator"
@@ -1092,59 +1555,43 @@ export default function App() {
                 />
             )}
             {/* Список кораблей — вторым слоем той же коробки, где стоит разговор, и тем же
-                выездом снизу, что и форма своего корабля. Шторкой поверх всего он был раньше,
-                и это было неправдой про него: шторка затемняет под собой экран, потому что пока
-                она открыта, разговор идёт только про неё, — а список кораблей про рейд, и гасить
-                рейд ради него незачем. В коробке он никого не загораживает: сцена остаётся живой
-                и открытой в обеих раскладках.
+                выездом снизу, что и форма своего корабля. Шторкой он не стал нарочно: шторка
+                затемняет под собой экран, потому что пока она открыта, разговор идёт только
+                про неё, — а список кораблей про рейд, и гасить рейд ради него незачем. В коробке
+                он никого не загораживает: сцена остаётся живой и открытой в обеих раскладках.
 
                 Отсюда и раскладок ему не нужно двух: коробка сама стоит там, где ей положено, —
-                под кадром на телефоне, панелью справа на десктопе, — и список едет вместе с ней. */}
+                под кадром на телефоне, панелью справа на десктопе, — и список едет вместе с ней.
+                Вместе с ней он и убирается за кромку, и глохнет там (inert), — как форма своего
+                корабля рядом.
+
+                Своей ручки у него нет: ручка — это кромка коробки, а список приезжает внутрь
+                коробки, под неё. Хват на кромке остаётся один и тот же, и коробку с открытым
+                списком тянут ровно тем же движением, что и без него. */}
             {listSlide.mounted && (
                 <section
+                    ref={listSlide.ref}
                     className={[styles.list, listOpen ? '' : styles.listLeaving].filter(Boolean).join(' ')}
+                    style={boxSize}
                     aria-label="Корабли на связи"
-                    onTransitionEnd={listSlide.onTransitionEnd}
+                    // Глохнет он не только за кромкой, но и под накрывшей его формой: видно
+                    // из-под неё нечего, а фокус по Tab уходил бы в невидимое.
+                    inert={!shown || formOpen}
                 >
-                    {/* Ручка — та же, что и у разговора под ним, и тянет она то же самое:
-                        размер коробки. Список занял её собой, но кромка у коробки прежняя,
-                        и двигают её тем же движением. У убранного разговора размера нет,
-                        и тянуть не за что — там нет и коридора вдоль кромки. */}
-                    {!atSide && shown && (
-                        <div className={styles.sheetHandle} aria-hidden="true" {...gripHandlers}>
-                            <span className={styles.sheetGrip} />
-                        </div>
-                    )}
                     {/* Крестик — там же, где у шторки. Закрывается список ещё и названием канала
                         в шапке, тем же нажатием, каким его открыли, — но искать выход в другом
                         конце экрана человек не обязан. */}
-                    <div className={styles.layerClose}>
-                        <IconButton variant="muted" onClick={() => setSheetOpen(false)} aria-label="Закрыть">
-                            <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
-                                <path
-                                    d="M7 7l10 10M17 7L7 17"
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                    strokeLinecap="round"
-                                    fill="none"
-                                />
-                            </svg>
-                        </IconButton>
-                    </div>
+                    <CloseButton onClick={() => act({ type: 'close-list' })} />
                     <MembersList
                         members={members}
                         myId={myId}
                         seniorId={channel?.channel.owner?.memberId ?? null}
-                        // Настройка своего корабля — та же форма, что и по щелчку по нему на рейде.
-                        // Список за собой закрываем: слой коробки у них один, и вдвоём
-                        // им там не поместиться.
-                        onEditMe={() => {
-                            setSheetOpen(false);
-                            setEditing(true);
-                        }}
+                        // Настройка своего корабля — та же форма и тем же путём, что и по щелчку
+                        // по кораблю на рейде (см. `handleEditShip`).
+                        onEditMe={handleEditShip}
                         // Список остаётся открытым: высадив один корабль, старший чаще всего смотрит
                         // на список дальше, а не уходит из него.
-                        onKick={(memberId) => void channelState.kick(memberId)}
+                        onKick={handleKick}
                         onHail={handleHail}
                         // Карточка чужого корабля — та же, что и по щелчку по нему в кадре. Здесь
                         // она ложится поверх списка и закрывается обратно в него.
@@ -1156,6 +1603,42 @@ export default function App() {
                     />
                 </section>
             )}
+            {/* Форма своего корабля — верхний слой той же коробки, где стоит разговор, и ростом
+                в неё за вычетом ручки: ручка — кромка коробки, форма приезжает внутрь, под неё,
+                и своей ручки не заводит. Отсюда всё её поведение разом: тянут кромку — форма
+                меняет размер вместе с разговором под ней, убирают панель — уходит за кромку
+                вместе с ней и там глохнет (inert), как и разговор. Открыть форму в убранную
+                или свёрнутую панель нельзя — та сперва возвращается на экран (см. эффект
+                «Панель под открывшийся слой»).
+
+                Стоит она в разметке последней из слоёв — за списком кораблей, — и потому
+                рисуется поверх него: слои лежат стопкой, и открытая из списка форма его
+                не разбирает, а накрывает. Закрылась — список остался на месте, там же,
+                где и был, вместе с прокруткой.
+
+                Написана она соседом разговору, а не внутри него: разговор обрезан наглухо,
+                и выезжающая снизу форма из него бы не высунулась. */}
+            {formSlide.mounted && me && (
+                <div
+                    ref={formSlide.ref}
+                    className={[styles.form, editing ? '' : styles.formLeaving].filter(Boolean).join(' ')}
+                    style={boxSize}
+                    inert={!shown}
+                >
+                    <MemberForm
+                        mode="edit"
+                        crew={members}
+                        myId={myId}
+                        initial={myDraft}
+                        shipKind={shipKind}
+                        onShipKind={setPickedKind}
+                        facing={facing}
+                        onFacing={setPickedFacing}
+                        onSubmit={handleMemberSubmit}
+                        onCancel={() => act({ type: 'close-form' })}
+                    />
+                </div>
+            )}
             {/* Карточка чужого корабля — шторкой, и это не непоследовательность. Карточка
                 приходит с двух сторон — из строчки списка и щелчком по кораблю в кадре, —
                 и в обоих случаях разговор идёт ровно про неё: под ней ничего не выбирают,
@@ -1164,7 +1647,14 @@ export default function App() {
 
                 Ложится она поверх (cover): открытая из строчки списка, она его продолжает,
                 и закрыв её, человек ждёт увидеть список, а не пустой рейд. */}
-            <Shade open={Boolean(shownMember)} onClose={() => setShownId(null)} label="Корабль" onScene={atSide} cover>
+            <Shade
+                open={Boolean(shownMember)}
+                onClose={() => act({ type: 'close-card' })}
+                label="Корабль"
+                onScene={atSide}
+                sideWidth={taken.side}
+                cover
+            >
                 {shownCard && (
                     <ShipCard
                         key={shownCard.memberId}
@@ -1180,12 +1670,18 @@ export default function App() {
                 а вместе с ним — и всё, что показывают своему кораблю. */}
             <Shade
                 open={leaving && inChat}
-                onClose={() => setLeaving(false)}
+                onClose={() => act({ type: 'close-course' })}
                 label="Вы уходите с рейда"
                 onScene={atSide}
+                sideWidth={taken.side}
                 cover
             >
-                <LeaveRaid onConfirm={handleLeaveConfirm} onCancel={() => setLeaving(false)} />
+                <LeaveRaid
+                    others={members.filter((member) => member.memberId !== myId)}
+                    iAmSenior={Boolean(myId) && myId === channel?.channel.owner?.memberId}
+                    onConfirm={handleLeaveConfirm}
+                    onCancel={() => act({ type: 'close-course' })}
+                />
             </Shade>
         </div>
     );

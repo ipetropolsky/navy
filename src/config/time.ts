@@ -41,3 +41,12 @@ export const TIME_SCALE = readTimeScale();
  * делится и то и другое одинаково.
  */
 export const paced = (duration: number): number => duration / TIME_SCALE;
+
+/**
+ * Обратно: сколько эта длительность значила бы при обычной скорости времени.
+ *
+ * Нужно там, где длительность уходит из кадра наружу и переживает его, — в хранилище
+ * (`Manoeuvre.seconds`). Записанная секунда должна значить секунду: ускорена вкладка или нет,
+ * дело этой вкладки, а прочитать запись может и не она.
+ */
+export const unpaced = (duration: number): number => duration * TIME_SCALE;

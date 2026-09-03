@@ -1,6 +1,6 @@
 import { ReactNode } from 'react';
 
-import { SHIP_KIND_LABELS, ShipField, ShipNotice, ShipTitle } from '@/types/channel';
+import { SHIP_KIND_LABELS, ShipField, ShipNotice, ShipTitle } from '@shared/types/channel';
 
 /**
  * Строчка канала о корабле: вошёл, переоснастился, снялся с рейда.
@@ -48,6 +48,12 @@ export default function ShipNoticeLine({ notice }: ShipNoticeLineProps): ReactNo
             // Без `changed` переоснащения не бывает, но тип этого не обещает, а выдумывать,
             // что именно сменилось, нельзя.
             return notice.changed ? REFIT_LINES[notice.changed] : null;
+        case 'moved':
+            // Перемена места — той же формой, что и переоснащение: подлежащего нет, строчка
+            // стоит в цепочке самого корабля, и о ком речь, видно по аватарке и позывному
+            // над ней. Куда именно он пошёл, не сказано: место на рейде называется
+            // координатами, а не словами, а сам переход человек и так видит в кадре.
+            return <>Сменил место стоянки</>;
         case 'left':
             // Уходящий говорит, куда пошёл, и его слова — главное в строчке: корабль
             // не пропадает с рейда молча. Корабль в ней не назван вовсе — она стоит в его же
@@ -59,7 +65,10 @@ export default function ShipNoticeLine({ notice }: ShipNoticeLineProps): ReactNo
             // и пошли. Ровно то, что происходит в кадре, и ровно так об этом и говорят.
             return notice.course ? <>Уходит с рейда. Новый курс: {notice.course}</> : <>{who} снялся с рейда</>;
         case 'kicked':
-            return <>{who} выдворен с рейда</>;
+            // «Снят с рейда», а не «выдворен»: рейд — не двор, и с него снимают, как снимают
+            // с якоря. Слово при этом остаётся страдательным — в отличие от снявшегося сам,
+            // корабль тут не решал ничего.
+            return <>{who} снят с рейда</>;
         case 'joined':
         default:
             return <>{who} встал на рейд</>;

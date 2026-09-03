@@ -21,14 +21,22 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
+    "types": ["node"],
 
     /* Path mapping */
     "paths": {
       "@/*": ["./src/*"],
+      "@shared/*": ["./shared/*"],
       "@tests/*": ["./tests/*"],
+      "@tests-firebase/*": ["./tests-firebase/*"],
       "~/*": ["./node_modules/*"]
     }
   },
-  "include": ["src", "tests"],
+  // functions/src — не свой tsconfig (module: NodeNext, см. functions/tsconfig.json), а этот:
+  // ts-check тут общий на весь репозиторий, и второй раз поднимать компилятор ради одного
+  // каталога незачем — bundler-резолюция видит те же node_modules/functions/node_modules,
+  // что и NodeNext, обычным поиском вверх по каталогам. Строгость сборки функций (что именно
+  // войдёт в lib/) по-прежнему проверяет только functions/tsconfig.json через свою сборку.
+  "include": ["src", "shared", "tests", "tests-firebase", "firestore", "functions/src"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

@@ -22,6 +22,13 @@ interface Store {
     read: (key: string) => string | null;
     write: (key: string, value: string) => void;
     remove: (key: string) => void;
+    /**
+     * Все ключи хранилища прямо сейчас. Нужен там, где заранее не известно, под каким
+     * именно ключом искать запись — например ящику неотправленного (backend/outbox.ts),
+     * когда discardMessage не приносит userId. Пусто в ответе — не обязательно пусто
+     * на деле: так же, как read/write/remove, тихо сдаётся при отказе хранилища.
+     */
+    keys: () => string[];
 }
 
 /** Хранилище берём не сразу, а на каждом обращении: до первого вызова окна может не быть. */
@@ -45,6 +52,21 @@ const guarded = (pick: () => Storage): Store => ({
             pick().removeItem(key);
         } catch {
             // Нечего чистить — и не надо.
+        }
+    },
+    keys() {
+        try {
+            const storage = pick();
+            const result: string[] = [];
+            for (let i = 0; i < storage.length; i += 1) {
+                const key = storage.key(i);
+                if (key !== null) {
+                    result.push(key);
+                }
+            }
+            return result;
+        } catch {
+            return [];
         }
     },
 });

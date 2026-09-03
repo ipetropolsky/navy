@@ -3,7 +3,7 @@ import { CSSProperties, ReactNode } from 'react';
 import { useSheetDrag } from '@/hooks/useSheetDrag';
 import { useSlide } from '@/hooks/useSlide';
 
-import IconButton from '@/components/ui/IconButton';
+import CloseButton from '@/components/ui/CloseButton';
 import { useShadeFloor } from '@/components/ui/ShadeStack';
 
 import styles from './Shade.module.less';
@@ -24,6 +24,15 @@ interface ShadeProps {
      * разговор идёт только про неё.
      */
     onScene?: boolean;
+    /**
+     * Ширина боковой панели, px: на столько шторка на сцене отступает справа. Панель тянут
+     * за коридор вдоль её кромки, и шторка рядом обязана двигаться вместе с этой кромкой.
+     *
+     * Числом от хозяина, а не переменной с приложения: мерка эта меняется на каждый шаг
+     * тянущего пальца, и наследуемой она делала бы недействительным всё дерево разом
+     * (см. @property в index.less). Под кадром панели нет вовсе, и там это ноль.
+     */
+    sideWidth?: number;
     /**
      * Лечь поверх уже открытых шторок, а не закрывать их за собой.
      *
@@ -71,18 +80,27 @@ interface ShadeProps {
  * Едет она сдвигом, а не высотой: высоту ей задаёт содержимое, и разводить её во времени
  * значило бы перекладывать содержимое на каждом кадре выезда.
  *
- * Сам свайп — общий (см. hooks/useSheetDrag): так же тянут и форму своего корабля, которую
- * приспускают, чтобы разглядеть рейд под ней.
+ * Сам свайп — в hooks/useSheetDrag; там же сказано, чем он пока расходится со свайпом
+ * за кромку разговора и почему этого быть не должно (docs/SHEETS.md).
  */
-export default function Shade({ open, onClose, label, onScene = false, cover = false, children }: ShadeProps) {
-    const { mounted, onTransitionEnd } = useSlide(open);
+export default function Shade({
+    open,
+    onClose,
+    label,
+    onScene = false,
+    sideWidth = 0,
+    cover = false,
+    children,
+}: ShadeProps) {
+    const { mounted, ref } = useSlide(open);
     // Этаж в стопке: открытая позже лежит выше открытой раньше, а не так, как их написали
     // в разметке. Считает его ShadeStack, он же и закрывает нижние, если эта не `cover`.
     const floor = useShadeFloor(mounted, onClose, cover);
     // Потяг — общая механика (см. hooks/useSheetDrag): тянут за ручку, отпущенная шторка
     // приезжает к своей точке. Точки не задаём: у шторки они обычные — закрыта или раскрыта
-    // по содержимому.
-    const { shift, dragging, handlers } = useSheetDrag({ open, onClose });
+    // по содержимому. А вот встать между ними шторке нельзя (`pointsOnly`): показывать её
+    // на четверти незачем — в шторке читают и нажимают, а не подглядывают.
+    const { shift, dragging, handlers } = useSheetDrag({ open, onClose, magnet: { pointsOnly: true } });
 
     if (!mounted) {
         return null;
@@ -125,15 +143,19 @@ export default function Shade({ open, onClose, label, onScene = false, cover = f
                 onClick={onClose}
             />
             <section
+                ref={ref}
                 className={look}
                 style={
                     {
                         '--shade-floor': floor,
+                        // Ширина панели, от которой шторка на сцене отступает. Стоит она
+                        // на самой шторке, а не наследуется с приложения: меняется мерка
+                        // на каждый шаг тянущего кромку пальца.
+                        '--side-width': `${sideWidth}px`,
                         ...(held === null ? {} : { transform: `translateY(${held}px)` }),
                     } as CSSProperties
                 }
                 aria-label={label}
-                onTransitionEnd={onTransitionEnd}
             >
                 {/* Ручка — то самое место, за которое шторку тянут, и единственное. Кнопкой она
                     при этом не становится: нажимать её незачем и нечем — тому, у кого нет пальца,
@@ -142,19 +164,7 @@ export default function Shade({ open, onClose, label, onScene = false, cover = f
                 <span className={styles.handle} aria-hidden="true" {...handlers}>
                     <span className={styles.grip} />
                 </span>
-                <div className={styles.close}>
-                    <IconButton variant="muted" onClick={onClose} aria-label="Закрыть">
-                        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
-                            <path
-                                d="M7 7l10 10M17 7L7 17"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                                strokeLinecap="round"
-                                fill="none"
-                            />
-                        </svg>
-                    </IconButton>
-                </div>
+                <CloseButton onClick={onClose} />
                 {children}
             </section>
         </>

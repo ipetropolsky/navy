@@ -3,11 +3,13 @@ import { useState } from 'react';
 import MemberName from '@/components/ships/MemberName';
 import Pennant from '@/components/ships/Pennant';
 import ShipPortrait, { shipSpecLine } from '@/components/ships/ShipPortrait';
-import Actions from '@/components/ui/Actions';
 import Button from '@/components/ui/Button';
+import Sheet from '@/components/ui/Sheet';
 import { useSnackbar } from '@/components/ui/Snackbar';
+import Switch from '@/components/ui/Switch';
+import { BeaconIcon } from '@/components/ui/icons';
 import { HAIL_SIGNAL } from '@/hooks/morse';
-import { Member, MorseFeed, SHIP_KIND_LABELS } from '@/types/channel';
+import { Member, MorseFeed, SHIP_KIND_LABELS } from '@shared/types/channel';
 
 import styles from './ShipCard.module.less';
 
@@ -19,6 +21,16 @@ interface ShipCardProps {
 
 /** Что означает вымпел. То же слово, что и в списке: звание одно. */
 const SENIOR_TITLE = 'Старший на рейде';
+
+/**
+ * Положения переключателя огней. Порядок тут и есть порядок на дорожке: «Ход» слева, «Якорь»
+ * справа. Список постоянный и лежит снаружи разметки — как и всё, что от состояния карточки
+ * не зависит.
+ */
+const UNDERWAY_OPTIONS = [
+    { value: 'underway', label: 'Ход' },
+    { value: 'anchored', label: 'Якорь' },
+] as const;
 
 /**
  * Карточка чужого корабля: портрет с бортовым номером, позывной, силуэт и его характеристики.
@@ -57,24 +69,54 @@ export default function ShipCard({ member, senior }: ShipCardProps) {
     };
 
     return (
-        <div className={styles.card}>
-            <div className={styles.title}>
-                <MemberName name={member.name} color={member.color} large />
-                {/* Отвечает званием по нажатию — так же, как в списке кораблей: вымпел
-                    в карточке ничем не подписан, и спросить, что он значит, человек может
-                    только тычком. */}
-                {senior && (
-                    <button
-                        type="button"
-                        className={styles.pennant}
-                        title={SENIOR_TITLE}
-                        aria-label={SENIOR_TITLE}
-                        onClick={() => notify(SENIOR_TITLE)}
-                    >
-                        <Pennant />
-                    </button>
-                )}
-            </div>
+        <Sheet
+            title={
+                <div className={styles.name}>
+                    <MemberName name={member.name} color={member.color} large />
+                    {/* Отвечает званием по нажатию — так же, как в списке кораблей: вымпел
+                        в карточке ничем не подписан, и спросить, что он значит, человек может
+                        только тычком. */}
+                    {senior && (
+                        <button
+                            type="button"
+                            className={styles.pennant}
+                            title={SENIOR_TITLE}
+                            aria-label={SENIOR_TITLE}
+                            onClick={() => notify(SENIOR_TITLE)}
+                        >
+                            <Pennant />
+                        </button>
+                    )}
+                </div>
+            }
+            /* Ряд тот же, что внизу форм, но по содержимому и разведён по краям: переключатель
+               тянуть нельзя (см. ui/Actions и ui/Switch), а сигнал и огни — два разных дела,
+               а не пара, которая должна читаться вместе. */
+            actions={
+                <>
+                    <Button variant="secondary" onClick={handleSignal}>
+                        <BeaconIcon />
+                        {/* «Подать сигнал» — там, где карточка широка, и просто «Сигнал», где узка.
+                            Меряется карточка, а не окно: она живёт в шторке, а та бывает и в треть
+                            экрана шириной (см. .signalWide). */}
+                        <span className={styles.signalWide}>Подать сигнал</span>
+                        <span className={styles.signalNarrow}>Сигнал</span>
+                    </Button>
+                    {/* Положения, а не действия: кнопка тут показывала обратное нынешнему —
+                        на якоре предлагала ход, — и прочесть по ней, как корабль стоит сейчас,
+                        было нельзя. */}
+                    <Switch
+                        label="Огни"
+                        options={UNDERWAY_OPTIONS}
+                        value={underway ? 'underway' : 'anchored'}
+                        onChange={(mode) => setUnderway(mode === 'underway')}
+                    />
+                </>
+            }
+            ownWidth
+            spread
+            inset
+        >
             <div className={styles.hullNumber}>Бортовой номер {member.hullNumber}</div>
 
             {/* По умолчанию корабль на якоре — он и правда стоит на рейде, и огни у него
@@ -99,23 +141,6 @@ export default function ShipCard({ member, senior }: ShipCardProps) {
 
             <div className={styles.kind}>{SHIP_KIND_LABELS[member.shipKind]}</div>
             <div className={styles.spec}>{shipSpecLine(member.shipKind)}</div>
-
-            {/* Ряд кнопок тот же, что внизу форм: одна механика на всё приложение — как они
-                делят ширину, когда переносятся и как липнут к нижней кромке. */}
-            <Actions pinned>
-                <Button variant="secondary" onClick={handleSignal}>
-                    Сигнал
-                </Button>
-                {/* Подпись — действие, а не положение: пока корабль на якоре, кнопка предлагает
-                    дать ход, а под парами — отдать якорь. Обе подписи лежат в кнопке разом,
-                    чтобы переключение не меняло её ширину (см. .swap). */}
-                <Button variant="secondary" onClick={() => setUnderway((was) => !was)}>
-                    <span className={styles.swap}>
-                        <span className={underway ? styles.swapHidden : undefined}>Ход</span>
-                        <span className={underway ? undefined : styles.swapHidden}>Якорь</span>
-                    </span>
-                </Button>
-            </Actions>
-        </div>
+        </Sheet>
     );
 }

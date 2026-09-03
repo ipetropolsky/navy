@@ -1,8 +1,8 @@
-import { AuthorLook, Berth, CORRIDORS, Corridor, Member, MemberRef, ShipKind, memberLook } from '@/types/channel';
-import { pick, pickBetween, shuffled } from '@/utils/random';
+import { Standing, berthAt, placeShip } from '@shared/placement';
+import { AuthorLook, Berth, CORRIDORS, Corridor, Member, MemberRef, ShipKind, memberLook } from '@shared/types/channel';
+import { pick, pickBetween, shuffled } from '@shared/utils/random';
 
-import { Standing, berthAt, placeShip } from '@/backend/placement';
-import { ChannelSnapshot } from '@/backend/types';
+import { StoredChannel } from '@/backend/migrate';
 
 /**
  * Демо-канал: три корабля и уже начатый разговор. Нужен, чтобы чат было на что посмотреть
@@ -17,8 +17,9 @@ import { ChannelSnapshot } from '@/backend/types';
  * демо не трогает его: разговор, который вы вели вчера, не должен пропадать из-за того,
  * что мы решили что-то показать.
  *
- * Время у сообщений считается от полуночи сегодняшнего дня, а не хранится числом:
- * иначе демо-переписка со временем уезжала бы всё дальше в прошлое.
+ * Время у сообщений считается от полуночи ближайшего прошедшего вечера, а не хранится
+ * числом: иначе демо-переписка со временем уезжала бы всё дальше в прошлое. Почему
+ * прошедшего, а не сегодняшнего — см. `minutesAfterMidnight`.
  *
  * Места на рейде не заданы руками: демо просит по месту в каждой трети рейда и в каждом
  * коридоре, а назначает их та же расстановка, что и всем остальным (см. `demoBerths`).
@@ -29,24 +30,49 @@ import { ChannelSnapshot } from '@/backend/types';
 export const DEMO_CHANNEL_ID = 'ch-demo';
 export const DEMO_CHANNEL_SLUG = 'demo';
 
+/**
+ * Последняя минута демо-переписки. Числом, а не выведенным из самой ленты: по нему выбирается
+ * вечер, которым датирована вся история, а выбирать его надо до того, как история собрана.
+ * Припишете сообщение позже — поправьте и здесь; на случай, если забудете, есть проверка
+ * (seed.test.ts, «вся переписка лежит в прошлом»), и падает она громко.
+ */
+const DEMO_ENDS_AT = { hours: 21, minutes: 48 };
+
+/**
+ * Полночь того вечера, которым идёт разговор: сегодняшнего, если он уже прошёл, и вчерашнего,
+ * если ещё нет.
+ *
+ * Вторая половина этого правила — не про красоту дат. Пока переписка датирована будущим, всё,
+ * что в канале напишут после, оказывается «раньше» уже написанного: счётчик непрочитанного
+ * считает от метки последнего виденного сообщения (`lastSeen.at`, см. hooks/useUnread) и потому
+ * молчит вовсе, а лента, выстроенная по времени, ставит новую реплику в середину разговора.
+ * Демо же открывают когда придётся, а вечер в нём поздний — почти весь день он ещё впереди.
+ *
+ * День отматывается календарём (`setDate`), а не вычитанием суток в миллисекундах: в ночь
+ * перевода часов сутки не двадцать четыре часа, и вечер уехал бы на час.
+ */
 const minutesAfterMidnight = (hours: number, minutes: number): number => {
-    const midnight = new Date();
-    midnight.setHours(hours, minutes, 0, 0);
-    return midnight.getTime();
+    const ends = new Date();
+    ends.setHours(DEMO_ENDS_AT.hours, DEMO_ENDS_AT.minutes, 0, 0);
+    const moment = new Date();
+    moment.setHours(hours, minutes, 0, 0);
+    if (ends.getTime() > Date.now()) {
+        moment.setDate(moment.getDate() - 1);
+    }
+    return moment.getTime();
 };
 
 /**
  * Корабли демо-канала: крупный, средний и малый — чтобы в кадре была видна разница в размере,
  * а расстановка развела их по дальности. Места раздаются по очереди, как при настоящем входе.
  */
-const DEMO_CREW: (Omit<Member, 'place'> & { shipKind: ShipKind })[] = [
+const DEMO_CREW: (Omit<Member, 'place' | 'joinedAt'> & { shipKind: ShipKind })[] = [
     {
         memberId: 'm-albatros',
         name: 'Альбатрос',
         hullNumber: '317',
         shipKind: 'pr1400',
         color: '#8ecae6',
-        joinedAt: minutesAfterMidnight(21, 30),
     },
     {
         memberId: 'm-vympel',
@@ -54,7 +80,6 @@ const DEMO_CREW: (Omit<Member, 'place'> & { shipKind: ShipKind })[] = [
         hullNumber: '561',
         shipKind: 'pr1234',
         color: '#f2cc8f',
-        joinedAt: minutesAfterMidnight(21, 32),
     },
     {
         memberId: 'm-rezvy',
@@ -62,7 +87,6 @@ const DEMO_CREW: (Omit<Member, 'place'> & { shipKind: ShipKind })[] = [
         hullNumber: '208',
         shipKind: 'pr205',
         color: '#95d5b2',
-        joinedAt: minutesAfterMidnight(21, 34),
     },
 ];
 
@@ -110,11 +134,21 @@ const placeDemoCrew = (): Member[] => {
         // хватит и первого слота — до него дело не дойдёт.
         const place = placeShip(member.shipKind, taken, berths[index]) ?? { ...taken[0].place };
         taken.push({ shipKind: member.shipKind, place });
-        return { ...member, place };
+        // Не в самом DEMO_CREW и не один раз на модуль: minutesAfterMidnight читает реальные
+        // часы в момент вызова, а DEMO_CREW — это константа модуля, вычисленная при первой
+        // загрузке файла и застывающая на всё время его жизни. В браузере это не заметно —
+        // там модуль и так живёт один просмотр страницы, — а вот в проверке с поддельными
+        // часами (`vi.setSystemTime`, seed.test.ts) время подменяется уже после того, как
+        // модуль загружен и DEMO_CREW вычислен по-настоящему один раз, так что подмена на него
+        // не подействует. Порядок состава на этом рейде не перемешан (перемешаны только места
+        // выше), так что «плюс две минуты на каждого» — это те же 21:30 / 21:32 / 21:34, что
+        // раньше были вписаны в сам DEMO_CREW.
+        const joinedAt = minutesAfterMidnight(21, 30 + index * 2);
+        return { ...member, place, joinedAt };
     });
 };
 
-export const createDemoChannel = (): ChannelSnapshot => {
+export const createDemoChannel = (): StoredChannel => {
     const members = placeDemoCrew();
 
     /**

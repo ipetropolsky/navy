@@ -2,7 +2,21 @@
 <html lang="ru">
     <head>
         <meta charset="UTF-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <!--
+            interactive-widget=resizes-content — про экранную клавиатуру на телефоне.
+
+            По умолчанию браузер её от страницы прячет: клавиатура ложится поверх, окно остаётся
+            прежней высоты, `100dvh` не меняется, и плашка ввода как стояла у нижней кромки окна,
+            так и стоит — то есть под клавиатурой. Видно её только потому, что браузер подматывает
+            к полю с фокусом видимую часть окна; стоит содержимому перерисоваться (а отправка
+            сообщения — это ровно оно), подмотку он теряет, и поле уезжает вниз под клавиатуру.
+
+            С этим значением клавиатура уменьшает само окно: `100dvh` и `window.innerHeight`
+            становятся ростом видимой части, и приложение раскладывается в неё как в любое другое
+            окно (см. --scene-height в App.module.less и `useWindowShape` в hooks/useLayout).
+            Подматывать при этом нечего — плашка ввода и так у нижней кромки.
+        -->
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content" />
         <link rel="stylesheet" href="src/index.less" />
         <title>Кильватер — ночной морской чат</title>
     </head>

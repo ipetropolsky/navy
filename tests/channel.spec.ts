@@ -1,12 +1,17 @@
 import { Locator, Page, expect } from '@playwright/test';
 
+import { MESSAGE_PAGE } from '@/config/network';
+
 import {
     ALBATROS,
     DEMO,
+    REZVY,
+    SAIL_TIMEOUT,
     VYMPEL,
     berths,
     bubbles,
-    clickShip,
+    closeSheet,
+    enterAccessCode,
     join,
     leaveButton,
     leaveRaid,
@@ -52,33 +57,100 @@ test('канал заводится с главной, и в него можно
 });
 
 /**
- * Закрытое состояние формы корабля. Пришедший по ссылке — ещё никто в этом канале, и канал
- * ведёт себя с ним соответственно: рейд ему виден как обычно — за ним по ссылке и идут, —
- * а больше не видно ничего. Ни разговора, ни списка кораблей, и корабли в кадре не нажимаются:
- * пока человек не встал в строй, канал о нём не знает ничего, и он о канале ровно столько же.
- * Вопрос к нему на экране один и стоит одной кнопкой посреди пустой плашки.
+ * Закрытое состояние формы корабля. Пришедший по ссылке — ещё не участник этого канала,
+ * и до входа ему не видно ничего, кроме самого входа: ни рейда, ни разговора, ни списка
+ * кораблей. Чтение отдаёт не участнику пустой снимок — той же общей политикой, что и у
+ * настоящего бэкенда (см. `previewOf`/`needsPreview` в localBackend.ts и `isMember`
+ * в firestore.rules): участников в снимке нет, и рисовать в кадре нечего. Вопрос к гостю
+ * на экране один и стоит одной кнопкой посреди пустой плашки.
  */
-test('канал по ссылке встречает закрытой формой: рейд видно, а трогать нечего', async ({ page }) => {
+test('канал по ссылке встречает закрытой формой: рейд не виден, а вход — одной кнопкой', async ({ page }) => {
     await openChannel(page, DEMO);
 
     // Одна кнопка, и никакой анкеты под ней.
     await expect(page.getByRole('button', { name: 'Встать на рейд' })).toBeVisible();
     await expect(page.getByPlaceholder('Гром'), 'форма открылась сама').toHaveCount(0);
-    // Рейд при этом на месте и виден целиком: три корабля демо-эскадры.
-    await expect(ships(page)).toHaveCount(3);
+    // Рейда не видно вовсе, хотя в демо-канале стоит целая эскадра: гостю, ещё не участнику,
+    // корабли не показывают, пока он не встал в строй сам.
+    await expect(ships(page), 'гостю виден рейд, хотя он не участник').toHaveCount(0);
     // А выбирать место ещё не из чего: свободные места показывает открытая форма.
     await expect(berths(page), 'закрытая форма показала свободные места').toHaveCount(0);
     // Списка кораблей гостю тоже нет: название канала осталось строчкой, а не кнопкой.
     await expect(shipsButton(page), 'гостю досталась кнопка списка кораблей').toHaveCount(0);
 
-    // И корабли не нажимаются: тычок по чужому не открывает его карточку.
-    await clickShip(page, ships(page).first());
-    await page.waitForTimeout(300);
-    await expect(page.getByRole('region', { name: 'Корабль' }), 'корабль открылся гостю').toHaveCount(0);
-
     // Кнопка открывает ту самую форму — с полями и со свободными местами на рейде.
     await openJoinForm(page);
     await expect(berths(page).first(), 'открытая форма не показала места на рейде').toBeVisible();
+});
+
+/**
+ * Закрытая частота. Код доступа хранится вместе с каналом, а не с формой (см. `verifiedCode`
+ * в App.tsx), и заведший канал сам его не спрашивает — своей же выдумке подтверждаться незачем
+ * (см. `!joining` у `needsCode`). Пришедший следом по той же ссылке — другая вкладка с другой
+ * локальной личностью (см. `forgetLocalTab` и комментарий у контекста в helpers.ts) — экран
+ * кода получает честно, и неверный код не пускает дальше, а верный раскрывает вход и не более:
+ * встать в строй — отдельное решение, то же самое, что у открытого канала.
+ */
+test('закрытый канал: неверный код отказывает, верный — раскрывает вход, но не строй', async ({ page, context }) => {
+    takes(6);
+    const slug = 'zakrytaya-chastota';
+    const code = 'sword-fish';
+
+    await openNewChannel(page, slug, code);
+    // Хозяину собственного закрытого канала экран кода не встаёт — он и так знает код.
+    await expect(page.getByRole('heading', { name: 'Закрытая частота' })).toHaveCount(0);
+    await join(page, 'Маяк', '404');
+    await send(page, 'Есть кто на связи?');
+
+    const guest = await context.newPage();
+    await openChannel(guest, slug);
+
+    await expect(guest.getByRole('heading', { name: 'Закрытая частота' }), 'экран кода не показался').toBeVisible();
+    await expect(ships(guest), 'рейд виден до кода доступа').toHaveCount(0);
+    await expect(guest.getByRole('button', { name: 'Встать на рейд' }), 'вход открылся до кода').toHaveCount(0);
+
+    await enterAccessCode(guest, 'неверный-код');
+    await expect(guest.locator('[class*="snackbar"]'), 'неверный код не отказал').toHaveText(
+        'Код доступа неверен. Обратитесь к старшему на рейде.'
+    );
+    await expect(guest.getByRole('heading', { name: 'Закрытая частота' }), 'экран кода закрылся сам').toBeVisible();
+
+    // Верный код раскрывает вход тем же намерением, что и кнопка «Встать на рейд» у открытого
+    // канала (см. handleCheckCode), — форма корабля встаёт сама, второе нажатие не нужно.
+    await enterAccessCode(guest, code);
+    await expect(guest.getByPlaceholder('Гром'), 'код принят, а форма не раскрылась').toBeVisible();
+    await join(guest, 'Секстант', '512');
+
+    await expect(ships(guest), 'после верного кода видны не все корабли').toHaveCount(2);
+    await expect(
+        bubbles(guest).filter({ hasText: 'Есть кто на связи?' }),
+        'после верного кода не видно сообщения, написанного до входа'
+    ).toBeVisible();
+});
+
+/**
+ * GH-52: закрытая форма — одна кнопка посреди плашки, и коробка под неё не обязана стоять
+ * долей хода, как настоящий разговор: смотреть там больше не на что. Коробка встаёт по самой
+ * кнопке (см. `gateHeight` в App), и тянуть её не за что — ни ручки, ни коридора у кромки нет.
+ */
+test('закрытая форма стоит по кнопке, а не долей хода, и её нечем тянуть', async ({ page }) => {
+    await openChannel(page, DEMO);
+    // Под кадром: сбоку разговор и так стоит во весь рост окна, мерить там нечего.
+    await page.setViewportSize({ width: 420, height: 900 });
+
+    const gate = page.getByRole('button', { name: 'Встать на рейд' });
+    await expect(gate).toBeVisible();
+    const gateBox = (await gate.boundingBox())!;
+    const contentBox = (await page.locator('main').boundingBox())!;
+
+    // Коробка выше кнопки — на поле плашки сверху и снизу, — и никак не на треть окна:
+    // до открытой формы (её пришлось бы открыть, чтобы сверить) тут в разы меньше.
+    expect(contentBox.height).toBeGreaterThan(gateBox.height);
+    expect(contentBox.height).toBeLessThan(gateBox.height + 100);
+
+    // Тянуть коробку нечем: ни ручки снизу кадра, ни коридора вдоль кромки разговора.
+    await expect(page.locator('[class*="sheetHandle"]')).toHaveCount(0);
+    await expect(page.locator('[class*="grip_"]')).toHaveCount(0);
 });
 
 test('свой, только что заведённый канал открывается сразу формой', async ({ page }) => {
@@ -86,6 +158,46 @@ test('свой, только что заведённый канал открыв
     // и спрашивать его же, хочет ли он встать на собственный рейд, незачем.
     await openNewChannel(page, 'svoy-reyd');
     await expect(page.getByPlaceholder('Гром'), 'на своём рейде спросили дважды').toBeVisible();
+    await expect(page.getByRole('button', { name: 'Встать на рейд' })).toHaveCount(0);
+});
+
+/** Цвет, который сам по себе форме не достанется: по умолчанию она берёт первый свободный. */
+const OWN_COLOR = '#d8b4f8';
+
+/** Силуэт не по умолчанию — умолчание у формы «Малый противолодочный корабль». */
+const OWN_SHIP = 'Ракетный катер';
+
+/**
+ * Личность у человека одна, а корабли у неё в каждом канале свои. Вкладка помнит и то,
+ * и другое: в какой канал каким кораблём ходит — чтобы возврат был возвратом на своё место,
+ * а не новой постановкой в строй, — и чем эта личность выходила в море в последний раз,
+ * чтобы в новом канале не собирать корабль заново.
+ *
+ * Позывной с номером при этом не подставляются нарочно: они на каждом рейде свои, номер вдобавок
+ * может оказаться занят, и подставленный требовал бы не подтверждения, а исправления.
+ */
+test('в новом канале форма открывается прошлым кораблём, а в прежнем — своим', async ({ page }) => {
+    takes(12);
+    await openNewChannel(page, 'pamyat-odin');
+    await page.getByLabel(`Цвет ${OWN_COLOR}`).click();
+    await join(page, 'Гроза', '101', OWN_SHIP);
+    await expect(page.getByPlaceholder('Сообщение'), 'корабль не встал в строй').toBeVisible();
+
+    // Другой канал той же вкладкой: корабля тут ещё нет, но внешность прошлого форма помнит.
+    await openNewChannel(page, 'pamyat-dva');
+    await expect(page.locator('[class*="kindActive"]'), 'силуэт не достался от прошлого корабля').toContainText(
+        OWN_SHIP
+    );
+    await expect(page.locator('[class*="colorActive"]'), 'цвет не достался от прошлого корабля').toHaveAttribute(
+        'aria-label',
+        `Цвет ${OWN_COLOR}`
+    );
+    // А позывной с номером — свои: подставленный чужой номер пришлось бы стирать.
+    await expect(page.getByPlaceholder('Гром'), 'позывной подставился из прошлого канала').toHaveValue('');
+
+    // Возврат в первый канал — возврат на своё место: форма о постановке в строй не спрашивает.
+    await openChannel(page, 'pamyat-odin');
+    await expect(page.getByPlaceholder('Сообщение'), 'своя личность в канале забылась').toBeVisible();
     await expect(page.getByRole('button', { name: 'Встать на рейд' })).toHaveCount(0);
 });
 
@@ -198,6 +310,54 @@ test('сообщение из соседней вкладки доезжает',
 
     await expect(bubbles(mine)).toHaveCount(before + 1);
     await expect(bubbles(mine).last()).toContainText('Швартовы отданы');
+});
+
+/**
+ * Убранная панель считает то, что пришло без неё.
+ *
+ * Разговор с экрана убирают целиком, и тогда о новой реплике не говорит ничто: кнопка, которой
+ * его возвращают, выглядит одинаково и с непрочитанным, и без. Счётчик на ней — единственная
+ * примета, и держится он ровно до возврата разговора: показали ленту — значит, прочитано.
+ *
+ * Меряется здесь всё, что счётчик обещает: что он появляется, что цифра в нём та самая, что она
+ * есть и в подписи кнопки (сама пилюля читалке не достаётся), что возврат панели его убирает
+ * и что заново он с прочитанного не начинается.
+ */
+/** Счётчик непрочитанного у кнопки панели. Число он несёт пометкой, а не одним лишь текстом:
+ *  показывает пилюля не больше «99+», а проверять надо настоящий счёт. */
+const unreadCount = (page: Page) => page.locator('[data-unread]');
+
+test('убранная панель считает пришедшие реплики', async ({ context }) => {
+    takes(10);
+    const mine = await context.newPage();
+    const theirs = await context.newPage();
+    await openChannel(mine, DEMO, ALBATROS);
+    await openChannel(theirs, DEMO, VYMPEL);
+    const before = await bubbles(mine).count();
+
+    await mine.getByRole('button', { name: 'Убрать панель' }).click();
+    await expect(unreadCount(mine), 'на кнопке нашёлся счётчик, когда считать было нечего').toHaveCount(0);
+
+    await send(theirs, 'Швартовы отданы');
+    await send(theirs, 'Идём на выход');
+
+    await expect(unreadCount(mine), 'счётчик не сошёлся с числом пришедших реплик').toHaveAttribute('data-unread', '2');
+    // Та же цифра словами: пилюлю читалка не видит, и без подписи убранная панель молчала бы
+    // о новостях всем, кроме глаз.
+    await expect(
+        mine.getByRole('button', { name: 'Вернуть панель, 2 новых сообщения', exact: true }),
+        'счётчик не дошёл до подписи кнопки'
+    ).toBeVisible();
+
+    // Разговор вернулся — счётчик снят, и реплики в ленте на месте: считались настоящие
+    // сообщения, а не что-нибудь ещё.
+    await mine.getByRole('button', { name: 'Вернуть панель' }).click();
+    await expect(unreadCount(mine), 'счётчик пережил возврат разговора').toHaveCount(0);
+    await expect(bubbles(mine)).toHaveCount(before + 2);
+
+    // И прочитанное не пересчитывается заново: убранная во второй раз панель начинает с нуля.
+    await mine.getByRole('button', { name: 'Убрать панель' }).click();
+    await expect(unreadCount(mine), 'счётчик пересчитал уже прочитанное').toHaveCount(0);
 });
 
 test('уход с рейда отмечается в ленте и возвращает к постановке в строй', async ({ page }) => {
@@ -349,9 +509,12 @@ test('строчка о корабле стоит по его сторону л�
     await expect(bubbles(page).last()).toContainText('Курс норд');
 
     // Меняем один бортовой номер: тип и позывной остаются прежними.
-    await shipsButton(page).click();
+    await openSheet(page);
     await page.getByRole('button', { name: 'Настроить корабль' }).click();
     await join(page, 'Альбатрос', '512');
+    // И убираем список: форма ушла, а он под ней остался — так и задумано, — но лежит он
+    // слоем поверх ленты и нажатия по строчке забирал бы себе.
+    await closeSheet(page);
 
     const note = systemLines(page).last();
     // Сказано только, что сменилось: новый номер стоит на аватарке рядом, старый — выше
@@ -459,7 +622,7 @@ test('старший на рейде отмечен бэджем и высажи
 
     // Считаем не корабли в кадре, а канал: высаженный ещё уходит за кромку и висит в сцене
     // столько же, сколько ушедший сам.
-    await expect(systemLines(page).last()).toContainText('Малый ракетный корабль выдворен с рейда');
+    await expect(systemLines(page).last()).toContainText('Малый ракетный корабль снят с рейда');
     const crew = await readState(page);
     expect(crew.channels['ch-demo'].members.map((member) => member.memberId)).not.toContain(VYMPEL);
 });
@@ -546,6 +709,51 @@ test('не старшему высаживать нечем, а после ег�
 });
 
 /**
+ * Старший может назвать преемника сам, а не отдавать выбор давности постановки в строй.
+ * Резвый пришёл позже Вымпела, и без выбора старшинство досталось бы Вымпелу (см. проверку выше) —
+ * названный выбор его перебивает.
+ */
+test('старший называет преемника — старшинство достаётся ему, а не самому давнему', async ({ page }) => {
+    await openChannel(page, DEMO, ALBATROS);
+    await expect(ships(page)).toHaveCount(3);
+
+    await leaveRaid(page, 'В Кронштадт, на зимовку', 'Резвый');
+
+    await expect
+        .poll(async () => (await readState(page)).channels['ch-demo'].channel.owner?.memberId, {
+            message: 'старшинство не досталось названному преемнику',
+        })
+        .toBe(REZVY);
+});
+
+/**
+ * Уход последнего участника — тот самый случай, из-за которого рейд не должен пропадать молча.
+ * Выбирать преемника здесь не из кого, поле не показывается вовсе, и уход завершается тем же
+ * возвратом к постановке в строй, что и любой другой, — без ошибки и снекбара.
+ */
+test('уходит последний участник — рейд остаётся, и зайти в него можно снова', async ({ page }) => {
+    await openNewChannel(page, 'odin-na-reyde');
+    await join(page, 'Гром', '101');
+    await expect(ships(page)).toHaveCount(1);
+
+    await leaveRaid(page, 'На отстой');
+    await expect(page.getByRole('button', { name: 'Встать на рейд' })).toBeVisible();
+    // Прежде здесь всплывал снекбар «Канал не найден» — уйти не получалось вовсе.
+    await expect(page.locator('[role="status"]:visible')).toHaveCount(0);
+
+    const emptied = await readState(page);
+    const channel = Object.values(emptied.channels).find((entry) => entry.channel.slug === 'odin-na-reyde');
+    expect(channel, 'канал пропал вместе с последним участником').toBeDefined();
+    expect(channel!.members).toHaveLength(0);
+
+    // Зашли туда, где никого, — встали старшим на рейде: бэкенд решает это сам.
+    await join(page, 'Шторм', '202');
+    const arrived = await readState(page);
+    const reopened = Object.values(arrived.channels).find((entry) => entry.channel.slug === 'odin-na-reyde')!;
+    expect(reopened.channel.owner?.memberId).toBe(reopened.members[0].memberId);
+});
+
+/**
  * Прицеп ленты к низу. Пока лента внизу, она там и держится: новые реплики приходят на виду,
  * и поле ввода отделяет их от последней строчки. Отмотал вверх — лента отцепляется, и место,
  * на которое человек смотрит, больше не двигается ни от чужих сообщений, ни от того, что
@@ -555,8 +763,9 @@ test('не старшему высаживать нечем, а после ег�
  * Свои реплики — исключение, и единственное: отправить сообщение и не увидеть его нельзя.
  */
 // Сама лента, а не список кораблей: имя класса у обеих одно и то же (.list в своём модуле),
-// поэтому берём её через плашку с датой — та бывает только в ленте и лежит прямо в ней.
-const listBox = (page: Page) => page.locator('[class*="dateChip"]').locator('xpath=..');
+// поэтому берём её через плашку с датой — та бывает только в ленте. До самой прокручиваемой
+// коробки от неё две ступени вверх: плашка лежит в строчках (.rows), а те — уже в ленте (.list).
+const listBox = (page: Page) => page.locator('[class*="dateChip"]').locator('xpath=../..');
 
 const scrollState = (page: Page): Promise<{ top: number; bottom: number }> =>
     listBox(page).evaluate((node) => ({
@@ -638,6 +847,135 @@ test('лента держится низа при смене раскладки'
 });
 
 /**
+ * Длинный разговор для проверок догрузки: без него негде проверить, что открытая с наскока
+ * лента показывает только хвост и подтягивает остаток по прокрутке (см. MESSAGE_PAGE).
+ *
+ * Кладём его сразу в хранилище, а не через форму: отправка спит между репликами (LATENCY_MS
+ * в localBackend), и несколько сотен через неё складывались бы в лишние секунды каждого
+ * прогона. Хранилище — тот же JSON, каким приложение само обменивается между вкладками
+ * (см. readState выше): проверка лишь раскладывает его заранее, а не в обход контракта.
+ *
+ * Все реплики — от одного участника, он же открывает канал: кто там говорит, для страниц
+ * не важно, а заводить второго ради этого — лишняя сущность в разметке.
+ */
+const HISTORY_CHANNEL_ID = 'ch-long-talk';
+const HISTORY_SLUG = 'long-talk';
+const HISTORY_MEMBER_ID = 'm-diarist';
+
+const seedHistory = async (page: Page, count: number): Promise<void> => {
+    // Не StoredState: тот тип для чтения (см. readState) и не знает title/createdAt канала —
+    // без них разбор хранилища выбрасывает канал целиком (см. isChannel в migrate.ts).
+    const state = {
+        version: 15, // STORAGE_VERSION в localBackend.ts: форма та же, шаг миграции не нужен
+        channels: {
+            [HISTORY_CHANNEL_ID]: {
+                channel: {
+                    channelId: HISTORY_CHANNEL_ID,
+                    slug: HISTORY_SLUG,
+                    title: 'Долгая вахта',
+                    createdAt: 0,
+                },
+                members: [
+                    {
+                        memberId: HISTORY_MEMBER_ID,
+                        name: 'Летописец',
+                        hullNumber: '100',
+                        shipKind: 'pr1234',
+                        place: { slot: 0, corridor: 'center', left: 50, facing: 'left', enterFrom: 'left' },
+                    },
+                ],
+                messages: [...Array(count).keys()].map((index) => ({
+                    messageId: `msg-${index}`,
+                    author: { memberId: HISTORY_MEMBER_ID },
+                    // Точка после числа: без неё «Запись номер 1» — подстрока «Запись номер 100»,
+                    // и метка ниже находила бы не то сообщение.
+                    text: `Запись номер ${index}.`,
+                    sentAt: index * 60_000,
+                })),
+            },
+        },
+    };
+    await page.addInitScript((seeded) => {
+        // eslint-disable-next-line no-restricted-syntax -- та же прямая запись, что и читающий её readState выше
+        localStorage.setItem('kilvater.state', JSON.stringify(seeded));
+    }, state);
+};
+
+test('долгий разговор открывается одной страницей, а верх подгружается по прокрутке', async ({ page }) => {
+    takes(4);
+    const total = MESSAGE_PAGE * 2 + 20;
+    await seedHistory(page, total);
+    await openChannel(page, HISTORY_SLUG, HISTORY_MEMBER_ID);
+
+    // С наскока видна только последняя страница — не весь разговор разом.
+    await expect(bubbles(page)).toHaveCount(MESSAGE_PAGE);
+
+    // Домотка до упора и есть сигнал «догрузить ещё»: после вставки видимое место остаётся
+    // у самого верха (см. правку в MessageList.tsx), и следующая прокрутка к нулю снова его
+    // застаёт — цикл идёт сам, пока страниц не кончится. Предел кругов — только защита
+    // от зависшей проверки, если бы догрузка когда-нибудь перестала отвечать.
+    const maxRounds = Math.ceil(total / MESSAGE_PAGE) + 2;
+    for (let round = 0; round < maxRounds; round += 1) {
+        // eslint-disable-next-line no-await-in-loop -- каждый круг ждёт итога предыдущей догрузки
+        const before = await bubbles(page).count();
+        if (before >= total) {
+            break;
+        }
+        // eslint-disable-next-line no-await-in-loop
+        await listBox(page).evaluate((node) => {
+            node.scrollTop = 0;
+        });
+        // eslint-disable-next-line no-await-in-loop
+        await expect
+            .poll(async () => bubbles(page).count(), { message: `догрузка застряла на ${before}` })
+            .toBeGreaterThan(before);
+    }
+
+    await expect(bubbles(page)).toHaveCount(total);
+    // Самое старое сообщение дошло — цепочка догрузок не потеряла и не задвоила ни одной страницы.
+    await expect(bubbles(page).first()).toContainText('Запись номер 0.');
+});
+
+test('подгрузка старой страницы не двигает то, что уже видно (замер)', async ({ page }) => {
+    takes(4);
+    const total = MESSAGE_PAGE * 2;
+    await seedHistory(page, total);
+    await openChannel(page, HISTORY_SLUG, HISTORY_MEMBER_ID);
+    await expect(bubbles(page)).toHaveCount(MESSAGE_PAGE);
+
+    // Помеченное — самое верхнее из уже показанного и первое, что уехало бы, не досчитай
+    // поправка высоту вставленной сверху сотни (см. lastHeightRef в MessageList.tsx).
+    const markText = `Запись номер ${total - MESSAGE_PAGE}.`;
+    const marked = bubbles(page).filter({ hasText: markText });
+    await expect(marked).toHaveCount(1);
+
+    // Прокрутка и замер «до» — один синхронный вызов страницы: scrollTop меняет раскладку
+    // немедленно, а 'scroll', которое будит догрузку, приходит отдельным тиком. Раздельные
+    // обращения рисковали бы поймать место уже после того, как оно тронулось.
+    const before = await page.evaluate((text) => {
+        const rows = document.querySelector('[class*="dateChip"]')?.parentElement;
+        const list = rows?.parentElement;
+        if (!list) {
+            return null;
+        }
+        list.scrollTop = 0;
+        const marker = [...document.querySelectorAll('[class*="bubble"]')].find((node) =>
+            node.textContent?.includes(text)
+        );
+        return marker?.getBoundingClientRect().top ?? null;
+    }, markText);
+    expect(before, 'помеченное сообщение не нашлось до догрузки').not.toBeNull();
+
+    await expect(bubbles(page)).toHaveCount(total);
+
+    const after = await marked.evaluate((node) => node.getBoundingClientRect().top);
+    const jumpPx = Math.abs(after - (before ?? 0));
+    // eslint-disable-next-line no-console -- число из задачи: замер, а не впечатление
+    console.log(`[замер] сдвиг видимого сообщения при догрузке верхней страницы — ${jumpPx.toFixed(1)}px`);
+    expect(jumpPx, 'видимое сообщение сдвинулось при догрузке верхней страницы').toBeLessThan(2);
+});
+
+/**
  * Две вкладки, переставляющие корабли в один и тот же миг.
  *
  * Состояние «сервера» лежит одним JSON-ом на весь браузер, и всякая перестановка — это
@@ -651,8 +989,22 @@ test('лента держится низа при смене раскладки'
  * это здесь: с двух вкладок разом — сперва на разные места, потом на одно.
  */
 
-/** Открыть форму настройки своего корабля: оттуда и переставляют. */
+/** Сама форма корабля: та, где выбирают место на рейде. */
+const shipForm = (page: Page) => page.locator('form').filter({ has: page.getByPlaceholder('Гром') });
+
+/**
+ * Открыть форму настройки своего корабля: оттуда и переставляют.
+ *
+ * Сперва дожидаемся, пока уйдёт прежняя. Отправленная форма закрывается не в тот же миг:
+ * сперва запись в «сервер» через общую очередь, потом рендер, — и позванный сразу после
+ * отправки помощник застаёт её ещё на экране. А пока она стоит, дороги к кнопке нет никакой:
+ * список кораблей лежит под ней накрытый, и «Настроить корабль» из-под формы не нажать,
+ * кнопка же списка в это время говорит «закрыт» — помощник жмёт её и закрывает как раз тот
+ * список, в котором эта кнопка и лежит. Обоими исходами проверка и падала: то нажатием
+ * в никуда, то прежней формой, застрявшей на отобранном месте.
+ */
 const openShipForm = async (page: Page): Promise<void> => {
+    await expect(shipForm(page), 'прежняя форма корабля так и не ушла с экрана').toHaveCount(0);
     await openSheet(page);
     await page.getByRole('button', { name: 'Настроить корабль' }).click();
     await expect(page.locator('[data-berth]').first()).toBeVisible();
@@ -662,11 +1014,7 @@ const openShipForm = async (page: Page): Promise<void> => {
  * Кнопка «Готово» самой формы. Через страницу её не взять: форма выезжает поверх разговора,
  * и у поля ввода под ней тоже кнопка-submit.
  */
-const shipFormSubmit = (page: Page) =>
-    page
-        .locator('form')
-        .filter({ has: page.getByPlaceholder('Гром') })
-        .locator('button[type=submit]');
+const shipFormSubmit = (page: Page) => shipForm(page).locator('button[type=submit]');
 
 /** Свободные места, какими их видит эта вкладка: они и предлагаются к выбору. */
 const freeBerths = (page: Page): Promise<string[]> =>
@@ -680,9 +1028,42 @@ const berthOf = async (page: Page, memberId: string): Promise<string> => {
     return member ? `${member.place.slot}-${member.place.corridor}` : 'нет в канале';
 };
 
-/** Место, которое вкладка считает своим: оно отмечено в форме нажатым. */
-const ownBerth = async (page: Page): Promise<string> =>
-    (await page.locator('[data-berth][aria-pressed="true"]').getAttribute('data-berth')) ?? 'ничего не выбрано';
+/**
+ * Место, на котором эта вкладка рисует свой корабль пришедшим.
+ *
+ * Спрашивают у кадра, а не у «сервера»: перестановка возвращается во вкладку рассылкой,
+ * и до неё вкладка честно показывает прежнее место. Метка «свой» тут кстати вдвойне —
+ * она же и признак прихода: своим корабль помечается только тогда, когда его можно открыть,
+ * а идущий по воде не открывает ничего (см. canEdit в SeaScene). Пока он идёт, метки нет,
+ * и ответом будет отговорка.
+ *
+ * Отговорка, а не ожидание: спрашивают отсюда пробой, а ожидание внутри пробы кончается
+ * не новой попыткой, а падением всей проверки. Ждёт поэтому сама проба.
+ *
+ * Весь рейд так не спросишь: перезаход — это уход со старого места и приход на новое,
+ * и какое-то время в кадре стоят оба корпуса. Разобрать, где чей, по одним местам нельзя,
+ * а на своём корабле метка эту пару и разводит.
+ */
+const shownBerth = (page: Page): Promise<string> =>
+    page.evaluate(
+        () => document.querySelector('[class*="shipMine"]')?.getAttribute('data-berth-ship') ?? 'корабль ещё в пути'
+    );
+
+/**
+ * Место, которое вкладка считает своим: оно отмечено в форме нажатым.
+ *
+ * Отвечает сразу тем, что видит, — и «ничего не выбрано», если нажатого места нет. Ждать
+ * ему нельзя: зовут его из `expect.poll`, а ожидание внутри такой пробы кончается не пробой,
+ * а падением всей проверки. Отобранное место возвращается во вкладку рассылкой, и, спрошенная
+ * разом после открытия формы, она честно стоит ни на чём — это ответ, а не ошибка, и ждать
+ * его должна проба снаружи.
+ */
+const ownBerth = (page: Page): Promise<string> =>
+    page.evaluate(
+        () =>
+            document.querySelector('[data-berth][aria-pressed="true"]')?.getAttribute('data-berth') ??
+            'ничего не выбрано'
+    );
 
 test('перестановка из соседней вкладки не затирает свою', async ({ context }) => {
     takes(6);
@@ -733,8 +1114,9 @@ test('перестановка из соседней вкладки не зат�
 });
 
 test('два корабля не встают на одно место, даже если выбрали его разом', async ({ context }) => {
-    // Две вкладки, и в каждой — свой заход на рейд с ходом по морю.
-    takes(8);
+    // Две вкладки, и в каждой — свой заход на рейд с ходом по морю. Вдобавок проверка дважды
+    // ждёт, пока корабль дойдёт до отведённого места: ход по воде и есть здесь самое долгое.
+    takes(13);
     const mine = await context.newPage();
     const theirs = await context.newPage();
     await openChannel(mine, DEMO, ALBATROS);
@@ -760,23 +1142,52 @@ test('два корабля не встают на одно место, даже
     await Promise.all([shipFormSubmit(mine).click(), shipFormSubmit(theirs).click()]);
 
     // Место одно, а желающих двое: достаться оно должно кому-то одному, второму — другое.
-    // Считаем именно разные места: кораблей в канале три при любом исходе, и на их числе
-    // не видно, дошли ли обе записи.
     const allBerths = async (): Promise<string[]> =>
         (await readState(mine)).channels['ch-demo'].members.map(
             (member) => `${member.place.slot}-${member.place.corridor}`
         );
+    // Ждём именно спорное место, а не три разных: разными они и были с самого начала —
+    // три корабля демо-эскадры стоят порознь, — и проверка на их число проходила, ещё не
+    // дождавшись ни одной записи. Дальше она читала рейд, на котором никто никуда не двигался,
+    // и падала на «место досталось не одному», хотя доставаться было ещё нечему.
     await expect
-        .poll(async () => new Set(await allBerths()).size, { message: 'на рейде так и не стало трёх разных мест' })
-        .toBe(3);
-    expect(
-        (await allBerths()).filter((berth) => berth === shared),
-        'место досталось не одному'
-    ).toHaveLength(1);
+        .poll(async () => (await allBerths()).filter((berth) => berth === shared).length, {
+            message: 'спорное место так и не досталось никому',
+        })
+        .toBe(1);
+    // А проигравший встал не на спорное — либо на другое свободное, либо остался, где стоял.
+    expect(new Set(await allBerths()).size, 'на рейде два корабля на одном месте').toBe(3);
 
     // И каждая вкладка держит своим то место, которое ей и досталось. До общей очереди обе
     // оставались при своём выборе — том самом спорном, — и вкладка рисовала свой корабль там,
     // где на деле уже стоял чужой.
+    //
+    // Сперва ждём, пока перестановка дойдёт до самих вкладок. Форма заводит свой выбор один
+    // раз, когда открывается: открытая раньше рассылки, она подставит прежнее место — и так
+    // на нём и останется, потому что прежнее свободно, а переспрашивать себя ей незачем.
+    //
+    // Признак прихода — свой корабль, вставший в кадре на то самое место, что записано за ним
+    // в «сервере». Сверяются они прямо в пробе, а не с заранее снятым рейдом: записи идут
+    // общей очередью, и вторая доходит позже — снимок, взятый разом после первой, устареет
+    // к следующей же попытке. Ход по воде долгий, отсюда и срок ожидания.
+    const standsWhereTold = async (page: Page, memberId: string): Promise<string> => {
+        const shown = await shownBerth(page);
+        const told = await berthOf(page, memberId);
+        return shown === told ? 'на своём месте' : `${shown} вместо ${told}`;
+    };
+    await expect
+        .poll(() => standsWhereTold(mine, ALBATROS), {
+            message: 'корабль так и не встал в кадре туда, где ему отвели место',
+            timeout: SAIL_TIMEOUT,
+        })
+        .toBe('на своём месте');
+    await expect
+        .poll(() => standsWhereTold(theirs, VYMPEL), {
+            message: 'корабль соседней вкладки так и не встал в кадре туда, где ему отвели место',
+            timeout: SAIL_TIMEOUT,
+        })
+        .toBe('на своём месте');
+
     await openShipForm(mine);
     await openShipForm(theirs);
     // Отобранное место возвращается во вкладку рассылкой, и приходит она не в тот же миг:

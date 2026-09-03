@@ -1,4 +1,4 @@
-import { KeyboardEvent, MouseEvent, PointerEvent, useRef, useState } from 'react';
+import { KeyboardEvent, MouseEvent, PointerEvent, Ref, useRef, useState } from 'react';
 
 import { ChannelError, MemberDraft } from '@/backend';
 import MemberName from '@/components/ships/MemberName';
@@ -9,29 +9,23 @@ import Input from '@/components/ui/Input';
 import Panel from '@/components/ui/Panel';
 import { useSnackbar } from '@/components/ui/Snackbar';
 import { HAIL_SIGNAL } from '@/hooks/morse';
+import { Press, isTap, startPress } from '@/utils/tap';
+import { isTouch } from '@/utils/viewport';
 import {
     HULL_NUMBER_LENGTH,
     MEMBER_COLORS,
     Member,
     MorseFeed,
+    NAME_MAX_LENGTH,
     SHIP_KINDS,
     SHIP_KIND_LABELS,
     ShipKind,
     Side,
     isValidHullNumber,
-} from '@/types/channel';
-import { limitMessage, overLimit } from '@/utils/limit';
-import { Press, isTap, startPress } from '@/utils/tap';
-import { isTouch } from '@/utils/viewport';
+} from '@shared/types/channel';
+import { limitMessage, overLimit } from '@shared/utils/limit';
 
 import styles from './MemberForm.module.less';
-
-/**
- * Предел длины позывного. Он стоит над репликой в ленте и подписью у корабля в кадре,
- * и длинный расползся бы на всю строку. Мягкий, как и все пределы: набранное сверх него
- * не обрезается, а поле краснеет и отвечает снекбаром (см. `@/utils/limit`).
- */
-const NAME_MAX_LENGTH = 20;
 
 interface MemberFormProps {
     /** Вход в канал или переоснащение уже стоящего в строю корабля. */
@@ -41,6 +35,12 @@ interface MemberFormProps {
     /** Свой корабль, если он уже в строю: его цвет из занятых не исключаем. */
     myId: string | null;
     initial?: MemberDraft;
+    /**
+     * Каким цветом вошедший ходил в прошлый раз (`useAuth.lastLook`). Годится только
+     * входящему: у стоящего в строю цвет свой, он приходит в `initial`. Занят на этом рейде —
+     * берём первый свободный, как и без всякой памяти.
+     */
+    lastColor?: string;
     /**
      * Выбранный силуэт. Живёт снаружи: от размера корабля зависит, куда он влезет на рейде,
      * а свободные места показывает не форма, а сцена.
@@ -58,15 +58,22 @@ interface MemberFormProps {
     onCancel?: () => void;
     /**
      * Открыта ли форма. Закрытая — это та же форма, только свёрнутая до одной кнопки посреди
-     * плашки: гость, зашедший по ссылке, попадает не в настройку корабля, а на рейд, который
-     * можно просто разглядывать. Закрытым состоянием живёт только вход (`mode="join"`):
-     * переоснащение открывают нажатием, и закрывать его нечему.
+     * плашки: гость, зашедший по ссылке, попадает не в настройку корабля, а к этой одной
+     * кнопке — рейда за ней не видно вовсе (см. `atGate` в App.tsx). Закрытым состоянием живёт
+     * только вход (`mode="join"`): переоснащение открывают нажатием, и закрывать его нечему.
      *
      * Состояние формы при этом никуда не девается — набранный позывной и выбранный корабль
      * переживают закрытие: это одна и та же форма в двух видах, а не две разные.
      */
     open?: boolean;
     onOpen?: () => void;
+    /**
+     * Ссылка на кнопку закрытой формы. Читает её App: коробка разговора для закрытой формы
+     * стоит не долей хода, как для настоящего разговора, а по этой самой кнопке — единственном,
+     * что в ней есть (см. `gateRef` в App). Пока форма открыта, ссылка не у дел: коробка там
+     * во весь размер слоя, и мерить в ней нечего.
+     */
+    gateRef?: Ref<HTMLButtonElement>;
 }
 
 const randomHullNumber = (): string => String(Math.floor(Math.random() * 900) + 100);
@@ -107,6 +114,7 @@ export default function MemberForm({
     crew,
     myId,
     initial,
+    lastColor,
     shipKind,
     onShipKind,
     facing,
@@ -115,13 +123,16 @@ export default function MemberForm({
     onCancel,
     open = true,
     onOpen,
+    gateRef,
 }: MemberFormProps) {
     const takenColors = crew.filter((member) => member.memberId !== myId).map((member) => member.color);
     const [name, setName] = useState(initial?.name ?? '');
     const [hullNumber, setHullNumber] = useState(initial?.hullNumber ?? randomHullNumber);
-    // Цвет по умолчанию — первый свободный: два одинаковых позывных в ленте не различить.
+    // Цвет по умолчанию — прошлый свой, если он на этом рейде свободен, иначе первый свободный:
+    // два корабля одного цвета в ленте не различить.
+    const freeColor = MEMBER_COLORS.find((option) => !takenColors.includes(option)) ?? MEMBER_COLORS[0];
     const [color, setColor] = useState(
-        initial?.color ?? MEMBER_COLORS.find((option) => !takenColors.includes(option)) ?? MEMBER_COLORS[0]
+        initial?.color ?? (lastColor && !takenColors.includes(lastColor) ? lastColor : freeColor)
     );
     const [busy, setBusy] = useState(false);
     // Отклик выбранного корабля: ткнули в кнопку — он мигнул лампой ровно так же, как чужой
@@ -176,7 +187,7 @@ export default function MemberForm({
             return;
         }
         // Перебор длины кнопку не гасит: недоступная кнопка молчит, а тут надо сказать,
-        // насколько перебрали. Правило и слова общие со строкой сообщения (`@/utils/limit`).
+        // насколько перебрали. Правило и слова общие со строкой сообщения (`@shared/utils/limit`).
         if (overLimit(name, NAME_MAX_LENGTH)) {
             notify(limitMessage(name, NAME_MAX_LENGTH));
             return;
@@ -199,7 +210,9 @@ export default function MemberForm({
         return (
             <Panel>
                 <div className={styles.gate}>
-                    <Button onClick={onOpen}>Встать на рейд</Button>
+                    <Button ref={gateRef} onClick={onOpen}>
+                        Встать на рейд
+                    </Button>
                 </div>
             </Panel>
         );
@@ -211,8 +224,6 @@ export default function MemberForm({
             // Состав здесь не перечисляем: пока форма открыта, занятые места на рейде подписаны
             // позывными, и то же самое второй раз строкой над формой — лишнее.
             onSubmit={handleSubmit}
-            // Форма длинная: корабли идут столбиком, и кнопки без этого уезжают под обрез.
-            pinActions
             actions={
                 <>
                     {onCancel && (

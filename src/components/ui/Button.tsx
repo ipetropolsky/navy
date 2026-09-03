@@ -1,4 +1,4 @@
-import { ButtonHTMLAttributes } from 'react';
+import { ButtonHTMLAttributes, Ref } from 'react';
 
 import styles from './Button.module.less';
 
@@ -18,6 +18,11 @@ export type ButtonVariant = 'primary' | 'secondary' | 'danger';
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
     variant?: ButtonVariant;
+    /**
+     * Ссылка на сам элемент. Нужна там, где кнопка — единственное содержимое плашки и её
+     * высотой меряют саму плашку (см. закрытую форму постановки в строй, `gateRef` в App).
+     */
+    ref?: Ref<HTMLButtonElement>;
 }
 
 const VARIANT_CLASS: Record<ButtonVariant, string> = {

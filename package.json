@@ -18,22 +18,29 @@
     "format-files-check": "prettier --check --ignore-unknown",
     "test": "vitest run",
     "test:e2e": "playwright test",
+    "test:e2e:firebase": "npm --prefix functions run build && firebase emulators:exec --only auth,firestore,functions --project demo-navy \"playwright test --config playwright.firebase.config.ts $E2E_ARGS\"",
+    "test:emulator": "firebase emulators:exec --only firestore --project demo-navy \"vitest run --config vitest.emulator.config.ts\"",
     "check": "npm run ts-check && npm run lint-check && npm run format-check && npm run test",
     "check-and-fix": "npm run lint && npm run format",
-    "deploy": "npm run build && gh-pages -d build",
     "deps-latest": "node tools/get-latest-deps.cjs",
+    "seed:firestore": "tsx tools/seed-firestore.ts",
     "lint-staged": "lint-staged",
-    "postinstall": "cp tools/githooks/* .git/hooks || true"
+    "postinstall": "cp tools/githooks/* .git/hooks || true",
+    "firebase": "firebase",
+    "functions:dev": "firebase emulators:start --only auth,firestore,functions",
+    "functions:deploy": "firebase deploy --only functions"
   },
   "engines": {
     "node": ">22.0.0"
   },
   "dependencies": {
+    "firebase": "12.18.0",
     "modern-normalize": "3.0.1",
     "react": "19.2.4",
     "react-dom": "19.2.4"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "5.0.2",
     "@hh.ru/eslint-config": "18.1.5",
     "@playwright/test": "1.62.1",
     "@types/node": "25.5.0",
@@ -42,13 +49,16 @@
     "@vitejs/plugin-react-swc": "4.3.0",
     "autoprefixer": "10.4.27",
     "eslint": "9.39.4",
+    "esbuild": "0.27.7",
     "eslint-config-prettier": "10.1.8",
-    "gh-pages": "6.3.0",
+    "firebase-admin": "13.6.0",
+    "firebase-tools": "15.26.0",
     "globals": "17.4.0",
     "less": "4.6.4",
     "lint-staged": "16.4.0",
     "postcss": "8.5.8",
     "prettier": "3.8.1",
+    "tsx": "4.23.12",
     "typescript": "6.0.2",
     "vite": "8.0.3",
     "vitest": "4.1.10"
