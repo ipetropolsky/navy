@@ -252,7 +252,7 @@ test('высадка одним и тем же нажатием дважды: в
     });
 
     // Высадили ровно один раз: записи в ленте от второй попытки нет, ей нечего было писать.
-    await expect(systemLines(page).filter({ hasText: 'выдворен' })).toHaveCount(1);
+    await expect(systemLines(page).filter({ hasText: 'снят с рейда' })).toHaveCount(1);
 
     // И вторая попытка не пропала молча — снекбар про неё виден.
     await expect(page.getByText('Такого корабля в канале нет')).toBeVisible();
