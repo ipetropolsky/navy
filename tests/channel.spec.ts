@@ -622,7 +622,7 @@ test('старший на рейде отмечен бэджем и высажи
 
     // Считаем не корабли в кадре, а канал: высаженный ещё уходит за кромку и висит в сцене
     // столько же, сколько ушедший сам.
-    await expect(systemLines(page).last()).toContainText('Малый ракетный корабль выдворен с рейда');
+    await expect(systemLines(page).last()).toContainText('Малый ракетный корабль снят с рейда');
     const crew = await readState(page);
     expect(crew.channels['ch-demo'].members.map((member) => member.memberId)).not.toContain(VYMPEL);
 });
