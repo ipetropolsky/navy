@@ -225,12 +225,12 @@ const readLocalLook = (userId: string): Look | undefined => {
     }
 };
 
-/** localAccount() с внешностью — нужна входу понарошку, а localBackend.ts она ни разу не нужна. */
-const localAccountWithLook = (): Account => {
-    const account = localAccount();
-    const look = readLocalLook(account.userId);
-    return look ? { ...account, look } : account;
-};
+/**
+ * Задержка перед приходом внешности из local-хранилища, мс. Столько же, сколько
+ * `LATENCY_MS` у localBackend.ts (см. там) — тот же смысл, отдельная константа: значение
+ * не экспортировано, а заводить ради одного числа общий модуль незачем.
+ */
+const LOOK_LATENCY_MS = 40;
 
 /**
  * Вышел ли человек из входа понарошку. В памяти вкладки, а не в переменной модуля: настоящий
@@ -249,7 +249,7 @@ const LOCAL_GUEST_KEY = 'kilvater.entrance.guest';
 export function createLocalEntrance(): Entrance {
     let state: AuthState = sessionStore.read(LOCAL_GUEST_KEY)
         ? { status: 'guest' }
-        : { status: 'signed', account: localAccountWithLook() };
+        : { status: 'signed', account: localAccount() };
     const listeners = new Set<(state: AuthState) => void>();
     const settle = (next: AuthState): void => {
         state = next;
@@ -261,17 +261,38 @@ export function createLocalEntrance(): Entrance {
         listeners.forEach((listener) => listener(state));
     };
 
+    /**
+     * Внешность — отдельным, чуть запоздалым приходом того же onChange, тем же приёмом,
+     * что и у настоящего входа (см. createFirebaseEntrance выше): та отдаёт её вторым
+     * вызовом, дождавшись Firestore. Читать sessionStorage в обход этой задержки было бы
+     * не «локальный бэкенд без сервера», а обход самого свойства, которое отлавливает
+     * баги вроде GH-81 — код, рассчитывающий на мгновенный ответ, здесь падал бы точно
+     * так же, как и на настоящем Firebase.
+     */
+    const deliverLook = (account: Account): void => {
+        window.setTimeout(() => {
+            const look = readLocalLook(account.userId);
+            if (look && state.status === 'signed' && state.account.userId === account.userId) {
+                settle({ status: 'signed', account: { ...state.account, look } });
+            }
+        }, LOOK_LATENCY_MS);
+    };
+
     return {
         watch: ({ onChange }) => {
             listeners.add(onChange);
             onChange(state);
+            if (state.status === 'signed') {
+                deliverLook(state.account);
+            }
             return () => {
                 listeners.delete(onChange);
             };
         },
         signIn: () => {
-            const account = localAccountWithLook();
+            const account = localAccount();
             settle({ status: 'signed', account });
+            deliverLook(account);
             return Promise.resolve(account);
         },
         signOut: () => {

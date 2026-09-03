@@ -273,6 +273,7 @@ export default function MemberForm({
                             className={option === color ? styles.colorActive : styles.color}
                             style={{ background: option }}
                             aria-label={`Цвет ${option}`}
+                            aria-pressed={option === color}
                             onClick={() => setColor(option)}
                         />
                     ))}
