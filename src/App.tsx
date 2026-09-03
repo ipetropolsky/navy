@@ -51,6 +51,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useChannel } from '@/hooks/useChannel';
 import { useConnection } from '@/hooks/useConnection';
 import { Layout, chatMagnets, useLayout } from '@/hooks/useLayout';
+import { useMessageNotifications } from '@/hooks/useMessageNotifications';
 import { useSlide } from '@/hooks/useSlide';
 import { useSwipe } from '@/hooks/useSwipe';
 import { useUnread } from '@/hooks/useUnread';
@@ -260,6 +261,11 @@ export default function App() {
      * пачкой в тот миг, когда он повернёт телефон.
      */
     const unread = useUnread(channel, myId, shown);
+
+    // Тот же канал, тот же признак «панель на виду», но другой отклик: не цифра на кнопке,
+    // а браузерное уведомление (или мигающий заголовок вкладки, если разрешения нет) —
+    // на случай, когда человек вовсе отошёл от вкладки (issue #83).
+    useMessageNotifications(channel, myId, shown);
 
     const sceneRef = useRef<HTMLDivElement>(null);
 
