@@ -22,6 +22,7 @@ import {
     ShipKind,
     Side,
     isValidHullNumber,
+    resolveMemberColor,
 } from '@shared/types/channel';
 import { limitMessage, overLimit } from '@shared/utils/limit';
 
@@ -128,12 +129,11 @@ export default function MemberForm({
     const takenColors = crew.filter((member) => member.memberId !== myId).map((member) => member.color);
     const [name, setName] = useState(initial?.name ?? '');
     const [hullNumber, setHullNumber] = useState(initial?.hullNumber ?? randomHullNumber);
-    // Цвет по умолчанию — прошлый свой, если он на этом рейде свободен, иначе первый свободный:
-    // два корабля одного цвета в ленте не различить.
-    const freeColor = MEMBER_COLORS.find((option) => !takenColors.includes(option)) ?? MEMBER_COLORS[0];
-    const [color, setColor] = useState(
-        initial?.color ?? (lastColor && !takenColors.includes(lastColor) ? lastColor : freeColor)
-    );
+    // Цвет держим здесь только тот, что выбран своей рукой, — как `pickedKind` в App.tsx.
+    // Умолчание не кэшируем в useState, а считаем заново на каждый проход — resolveMemberColor
+    // и объясняет зачем (`lastColor` приходит из аккаунта вторым, асинхронным приёмом).
+    const [pickedColor, setColor] = useState<string | null>(null);
+    const color = resolveMemberColor(pickedColor, takenColors, initial?.color, lastColor);
     const [busy, setBusy] = useState(false);
     // Отклик выбранного корабля: ткнули в кнопку — он мигнул лампой ровно так же, как чужой
     // корабль в кадре на тычок в аватарку. Держится он в состоянии, а не собирается на каждый
@@ -273,6 +273,7 @@ export default function MemberForm({
                             className={option === color ? styles.colorActive : styles.color}
                             style={{ background: option }}
                             aria-label={`Цвет ${option}`}
+                            aria-pressed={option === color}
                             onClick={() => setColor(option)}
                         />
                     ))}

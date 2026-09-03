@@ -22,7 +22,13 @@ const fakeSessionStorage = {
 
 beforeEach(() => {
     shelf.clear();
-    (globalThis as unknown as { window: unknown }).window = { sessionStorage: fakeSessionStorage };
+    // setTimeout — настоящий, не подложный: внешность здесь нарочно приходит вторым,
+    // запоздалым onChange (см. deliverLook в auth.ts), и проверки ниже этой асинхронности
+    // и касаются.
+    (globalThis as unknown as { window: unknown }).window = {
+        sessionStorage: fakeSessionStorage,
+        setTimeout: (run: () => void, ms: number) => setTimeout(run, ms),
+    };
 });
 
 afterEach(() => {
@@ -38,6 +44,28 @@ const firstState = (entrance: ReturnType<typeof createLocalEntrance>): AuthState
     }
     return state;
 };
+
+/**
+ * Дождаться состояния по условию — им ловим тот самый запоздалый приход внешности:
+ * первый onChange отвечает без неё, второй, минуя настоящий таймер, донашивает look
+ * следом (см. deliverLook в auth.ts, тот же приём, что и у createFirebaseEntrance).
+ */
+const waitForState = (
+    entrance: ReturnType<typeof createLocalEntrance>,
+    matches: (state: AuthState) => boolean
+): Promise<AuthState> =>
+    new Promise((resolve) => {
+        const unsubscribe = entrance.watch({
+            onChange: (next) => {
+                if (matches(next)) {
+                    unsubscribe();
+                    resolve(next);
+                }
+            },
+        });
+    });
+
+const hasLook = (state: AuthState): boolean => state.status === 'signed' && state.account.look !== undefined;
 
 describe('localAccount', () => {
     test('в той же вкладке — тот же userId, при каждом обращении', () => {
@@ -71,9 +99,13 @@ describe('вход понарошку: внешность корабля', () =>
         });
 
         // Новый вход над тем же (подложным) хранилищем — как вкладка после перезагрузки.
+        // Первым приходом внешности ещё нет, ровно как у настоящего входа.
         const reloaded = createLocalEntrance();
-        const state = firstState(reloaded);
-        expect(state.status === 'signed' ? state.account.look : undefined).toEqual({
+        const first = firstState(reloaded);
+        expect(first.status === 'signed' ? first.account.look : undefined).toBeUndefined();
+
+        const withLook = await waitForState(reloaded, hasLook);
+        expect(withLook.status === 'signed' ? withLook.account.look : undefined).toEqual({
             shipKind: 'pr1234',
             color: '#8ecae6',
         });
@@ -106,9 +138,16 @@ describe('вход понарошку: внешность корабля', () =>
         const before = await entrance.signIn();
 
         await entrance.signOut();
+        // signIn() отвечает сразу и без внешности — тем же приёмом, что и настоящий вход
+        // (см. createFirebaseEntrance.signIn): она приходит следом, отдельным onChange.
+        const withLook = waitForState(entrance, hasLook);
         const after = await entrance.signIn();
 
         expect(after.userId).toBe(before.userId);
-        expect(after.look).toEqual({ shipKind: 'pr1141', color: '#ffb703' });
+        const state = await withLook;
+        expect(state.status === 'signed' ? state.account.look : undefined).toEqual({
+            shipKind: 'pr1141',
+            color: '#ffb703',
+        });
     });
 });

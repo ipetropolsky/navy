@@ -655,6 +655,40 @@ export const shipWidthPercent = (slot: number, kind: ShipKind): number => slotWi
  */
 export const MEMBER_COLORS = ['#8ecae6', '#f2cc8f', '#95d5b2', '#d8b4f8', '#f4978e'];
 
+/**
+ * Цвет корабля в форме. Выбранный своей рукой (`picked`) стоит превыше всего; не выбирали —
+ * считаем умолчание заново, тем же приёмом, что и `pickedKind`/`shipKind` в App.tsx: состояние
+ * держит только собственный выбор, а умолчание — не useState, а обычное выражение, посчитанное
+ * на каждый проход.
+ *
+ * Пересчёт важен не для красоты: `lastColor` (прошлый цвет из аккаунта, `useAuth.lastLook`)
+ * приходит не с первым `onChange` при входе, а вторым, уже асинхронным (см. `src/backend/auth.ts`),
+ * когда форма давно смонтирована. Ленивый инициализатор `useState` этот второй приход не увидел
+ * бы — он срабатывает один раз, на первом проходе, — а обычное выражение видит его как любой
+ * другой проп.
+ *
+ * Умолчание: цвет уже стоящего в строю корабля (`initial`), иначе прошлый свой, если он
+ * на этом рейде свободен, иначе первый свободный из палитры — два корабля одного цвета
+ * в ленте не различить.
+ */
+export const resolveMemberColor = (
+    picked: string | null,
+    takenColors: string[],
+    initial: string | undefined,
+    lastColor: string | undefined
+): string => {
+    if (picked) {
+        return picked;
+    }
+    if (initial) {
+        return initial;
+    }
+    if (lastColor && !takenColors.includes(lastColor)) {
+        return lastColor;
+    }
+    return MEMBER_COLORS.find((option) => !takenColors.includes(option)) ?? MEMBER_COLORS[0];
+};
+
 // Пределы длины — все, какие есть в приложении. Лежат вместе и здесь, а не в формах: на длину
 // названия и реплики смотрит ещё и правило безопасности (`firestore.rules`), а остальные
 // пределы уедут в серверный код вместе с рейдом. Импортов в языке правил нет — числа там
