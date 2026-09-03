@@ -6,6 +6,7 @@ import { SLUG_MAX_LENGTH } from '@/utils/slug';
 import {
     HULL_NUMBER_LENGTH,
     MAX_MESSAGE_LENGTH,
+    MEMBER_COLORS,
     Member,
     NAME_MAX_LENGTH,
     SLOT_COUNT,
@@ -16,6 +17,7 @@ import {
     memberLook,
     memberRef,
     projectLeft,
+    resolveMemberColor,
     slotShare,
 } from './channel';
 
@@ -173,5 +175,43 @@ describe('manoeuvreFrom', () => {
 
     it('входящему прежнего места не пишет вовсе: приходить ему неоткуда', () => {
         expect(manoeuvreFrom(undefined, 12.5, 1000)).toEqual({ startedAt: 1000, seconds: 12.5 });
+    });
+});
+
+/**
+ * Цвет в форме входа (`resolveMemberColor` — то же умолчание, что MemberForm.tsx считает
+ * заново на каждый проход, а не один раз в useState). Аккаунт отдаёт прошлый цвет (`lastColor`)
+ * не сразу с первым `onChange`, а вторым, асинхронным приёмом (`src/backend/auth.ts`) — форма
+ * к этому мигу уже смонтирована. Вызов с одним и тем же `picked`, но разным `lastColor`
+ * как раз и разыгрывает эти два прохода: первый, ещё без прошлого цвета, и второй, когда
+ * он подъехал следом.
+ */
+describe('resolveMemberColor', () => {
+    it('первым проходом, пока прошлый цвет ещё не подъехал, берёт первый свободный', () => {
+        expect(resolveMemberColor(null, [], undefined, undefined)).toBe(MEMBER_COLORS[0]);
+    });
+
+    it('вторым проходом, когда прошлый цвет подъехал следом, подставляет его', () => {
+        // Тот же человек, тот же рейд — переменилось только то, что accountLook наконец дошёл.
+        // На старом коде (useState с ленивым инициализатором) второй проход ничего не менял:
+        // цвет застревал первым свободным, посчитанным ещё до прихода lastColor.
+        expect(resolveMemberColor(null, [], undefined, MEMBER_COLORS[2])).toBe(MEMBER_COLORS[2]);
+    });
+
+    it('прошлый цвет, занятый на этом рейде, не подставляет — берёт первый свободный', () => {
+        const taken = [MEMBER_COLORS[0], MEMBER_COLORS[2]];
+
+        expect(resolveMemberColor(null, taken, undefined, MEMBER_COLORS[2])).toBe(MEMBER_COLORS[1]);
+    });
+
+    it('своя рука сильнее прошлого цвета: поздний lastColor её не перебивает', () => {
+        // Человек уже ткнул в другой цвет до того, как lastColor вообще подъехал, — и после
+        // прихода lastColor выбор остаётся его собственным, а не переезжает следом за пропом.
+        expect(resolveMemberColor(MEMBER_COLORS[4], [], undefined, undefined)).toBe(MEMBER_COLORS[4]);
+        expect(resolveMemberColor(MEMBER_COLORS[4], [], undefined, MEMBER_COLORS[1])).toBe(MEMBER_COLORS[4]);
+    });
+
+    it('цвет уже стоящего в строю корабля сильнее прошлого: он и есть нынешний, а не прошлый', () => {
+        expect(resolveMemberColor(null, [], MEMBER_COLORS[3], MEMBER_COLORS[1])).toBe(MEMBER_COLORS[3]);
     });
 });
