@@ -3,11 +3,14 @@ import { expect } from '@playwright/test';
 import { WRITE_TIMEOUT } from '@/config/network';
 
 import {
+    SAIL_TIMEOUT,
     berths,
     bubbles,
     createChannel,
     enterAccessCode,
     join,
+    kickShip,
+    leaveRaid,
     newTab,
     openChannel,
     pendingIcon,
@@ -308,4 +311,69 @@ test('закрытый канал: неверный код отказывает,
 
     await owner.context().close();
     await guest.context().close();
+});
+
+/**
+ * Свой корабль уходит из кадра и тогда, когда ушёл сам, и тогда, когда его ссадили (issue #79).
+ *
+ * Проверка стоит здесь, а не в местном наборе, потому что и ломалось это только здесь. Уход
+ * из кадра сцена замечает сравнением: пропал из списка участников — значит уходит (SeaScene.tsx).
+ * У местного бэкенда список приходит уходящему как ни в чём не бывало — подписка там решает,
+ * что кому показывать, один раз, при заведении, и потерявшего участие не обрезает. Firestore
+ * же спрашивает правило заново на каждом снимке: сняли с рейда — запрос к участникам перестал
+ * проходить isMember(channelId) и ответил не удалением записи, а отказом всему запросу разом.
+ * Сравнивать делалось нечего, и корабль оставался стоять на своём месте — до самого перезахода,
+ * когда он наконец трогался, но уже переездом на новую точку строя и совсем некстати.
+ *
+ * Отсюда и два ожидания на каждый путь: сперва `leaving` — что корабль именно пошёл за кромку,
+ * а не пропал из разметки разом, — а следом опустевший кадр, что он до кромки дошёл.
+ *
+ * Заодно проверяется и то, без чего высадки бы тут не случилось вовсе: старшинство заведший
+ * канал получает сразу, не перезагружая вкладку (mergeCatchUp в useChannel.ts). Owner проставляет
+ * сервер, в превью, снятом до входа, его нет, — не возьми довыгрузка канал из свежего снимка,
+ * кнопки «Высадить» на этом рейде не было бы ни одной.
+ */
+test('свой корабль уходит из кадра — и когда ушёл сам, и когда его высадили', async ({ browser }) => {
+    // Замер — секунд сорок: два настоящих входа (WRITE_TIMEOUT + SAIL_TIMEOUT каждый) и два
+    // ухода за кромку следом друг за другом, каждый со своим SAIL_TIMEOUT.
+    takes(75);
+
+    const slug = `leave-scene-${Date.now()}`;
+
+    const senior = await newTab(browser);
+    await signIn(senior, 'leave-scene-senior', 'Старший');
+    await createChannel(senior, 'Кто уходит', slug);
+    await join(senior, 'Альбатрос', '101');
+
+    const kicked = await newTab(browser);
+    await signIn(kicked, 'leave-scene-kicked', 'Высаженный');
+    await openChannel(kicked, slug);
+    await join(kicked, 'Вымпел', '202');
+    await expect(ships(kicked), 'высаживаемый не увидел весь рейд').toHaveCount(2);
+
+    // Высадка: смотрим не на вкладку старшего, а на вкладку высаженного — там и ломалось.
+    // bringToFront не для красоты: Chromium морозит переходы в фоновой вкладке, и уход
+    // за кромку в ней не начинается вовсе, сколько ни жди.
+    await kicked.bringToFront();
+    await kickShip(senior, 'Вымпел');
+    await expect(
+        kicked.locator('[data-motion="leaving"]'),
+        'высаженный корабль не пошёл из кадра у себя же на вкладке'
+    ).toHaveCount(1, { timeout: WRITE_TIMEOUT + 5_000 });
+    await expect(ships(kicked), 'высаженный корабль так и не ушёл за кромку').toHaveCount(1, {
+        timeout: SAIL_TIMEOUT,
+    });
+
+    // Уход сам: тот же вопрос к вкладке уходящего, только рейд после него пустеет совсем.
+    await senior.bringToFront();
+    await leaveRaid(senior);
+    await expect(senior.locator('[data-motion="leaving"]'), 'ушедший сам корабль не тронулся с места').toHaveCount(1, {
+        timeout: WRITE_TIMEOUT + 5_000,
+    });
+    await expect(ships(senior), 'ушедший сам корабль так и не ушёл за кромку').toHaveCount(0, {
+        timeout: SAIL_TIMEOUT,
+    });
+
+    await senior.context().close();
+    await kicked.context().close();
 });

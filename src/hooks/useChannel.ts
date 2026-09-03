@@ -79,14 +79,26 @@ const withMember = (snapshot: ChannelSnapshot, member: Member): ChannelSnapshot 
         : [...snapshot.members, member],
 });
 
+/** Вычеркнуть участника из снимка — обратная сторона `withMember` выше. */
+const withoutMember = (snapshot: ChannelSnapshot, memberId: string): ChannelSnapshot => ({
+    ...snapshot,
+    members: snapshot.members.filter((member) => member.memberId !== memberId),
+});
+
 /**
  * Слить снимок, довыгруженный после входа (см. join() и эффект подписки ниже), с тем, что уже
  * показано, — не заменить им. Подписка переподписывается раньше, чем уходит этот запрос,
  * и участника или реплику, пришедшие между переподпиской и ответом на неё, current уже
  * получил — слепая замена стёрла бы их снимком, снятым до этого прихода.
  *
- * channel берём из current: он и так обновляется живыми событиями, даже сквозь превью (см.
- * `channel-updated` в applyEvent ниже), — fetched в этом смысле не свежее.
+ * channel — от fetched, и это важнее, чем кажется. Довходовая подписка на документ канала живой
+ * не была: не участнику его не открыть тем же isMember(channelId), она получила отказ и замерла
+ * (см. firebaseBackend.ts, комментарий у подписки на канал). Всё, что сменилось на канале
+ * с открытия и до входа, до current, стало быть, не дошло, — а кое-что не дошло бы и вовсе
+ * никогда. Заведший рейд сам себе старший, но узнаёт об этом только отсюда: owner проставляет
+ * сервер (functions/src/raid.ts), в превью, снятом до входа, его нет по определению, а свежая,
+ * уже участницкая подписка свой первый снимок проглатывает молча. Без этого создатель канала
+ * не видел бы ни вымпела «Старший на рейде», ни кнопок высадки — до первой перезагрузки вкладки.
  *
  * members — от fetched: до входа участников не показывают вовсе (см. readChannelForUser
  * в firebaseBackend.ts), и current к этой минуте знает только самого себя — его join() дописал
@@ -116,7 +128,7 @@ const mergeCatchUp = (current: ChannelSnapshot, fetched: ChannelSnapshot): Chann
         ...fetched.messages.map((message) => freshById.get(message.messageId) ?? message),
         ...current.messages.filter((message) => !fetched.messages.some((item) => item.messageId === message.messageId)),
     ];
-    return { ...current, members, messages, hasMoreMessages: fetched.hasMoreMessages };
+    return { ...current, channel: fetched.channel, members, messages, hasMoreMessages: fetched.hasMoreMessages };
 };
 
 export function useChannel(
@@ -471,6 +483,20 @@ export function useChannel(
         async (course: string, nextOwnerId?: string) => {
             if (channelId && myId) {
                 await backend.leave({ channelId, memberId: myId, course, nextOwnerId });
+                // Свой корабль вычёркиваем из снимка сами — ровно по той же причине, по какой
+                // join() выше сам же его туда и ставит: ждать, пока уход вернётся подпиской,
+                // нельзя. У Firebase его оттуда и не дождёшься вовсе. Уход снимает с нас
+                // участие, а на участие смотрит правило (firestore.rules, isMember) — подписка
+                // на участников отвечает на это не событием `removed`, а отказом
+                // permission-denied, после которого замирает совсем (см. firebaseBackend.ts).
+                // Ушедший так и остался бы в снимке навсегда: в кадре — стоящим на прежнем
+                // месте кораблём, потому что уход из кадра сцена замечает сравнением списков
+                // (SeaScene.tsx), а сравнивать было бы нечего. И это не только про красоту:
+                // при следующем входе тем же человеком тот же корабль наконец сдвигался бы
+                // с места — но уже как переезд на новую точку строя, некстати и не туда (#79).
+                setChannel((current) =>
+                    current?.channel.channelId === channelId ? withoutMember(current, myId) : current
+                );
                 setMyId(null);
             }
         },
