@@ -23,6 +23,8 @@
   физика и что в них осталось свести.
 - [Проверки](docs/TESTING.md) — как гонять набор целиком и по одной, смотреть на него глазами,
   отлаживать и разбирать упавшее.
+- [PWA](docs/PWA.md) — установка на телефон: манифест, service worker, что он кэширует
+  и что нарочно нет.
 - [Задачи](https://github.com/ipetropolsky/navy/issues) — отложенные задачи и технический долг.
 
 ## Настройка проекта
@@ -213,6 +215,10 @@ npm run test:e2e
 # Production build to /build
 npm run build
 ```
+
+Сборка попутно кладёт в `/build` манифест и service worker — приложение можно установить
+на телефон как обычное; подробности и то, что service worker нарочно не кэширует, —
+в [docs/PWA.md](docs/PWA.md).
 
 Выкладывает на GitHub Pages не команда, а `.github/workflows/deploy.yml`. Сам он срабатывает
 на пуш в `master`; в остальных случаях — **Actions → Build & Deploy to GitHub Pages →

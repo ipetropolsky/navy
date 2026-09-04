@@ -28,6 +28,13 @@
         <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png" />
         <link rel="manifest" href="site.webmanifest" />
         <meta name="theme-color" content="#02112e" />
+        <!--
+            iOS Safari манифест почти не читает: display, start_url и scope для установки
+            на «Домой» ему не указ, и без этих тегов приложение открылось бы обратно в Safari
+            со всей его хромой. apple-touch-icon уже подключён выше — им iOS и пользуется.
+        -->
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-title" content="Кильватер" />
         <link rel="stylesheet" href="src/index.less" />
         <title>Кильватер — ночной морской чат</title>
     </head>
