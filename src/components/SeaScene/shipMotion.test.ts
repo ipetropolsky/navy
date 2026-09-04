@@ -13,6 +13,7 @@ import {
 import {
     LEAVE_GUARD,
     RELOCATE_PAUSE_SECONDS,
+    departureSeconds,
     leaveCourse,
     manoeuvreSeconds,
     pathToEdge,
@@ -237,5 +238,35 @@ describe('оценка манёвра', () => {
         });
 
         expect(Math.max(...worst)).toBeLessThan(120);
+    });
+});
+
+describe('уход сам по себе (без встречного захода)', () => {
+    test('тот же путь и та же длительность, что и у ухода в перезаходе', () => {
+        // departureSeconds — это ровно первая половина manoeuvreSeconds, посчитанная тем же
+        // счётом (leaveCourse, а не подобранный под встречный заход relocateCourse), — сцена
+        // ведёт настоящий уход с рейда ровно так же.
+        const place = at(NEAR, 'left', 'right');
+        const course = leaveCourse(place, KIND, []);
+        const width = shipWidthPercent(NEAR, KIND);
+        const path = pathToEdge(place.left, width, course.side, LEAVE_GUARD);
+        expect(departureSeconds(afloat(place), [])).toBeCloseTo(sailSeconds(path, NEAR, KIND, course.astern), 5);
+    });
+
+    test('дольше захода новичка с той же дальности: у ухода запас за кромкой больше', () => {
+        const place = at(NEAR, 'center', 'right');
+        expect(departureSeconds(afloat(place), [])).toBeGreaterThan(manoeuvreSeconds(undefined, afloat(place), []));
+    });
+
+    test('помеху на дороге учитывает так же, как обычный leaveCourse', () => {
+        // Сосед впереди меняет выбранную сторону ухода (см. «перед соседом корабль пятится»
+        // выше) — departureSeconds обязана считать по тому же курсу, а не по тому, что было бы
+        // без помехи.
+        const place = at(NEAR, 'right', 'left');
+        const obstacle = [at(NEAR, 'left', 'right')];
+        const course = leaveCourse(place, KIND, obstacle);
+        const width = shipWidthPercent(NEAR, KIND);
+        const path = pathToEdge(place.left, width, course.side, LEAVE_GUARD);
+        expect(departureSeconds(afloat(place), obstacle)).toBeCloseTo(sailSeconds(path, NEAR, KIND, course.astern), 5);
     });
 });

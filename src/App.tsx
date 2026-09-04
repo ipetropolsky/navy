@@ -26,7 +26,7 @@ import {
 import { ChannelDraft, ChannelError, MemberDraft, backend, freeBerths, placeShip, suggestBerth } from '@/backend';
 import { DEMO_CHANNEL_SLUG } from '@/backend/seed';
 import SeaScene, { BerthChoice } from '@/components/SeaScene/SeaScene';
-import { manoeuvreSeconds } from '@/components/SeaScene/shipMotion';
+import { departureSeconds, manoeuvreSeconds } from '@/components/SeaScene/shipMotion';
 import SignIn from '@/components/auth/SignIn';
 import ClosedChannel from '@/components/channel/ClosedChannel';
 import CreateChannel from '@/components/channel/CreateChannel';
@@ -60,6 +60,7 @@ import { channelLink, homeLink, useRoute } from '@/routing';
 import { NOTHING_OPEN, reduce } from '@/state/layers';
 import { copyText } from '@/utils/clipboard';
 import { Fling, rubberBand, settleMagnet, stepMagnet, trackFling } from '@/utils/magnet';
+import { manoeuvreEndsAt, manoeuvreWaitMs } from '@/utils/manoeuvreGuard';
 import { plural } from '@/utils/plural';
 
 import styles from './App.module.less';
@@ -396,6 +397,20 @@ export default function App() {
      */
     const leftByMe = useRef(false);
     /**
+     * Когда (по местным часам) закончится собственный уход с рейда, если он сейчас идёт, —
+     * мс эпохи, 0 по умолчанию: ждать нечего, ни манёвра не было, ни он уже кончился.
+     *
+     * Нужен затем, чтобы не пускать следующий манёвр этого же корабля — новый вход или
+     * переоснащение — раньше, чем сцена доиграет уход. Уйти с рейда — это тоже манёвр, только
+     * без записи о нём (см. `functions/src/raid.ts`, `leaveChannel`: участие вычёркивается
+     * целиком, а не переводится в какое-то «ушёл» место), и сцена отыгрывает его чисто на
+     * сравнении списков (SeaScene.tsx). Начни второй манёвр раньше — сравнение спутало бы
+     * недоигранный уход с только что начавшимся входом: корабль дёргался бы назад на прежнее
+     * место, а оттуда мчался на новое быстрее хода. Читает его только `handleMemberSubmit`,
+     * и то один раз, в момент отправки, — не состояние ради него городить незачем.
+     */
+    const departureEndsAtRef = useRef(0);
+    /**
      * Высадили — или ушёл из другой вкладки — сбрасываем `verifiedCode`: код спрашивают заново.
      * Память вкладки о подтверждённом коде годится только на повторный вход тем же решением,
      * ушёл сам и вернулся тем же кодом, что и подтверждал (см. комментарий у `verifiedCode`
@@ -646,6 +661,17 @@ export default function App() {
     };
 
     const handleMemberSubmit = async (draft: MemberDraft) => {
+        // Не начинаем новый манёвр, пока сцена не доиграла собственный уход (см. `departureEndsAtRef`):
+        // передумавший и тут же вставший заново застаёт кнопку занятой — «Минуту…» и недоступна
+        // (см. `MemberForm.busy`), тем же самым откликом, каким она уже отвечает на обычную отправку
+        // серверу. Отдельного признака в разметке под это заводить незачем: ожидание тут не длиннее
+        // самого ухода, несколько секунд, — и от вида недошедшего запроса неотличимо.
+        const wait = manoeuvreWaitMs(departureEndsAtRef.current, Date.now());
+        if (wait > 0) {
+            await new Promise((resolve) => {
+                setTimeout(resolve, wait);
+            });
+        }
         const withBerth = { ...draft, berth: pickedBerth ?? undefined };
         const withManoeuvre = { ...withBerth, manoeuvre: manoeuvreOf(withBerth) };
         if (editing) {
@@ -923,9 +949,23 @@ export default function App() {
     const handleLeaveConfirm = (course: string, nextOwnerId?: string) => {
         // Флаг — до вызова, а не после: см. комментарий у `leftByMe`.
         leftByMe.current = true;
+        // Снимаем мерку, пока корабль ещё стоит на своём месте: `leave()` через мгновение
+        // вычеркнет его из состава, и считать будет уже не с чего. Тот же счёт, каким ведёт
+        // уходящего сцена (см. `departureSeconds`) — им же посчитан и манёвр входа чуть ниже
+        // (`manoeuvreOf`), так что расходиться этим двум оценкам не с чего.
+        const leavingShip = me;
+        const remainingFleet = members.filter((member) => member.memberId !== myId).map((member) => member.place);
         void channelState
             .leave(course, nextOwnerId)
-            .then(() => act({ type: 'left' }))
+            .then(() => {
+                if (leavingShip) {
+                    departureEndsAtRef.current = manoeuvreEndsAt(
+                        Date.now(),
+                        departureSeconds({ place: leavingShip.place, shipKind: leavingShip.shipKind }, remainingFleet)
+                    );
+                }
+                act({ type: 'left' });
+            })
             // Отказ бэкенда (например, курс длиннее предела) оставляет шторку открытой:
             // набранное не потеряно, и сказанное снекбаром можно исправить на месте. Место
             // на рейде при этом никуда не делось — снимаем флаг, чтобы он не остался висеть

@@ -1112,6 +1112,105 @@ test('корабль уходит за кромку и пропадает из �
     await expect(ships(page)).toHaveCount(2, { timeout: SAIL_TIMEOUT });
 });
 
+/**
+ * Уйти с рейда и, не дожидаясь конца ухода, тут же встать заново на другое место — распечатанный
+ * случай: человек передумал в те же секунды, а сцена ведёт собственный уход и собственный вход
+ * одним и тем же кораблём, независимо друг от друга. Без очереди второй манёвр стартовал бы
+ * поверх ещё не доигранного первого, и сцена путала недоигранный уход со свежим входом — корабль
+ * дёргался назад на прежнее место и оттуда мчался на новое быстрее хода (см. `manoeuvreGuard.ts`
+ * и `App.tsx`, `departureEndsAtRef`).
+ *
+ * Кнопка формы — тот же признак ожидания, каким она уже отвечает на обычную отправку (см.
+ * `MemberForm.busy`): проверяем, что она остаётся занятой не на кадр-другой, а на заметный срок, —
+ * это и есть очередь в деле. Без неё повторная отправка уходит на сервер тем же тиком, и «Готово»
+ * освобождается почти сразу.
+ */
+test('уйти с рейда и сразу встать снова не сбивает корабль с курса', async ({ page }) => {
+    takes(15);
+    // Узкое окно и ближняя линия бокового коридора — тот же расклад, что и в «...сменилась
+    // раскладка» выше: уход идёт через весь кадр, дольше всего из возможных, и есть время
+    // застать очередь манёвров в деле, а не проскочить её за кадр-другой.
+    await page.setViewportSize({ width: 800, height: 844 });
+    await openNewChannel(page, 'srazu-obratno');
+    await page.getByText('Малый ракетный корабль', { exact: true }).click();
+    await page.getByLabel('Курс влево').click();
+    await page.locator('[data-berth="9-right"]').click();
+    await join(page, 'Стриж', '111');
+    await myShipParked(page);
+
+    await leaveRaid(page);
+    await expect(page.locator('[data-motion="leaving"]')).toHaveCount(1);
+
+    // Ведём собственный учёт хода — каждый кадр, пока идёт хоть какой-то манёвр, — и в конце
+    // проверяем, что позиция ни разу не скакнула рывком, пока вид хода не менялся: сам переход
+    // от ухода ко входу — законная смена стороны кадра, а не рывок, и потому меряем скачок
+    // только между кадрами одного и того же колена.
+    await page.evaluate(() => {
+        const seen: { motion: string | null; left: number }[] = [];
+        (window as unknown as { __seen: typeof seen }).__seen = seen;
+        const snap = (): void => {
+            const el = document.querySelector<HTMLElement>('[data-ship]');
+            if (el) {
+                seen.push({ motion: el.dataset.motion ?? null, left: el.getBoundingClientRect().left });
+            }
+            requestAnimationFrame(snap);
+        };
+        requestAnimationFrame(snap);
+    });
+
+    // Не дожидаясь, пока уход доиграет, тут же встаём заново — на другое место.
+    await page.getByRole('button', { name: 'Встать на рейд' }).click();
+    await page.getByPlaceholder('Гром').fill('Стриж');
+    await page.locator('input[inputmode="numeric"]').fill('111');
+    await page.getByText('Малый ракетный корабль', { exact: true }).click();
+    await page.locator('[data-berth="0-center"]').click();
+    const submit = shipFormSubmit(page);
+    await submit.click();
+
+    // Кнопка занята дольше кадра-другого: второй манёвр ждёт своей очереди, а не уходит
+    // на сервер тем же тиком, что и нажатие. Пока она занята, входа в кадре ещё нет —
+    // манёвры не смешиваются.
+    await expect(submit, 'кнопка не показала ожидание').toBeDisabled();
+    await expect(submit, 'кнопка не показала подпись ожидания').toHaveText('Минуту…');
+    expect(await page.locator('[data-motion="entering"]').count(), 'вход начался раньше времени').toBe(0);
+
+    // Уход доигрывает сам, без вмешательства, — и следом отправка проходит, а форма
+    // уходит с экрана (join, в отличие от переоснащения, не оставляет её висеть).
+    await expect(page.getByPlaceholder('Гром'), 'форма не закрылась после отправки').toHaveCount(0, {
+        timeout: SAIL_TIMEOUT,
+    });
+    const entering = page.locator('[data-motion="entering"]');
+    await expect(entering, 'вход не начался следом за уходом').toHaveCount(1, { timeout: 3_000 });
+    // Ход не мгновенный и не через полчаса — тот же предел, что и у обычного хода корабля
+    // (см. «ход корабля идёт с правдоподобной скоростью…» выше).
+    const enterSecondsRaw = await entering.evaluate((node) =>
+        getComputedStyle(node).getPropertyValue('--enter-seconds')
+    );
+    const enterSeconds = Number.parseFloat(enterSecondsRaw) * TIME_SCALE;
+    expect(enterSeconds, 'вход на новое место прошёл быстрее обычного хода').toBeGreaterThan(2);
+    expect(enterSeconds, 'вход на новое место занял неправдоподобно долго').toBeLessThanOrEqual(60);
+
+    await myShipParked(page);
+
+    const seen = await page.evaluate(
+        () => (window as unknown as { __seen: { motion: string | null; left: number }[] }).__seen
+    );
+    expect(seen.length, 'кадров хода не набралось, проверять нечего').toBeGreaterThan(10);
+    let maxSameKindJump = 0;
+    for (let i = 1; i < seen.length; i += 1) {
+        if (seen[i].motion === seen[i - 1].motion) {
+            maxSameKindJump = Math.max(maxSameKindJump, Math.abs(seen[i].left - seen[i - 1].left));
+        }
+    }
+    // Обычный шаг хода на этом окне — единицы пикселей за кадр; рывок в разы больше.
+    expect(maxSameKindJump, 'корабль дёрнулся посреди своего же колена хода').toBeLessThan(40);
+
+    // Место на рейде — то самое, новое, что выбрали при повторной постановке в строй.
+    const state = await readState(page);
+    const [moved] = Object.values(state.channels).find((one) => one.channel.slug === 'srazu-obratno')!.members;
+    expect(`${moved.place.slot}-${moved.place.corridor}`, 'корабль встал не на выбранное место').toBe('0-center');
+});
+
 test('огни на рейде якорные, на ходу ходовые, и от 50 метров их по два', async ({ page }) => {
     await openChannel(page, DEMO, ALBATROS);
 
