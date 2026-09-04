@@ -413,6 +413,116 @@ test('уведомление не показывается, пока разго�
 });
 
 /**
+ * То же самое, но настоящим браузерным разрешением и настоящим конструктором — без единой
+ * подмены (issue #83, жалоба «на десктопе после фикса уведомлений всё ещё нет»).
+ *
+ * `stubNotifications` выше не разрешение получает, а верит подложенному классу, что оно есть, —
+ * и это оставляет ровно ту дыру, которую не закрыть подменой: а вдруг браузер выдаёт разрешение
+ * не так, как ждёт код, или сам вызов настоящего конструктора у этого канала (`myId`, `watching`,
+ * `channelId`) на самом деле не доходит? Здесь разрешение выдаёт сам браузер через CDP
+ * (`context.grantPermissions`, без всплывающего окна, но по-настоящему — `Notification.permission`
+ * читает то же самое, что читал бы обычный человек, нажавший «Разрешить»), а `Notification`
+ * остаётся собственным браузерным классом — подкласс лишь запоминает аргументы конструктора
+ * и тут же зовёт `super(...)`, так что настоящая браузерная реализация отрабатывает как есть
+ * (statics вроде `permission`/`requestPermission` наследуются от неё же по цепочке прототипов).
+ * Показать само всплывающее окно ОС наружу браузера всё равно нечем (см. комментарий у
+ * stubNotifications), но факт настоящего вызова и его настоящие аргументы теперь видны без
+ * всякой веры на слово.
+ */
+const spyOnRealNotifications = async (page: Page): Promise<void> => {
+    await page.addInitScript(() => {
+        class RealCallLog {
+            static calls: { title: string; options?: NotificationOptions }[] = [];
+        }
+        (window as unknown as { __realNotifications: typeof RealCallLog }).__realNotifications = RealCallLog;
+        const OriginalNotification = window.Notification;
+        class SpyingNotification extends OriginalNotification {
+            constructor(title: string, options?: NotificationOptions) {
+                super(title, options);
+                RealCallLog.calls.push({ title, options });
+            }
+        }
+        window.Notification = SpyingNotification;
+    });
+};
+
+const realNotifications = (page: Page): Promise<{ title: string; options?: { body?: string; tag?: string } }[]> =>
+    page.evaluate(
+        () =>
+            (
+                window as unknown as {
+                    __realNotifications: { calls: { title: string; options?: { body?: string; tag?: string } }[] };
+                }
+            ).__realNotifications.calls
+    );
+
+test.describe('настоящее разрешение через CDP, без подмены Notification', () => {
+    // permissions — стандартный довод контекста Playwright (BrowserContextOptions.permissions):
+    // выдаёт его сам движок Chromium, тем же путём, каким он бы дошёл до страницы после нажатия
+    // «Разрешить» в настоящем диалоге, — а не наша выдумка вроде stubNotifications выше.
+    test.use({ permissions: ['notifications'] });
+
+    test('настоящий Notification.permission становится granted и настоящий конструктор вызывается', async ({
+        context,
+    }) => {
+        const mine = await context.newPage();
+        const theirs = await context.newPage();
+        await spyOnRealNotifications(mine);
+        await openChannel(mine, DEMO, ALBATROS);
+        await openChannel(theirs, DEMO, VYMPEL);
+
+        // Не догадка, а то самое место жалобы: разрешение читает настоящий браузерный API,
+        // а не подложенный класс, который просто обещал «granted» заранее.
+        await expect
+            .poll(() => mine.evaluate(() => Notification.permission), 'разрешение не стало granted по-настоящему')
+            .toBe('granted');
+
+        await mine.getByRole('button', { name: 'Убрать панель' }).click();
+        await send(theirs, 'Швартовы отданы');
+
+        await expect
+            .poll(() => realNotifications(mine).then((list) => list.length), 'настоящий Notification не вызвался')
+            .toBe(1);
+        const [notified] = await realNotifications(mine);
+        expect(notified.title).toBe('Вымпел');
+        expect(notified.options?.body).toBe('Швартовы отданы');
+    });
+});
+
+/**
+ * Другая половина той же жалобы: а что, если разрешения на самом деле никогда не было —
+ * не отказали, а браузер просто никогда не показал настоящий диалог (тихая подсказка в адресной
+ * строке при низком «engagement» — обычное поведение Chrome для свежего сайта, см. комментарий
+ * у requestPermission в useMessageNotifications.ts), и `Notification.permission` так и остался
+ * 'default'. Без единой подмены: ни разрешение не выдаём через grantPermissions, ни класс
+ * не подкладываем, — только тот же шпион поверх настоящего конструктора, чтобы доказать,
+ * что он и не должен был вызваться. Заголовок обязан замигать — это и есть отказоустойчивый
+ * резерв, ради которого эта задача затевалась (issue #83).
+ */
+test('без настоящего разрешения (permission=default) заголовок мигает, а Notification не вызывается', async ({
+    context,
+}) => {
+    takes(5);
+    const mine = await context.newPage();
+    const theirs = await context.newPage();
+    await spyOnRealNotifications(mine);
+    await openChannel(mine, DEMO, ALBATROS);
+    await openChannel(theirs, DEMO, VYMPEL);
+    const baseTitle = await mine.title();
+
+    expect(
+        await mine.evaluate(() => Notification.permission),
+        'в этом контексте разрешение не должно быть выдано'
+    ).toBe('default');
+
+    await mine.getByRole('button', { name: 'Убрать панель' }).click();
+    await send(theirs, 'Швартовы отданы');
+
+    await expect.poll(() => mine.title(), { timeout: 4000 }).toBe(`(1) ${baseTitle}`);
+    expect(await realNotifications(mine)).toHaveLength(0);
+});
+
+/**
  * Разрешение дано, а показать всё равно нечем: у части браузеров (Chrome на Android)
  * `new Notification(...)` не работает вовсе — конструктор бросает исключение, и решает
  * только ServiceWorkerRegistration.showNotification(), которого в проекте нет. Заголовок
