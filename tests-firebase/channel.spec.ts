@@ -14,6 +14,7 @@ import {
     newTab,
     openChannel,
     pendingIcon,
+    sceneReady,
     send,
     ships,
     shipsButton,
@@ -462,4 +463,68 @@ test('свой корабль уходит из кадра — и когда у�
 
     await senior.context().close();
     await kicked.context().close();
+});
+
+/** Цвет, который сам по себе форме не достанется: по умолчанию она берёт первый свободный. */
+const OWN_COLOR = '#d8b4f8';
+
+/** Силуэт не по умолчанию — умолчание у формы «Малый противолодочный корабль». */
+const OWN_SHIP = 'Ракетный катер';
+
+/**
+ * Жалоба (issue #147-повтор): «имя, номер, цвет не сохраняются после выхода при входе в тот же
+ * канал». На местном бэкенде та же проверка стоит в tests/channel.spec.ts — здесь то же самое,
+ * но против настоящих Auth и Firestore за эмулятором, потому что «вкус» (силуэт и цвет) идёт
+ * не из localStorage вкладки, а из личной истории кораблей на сервере (`users/{userId}/ships`,
+ * см. `lastShip` в src/backend/auth.ts) и приезжает вторым, запоздалым приёмом того же
+ * `onAuthStateChanged` — ровно тем приёмом, в котором и пряталась гонка GH-81.
+ *
+ * Перезагрузка страницы после ухода — не для верности, а часть сценария: живой человек, ушедший
+ * с рейда, чаще возвращается в новой вкладке или после «обновить страницу», чем не отпуская
+ * ту же самую форму, и врасплох гонка GH-81 когда-то заставала именно второй, запоздалый
+ * `onChange`, до которого форма уже успевала смонтироваться и снять умолчание один раз.
+ */
+test('уход с рейда и перезагрузка не роняют цвет и силуэт корабля, а позывной с номером — свои', async ({ page }) => {
+    // WRITE_TIMEOUT + SAIL_TIMEOUT на вход, ещё раз на переоснащение тут не нужен — только
+    // сам заход, уход и перезагрузка с новым открытием формы.
+    takes(35);
+
+    const slug = `pamyat-uhod-${Date.now()}`;
+    await signIn(page, `pamyat-uhod-${Date.now()}`, 'Проверка памяти');
+    await createChannel(page, 'Память об уходе', slug);
+
+    await page.getByLabel(`Цвет ${OWN_COLOR}`).click();
+    await page.getByText(OWN_SHIP, { exact: true }).click();
+    await join(page, 'Гроза', '101');
+
+    await leaveRaid(page, 'В Кронштадт, на зимовку');
+    await expect(
+        page.getByRole('button', { name: 'Встать на рейд' }),
+        'уход не вернул к постановке в строй'
+    ).toBeVisible({
+        timeout: SAIL_TIMEOUT,
+    });
+
+    // Перезагрузка — та самая асинхронная гонка GH-81: `lastShip()` приезжает вторым,
+    // запоздалым приёмом onAuthStateChanged, уже после того, как форма смонтирована.
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await sceneReady(page);
+    const joinButton = page.getByRole('button', { name: 'Встать на рейд' });
+    await expect(joinButton, 'после перезагрузки не показалась даже закрытая форма входа').toBeVisible();
+    await joinButton.click();
+    await expect(
+        page.getByPlaceholder('Гром'),
+        'форма постановки в строй не открылась после перезагрузки'
+    ).toBeVisible();
+
+    await expect(page.locator('[class*="kindActive"]'), 'силуэт не пережил уход и перезагрузку').toContainText(
+        OWN_SHIP
+    );
+    await expect(page.locator('[class*="colorActive"]'), 'цвет не пережил уход и перезагрузку').toHaveAttribute(
+        'aria-label',
+        `Цвет ${OWN_COLOR}`
+    );
+    // Позывной и номер — свои, как и на местном бэкенде: подставленный чужой номер пришлось бы
+    // стирать, а не подтверждать (см. ShipSetup/Look в shared/types/channel.ts).
+    await expect(page.getByPlaceholder('Гром'), 'позывной пережил уход и перезагрузку').toHaveValue('');
 });

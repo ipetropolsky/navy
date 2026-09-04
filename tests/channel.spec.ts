@@ -201,6 +201,37 @@ test('в новом канале форма открывается прошлы�
     await expect(page.getByRole('button', { name: 'Встать на рейд' })).toHaveCount(0);
 });
 
+/**
+ * Жалоба (issue #147-повтор): «имя, номер, цвет не сохраняются после выхода при входе в тот же
+ * канал». Прошлый тест выше проверяет только «не уходил вовсе» (своё место) и «зашёл в другой
+ * канал» — а не тот же самый уход, после которого GH-81 когда-то ловил гонку. Разбор показал:
+ * силуэт и цвет достаются форме и в этом случае — тем же `lastLook`, что и в новом канале, —
+ * а позывной с номером не подставляются нигде и никогда, это то же нарочное решение, что
+ * и в тесте выше. Отдельная проверка нужна ровно на случай, если гонка GH-81 (лениво
+ * посчитанный useState, не увидевший второй, запоздалый приход lastLook) вернётся: без неё
+ * регресс в этом самом сценарии — уйти и тут же зайти заново в тот же канал — не поймал бы
+ * никто, старый тест его не задевает вовсе.
+ */
+test('уход с рейда не роняет память о корабле: цвет и силуэт остаются, позывной с номером — нет', async ({ page }) => {
+    takes(12);
+    await openNewChannel(page, 'pamyat-uhod');
+    await page.getByLabel(`Цвет ${OWN_COLOR}`).click();
+    await join(page, 'Гроза', '101', OWN_SHIP);
+    await expect(page.getByPlaceholder('Сообщение'), 'корабль не встал в строй').toBeVisible();
+
+    await leaveRaid(page, 'В Кронштадт, на зимовку');
+    await openJoinForm(page);
+
+    await expect(page.locator('[class*="kindActive"]'), 'силуэт не пережил уход с рейда').toContainText(OWN_SHIP);
+    await expect(page.locator('[class*="colorActive"]'), 'цвет не пережил уход с рейда').toHaveAttribute(
+        'aria-label',
+        `Цвет ${OWN_COLOR}`
+    );
+    // Позывной и номер — свои, как и при входе в другой канал: подставленный чужой номер
+    // пришлось бы стирать, а не подтверждать (см. ShipSetup/Look в shared/types/channel.ts).
+    await expect(page.getByPlaceholder('Гром'), 'позывной пережил уход с рейда').toHaveValue('');
+});
+
 test('реплика уходит и привязывается ответом', async ({ page }) => {
     await openChannel(page, DEMO, ALBATROS);
     const before = await bubbles(page).count();
