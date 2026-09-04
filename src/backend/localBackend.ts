@@ -853,5 +853,13 @@ export function createLocalBackend(): ChannelBackend {
         // же слушаем navigator.onLine, а не отвечаем «на связи» всегда: иначе полоску «нет связи»
         // (см. App.tsx) нечем было бы проверить браузерным прогоном (context.setOffline).
         watchConnection: ({ onChange }) => watchOnlineStatus(onChange),
+
+        // Расходиться здесь нечему: и запись манёвра, и его доигровка читают часы одной
+        // и той же вкладки (issue #230 — см. backend/clock.ts). Сдвиг всегда нулевой,
+        // и меняться ему не с чего — слушатель зовём один раз и ничего не храним.
+        watchClockOffset: ({ onChange }) => {
+            onChange(0);
+            return () => {};
+        },
     };
 }

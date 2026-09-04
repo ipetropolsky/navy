@@ -53,6 +53,7 @@ import {
 } from '@shared/types/channel';
 import { limitMessage, overLimit } from '@shared/utils/limit';
 
+import { clockOffset } from '@/backend/clock';
 import { discardOutboxMessage, mergeOutbox, putOutboxMessage, readOutbox, removeOutboxMessage } from '@/backend/outbox';
 import {
     ChannelBackend,
@@ -124,6 +125,12 @@ interface MemberDoc {
      * там merge: true именно из-за этого поля).
      */
     lastSeen?: { messageId: string; at: number };
+    /**
+     * Серверное время последней записи — тем же приёмом, что и у сообщений ниже. Наружу,
+     * в Member, не идёт (см. `toMember`) — читает его только `applyClockOffset` (issue #230,
+     * см. backend/clock.ts), для доигровки манёвра при перезагрузке.
+     */
+    serverAt?: Timestamp;
 }
 
 /**
@@ -318,13 +325,14 @@ export const attemptWrite = async (
  * форма присылает `berth: undefined` всякий раз, когда человек не выбрал место сам, — то есть
  * при самой обычной постановке в строй.
  */
-const draftToCall = ({ name, hullNumber, shipKind, color, berth, facing }: MemberDraft): MemberDraft => ({
+const draftToCall = ({ name, hullNumber, shipKind, color, berth, facing, manoeuvre }: MemberDraft): MemberDraft => ({
     name,
     hullNumber,
     shipKind,
     color,
     ...(berth !== undefined ? { berth } : {}),
     ...(facing !== undefined ? { facing } : {}),
+    ...(manoeuvre !== undefined ? { manoeuvre } : {}),
 });
 
 /** Свой eventId на каждое событие — тем же способом, что и у локального бэкенда. */
@@ -396,6 +404,28 @@ export function createFirebaseBackend({
     let snapshotOffline = false;
     let connection: Connection = { status: 'online', since: Date.now() };
     const connectionListeners = new Set<(connection: Connection) => void>();
+
+    /**
+     * Оценка сдвига часов этой вкладки относительно сервера (issue #230, см. backend/clock.ts) —
+     * тем же приёмом, что и `connection` чуть выше: одна переменная на весь бэкенд, а не на
+     * каждую подписку канала, и слушатели, которым нужна свежая оценка сразу при подписке
+     * (см. watchClockOffset).
+     *
+     * Обновляет её `applyClockOffset` — по каждому документу участника, где нашлась
+     * подтверждённая `serverAt` (readChannel — на первом чтении, подписка на участников —
+     * дальше, на каждой перемене). Не подтверждена — снимок пропускается молча, прежняя оценка
+     * остаётся в силе (см. `clockOffset`).
+     */
+    let clockOffsetMs = 0;
+    const clockOffsetListeners = new Set<(offsetMs: number) => void>();
+    const applyClockOffset = (serverAt: Timestamp | undefined): void => {
+        const offset = clockOffset(serverAt ? serverAt.toMillis() : null, Date.now());
+        if (offset === null) {
+            return;
+        }
+        clockOffsetMs = offset;
+        clockOffsetListeners.forEach((listener) => listener(clockOffsetMs));
+    };
 
     /**
      * Кому передать message-updated/message-removed, которые не пришли снимком Firestore,
@@ -493,6 +523,10 @@ export function createFirebaseBackend({
         // он первый).
         const hasMoreMessages = feedSnap.docs.length > MESSAGE_PAGE;
         const pageDocs = hasMoreMessages ? feedSnap.docs.slice(1) : feedSnap.docs;
+        // Свежая оценка сдвига часов — по каждому пришедшему участнику разом: этот же снимок,
+        // случись он посреди чужого манёвра, и понадобится доигровке, едва отрисуется кадр
+        // (issue #230, см. applyClockOffset выше).
+        membersSnap.docs.forEach((item) => applyClockOffset((item.data() as MemberDoc).serverAt));
         return {
             channel: toChannel(channelId, channelSnap.data() as ChannelDoc),
             members: membersSnap.docs.map((item) => toMember(item.id, item.data() as MemberDoc)),
@@ -1103,7 +1137,9 @@ export function createFirebaseBackend({
                         return;
                     }
                     for (const change of snap.docChanges()) {
-                        const member = toMember(change.doc.id, change.doc.data() as MemberDoc);
+                        const data = change.doc.data() as MemberDoc;
+                        applyClockOffset(data.serverAt);
+                        const member = toMember(change.doc.id, data);
                         if (change.type === 'added') {
                             onEvent({
                                 eventId: randomEventId(),
@@ -1287,6 +1323,14 @@ export function createFirebaseBackend({
             connectionListeners.add(onChange);
             return () => {
                 connectionListeners.delete(onChange);
+            };
+        },
+
+        watchClockOffset: ({ onChange }) => {
+            onChange(clockOffsetMs);
+            clockOffsetListeners.add(onChange);
+            return () => {
+                clockOffsetListeners.delete(onChange);
             };
         },
     };

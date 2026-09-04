@@ -283,6 +283,14 @@ interface MemberDoc {
      * Firestore не принимает `undefined`, и запись просто не кладётся.
      */
     manoeuvre?: { from?: { place: ShipPlacement; shipKind: ShipKind }; startedAt: number; seconds: number };
+    /**
+     * Серверное время последней записи — тот же приём, что и у сообщений ниже. `startedAt`
+     * внутри `manoeuvre` ставят часы Cloud Function; вычитывает его вкладка своими, никак
+     * с ними не сверенными, и расхождение съедает остаток короткого хода при доигровке после
+     * перезагрузки (issue #230). По этой метке клиент (`firebaseBackend.ts`, `clockOffsetMs`)
+     * меряет свой сдвиг и правит им `Date.now()` перед сравнением со `startedAt`.
+     */
+    serverAt?: Timestamp;
 }
 
 /** channels/{channelId}/messages/{messageId} */

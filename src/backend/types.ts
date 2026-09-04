@@ -319,4 +319,17 @@ export interface ChannelBackend {
      * Первый вызов `onChange` — сразу с текущим состоянием, дальше — по перемене.
      */
     watchConnection(request: { onChange: (connection: Connection) => void }): Unsubscribe;
+
+    /**
+     * Оценка сдвига часов этой вкладки относительно сервера, в мс: `Date.now() + offsetMs`
+     * ближе к тому, что в этот же миг показывают часы сервера, чем голый `Date.now()`
+     * (issue #230, см. `backend/clock.ts`). Нужна доигровке манёвра при перезагрузке
+     * (`SeaScene.tsx`) — она сравнивает `Date.now()` со `startedAt`, который поставили не
+     * часы этой вкладки, а сервер.
+     *
+     * Первый вызов `onChange` — сразу с текущей оценкой, дальше — по перемене, тем же приёмом,
+     * что и у `watchConnection`. У localBackend расходиться часам не с чем (сервер — та же
+     * вкладка), и там оценка всегда 0.
+     */
+    watchClockOffset(request: { onChange: (offsetMs: number) => void }): Unsubscribe;
 }

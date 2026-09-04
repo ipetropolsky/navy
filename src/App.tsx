@@ -49,6 +49,7 @@ import { paced, unpaced } from '@/config/time';
 import { HAIL_SIGNAL, morseDuration } from '@/hooks/morse';
 import { useAuth } from '@/hooks/useAuth';
 import { useChannel } from '@/hooks/useChannel';
+import { useClockOffset } from '@/hooks/useClockOffset';
 import { useConnection } from '@/hooks/useConnection';
 import { Layout, chatMagnets, useLayout } from '@/hooks/useLayout';
 import { useMessageNotifications } from '@/hooks/useMessageNotifications';
@@ -135,6 +136,7 @@ export default function App() {
     const { channel, myId, reception, loading, loadError, retryLoad, hasMoreMessages, loadingOlder, loadOlder } =
         channelState;
     const connection = useConnection();
+    const clockOffsetMs = useClockOffset();
     /**
      * Вошёл ли человек. Вход спрашивают не ради приличия: корабль принадлежит человеку,
      * а не вкладке, и завести канал или встать на рейд, никем не назвавшись, теперь нельзя.
@@ -1362,6 +1364,7 @@ export default function App() {
                         myId={myId ?? ''}
                         morseFeeds={morseFeeds}
                         ready={!loading && Boolean(channel)}
+                        clockOffsetMs={clockOffsetMs}
                         // Щелчок по своему кораблю открывает ту же форму, что и кнопка
                         // «Настроить корабль»: и корабль, и место на рейде меняются в одном месте.
                         //

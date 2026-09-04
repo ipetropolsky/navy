@@ -37,6 +37,28 @@ export const newTab = async (browser: Browser): Promise<Page> => {
     return context.newPage();
 };
 
+/**
+ * Та же вкладка, что и `newTab`, но с часами, заранее сдвинутыми на `offsetMs` — тем же
+ * приёмом, `addInitScript`, до всякого кода вкладки. Нужна ровно одной проверке
+ * (clock.spec.ts, issue #230): часы вкладки и часы «сервера» (эмулятора) в этом прогоне —
+ * одна и та же машина, и без нарочного сдвига рассинхрон, из-за которого доигровка манёвра
+ * при перезагрузке съедает остаток хода раньше срока, никогда не случится сам собой.
+ *
+ * Патчится только `Date.now()`, а не сам конструктор `Date` — приложение (`SeaScene.tsx`)
+ * сравнивает часы вкладки с `manoeuvre.startedAt` только через него, и большего не нужно.
+ */
+export const newSkewedTab = async (browser: Browser, offsetMs: number): Promise<Page> => {
+    const context = await browser.newContext();
+    await context.addInitScript((scale) => {
+        window.timeScale = scale;
+    }, TIME_SCALE);
+    await context.addInitScript((offset) => {
+        const realNow = Date.now.bind(Date);
+        Date.now = () => realNow() + offset;
+    }, offsetMs);
+    return context.newPage();
+};
+
 /** Та же поправка для проверок с одной вкладкой — тем, кому хватает фикстуры `page`. */
 export const test = base.extend({
     context: async ({ context }, run) => {
@@ -264,6 +286,16 @@ const openSheet = async (page: Page): Promise<void> => {
         await shipsButton(page).click();
     }
     await page.waitForTimeout(280 / TIME_SCALE + 60);
+};
+
+/**
+ * Открыть форму своего корабля — ту, где меняют место на рейде. См. openShipForm
+ * в tests/helpers.ts: тот же смысл, «Настроить корабль» в списке.
+ */
+export const openShipForm = async (page: Page): Promise<void> => {
+    await openSheet(page);
+    await page.getByRole('button', { name: 'Настроить корабль' }).click();
+    await expect(berths(page).first()).toBeVisible();
 };
 
 /**

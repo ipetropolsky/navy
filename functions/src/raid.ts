@@ -56,6 +56,14 @@ interface MemberDoc {
     manoeuvre?: Manoeuvre;
     /** Чей это корабль. Сегодня равно ключу документа, и всё же полем: ссылка — объект. */
     user: { userId: string };
+    /**
+     * Серверное время последней записи — тем же приёмом, что и у сообщений (см. `NoticeDoc`,
+     * `writeNotice`). `manoeuvre.startedAt` ставят эти самые часы Cloud Function, а вычитывает
+     * его вкладка своими, ничем с ними не сверенными; расхождение съедает остаток короткого
+     * хода при доигровке после перезагрузки (issue #230). По `serverAt` рядом с записью клиент
+     * (firebaseBackend.ts) мерит свой сдвиг и поправляет им `Date.now()` перед сравнением.
+     */
+    serverAt?: FieldValue;
 }
 
 /** channels/{channelId}/berths/{berthId} — бронь места, ключ собран из слота и коридора. */
@@ -104,6 +112,7 @@ const memberToDoc = (member: Member): MemberDoc => ({
     joinedAt: member.joinedAt,
     ...(member.manoeuvre ? { manoeuvre: member.manoeuvre } : {}),
     user: { userId: member.memberId },
+    serverAt: FieldValue.serverTimestamp(),
 });
 
 /** Канал должен существовать — это общее условие всех четырёх операций. */

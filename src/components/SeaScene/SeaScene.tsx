@@ -312,10 +312,27 @@ interface SeaSceneProps {
      * заплывёт ли следующий корабль в кадр или просто окажется на месте.
      */
     ready: boolean;
+    /**
+     * Оценка сдвига часов этой вкладки относительно сервера, в мс (issue #230, см.
+     * backend/clock.ts, useClockOffset). Складывается с `Date.now()` там, где кадр сравнивает
+     * свои часы с серверной меткой старта манёвра (`manoeuvre.startedAt`) — иначе спешащие
+     * или отстающие часы вкладки съедали бы остаток короткого хода при доигровке после
+     * перезагрузки. Не передан (например, в проверках без App.tsx) — сдвига нет, как и было.
+     */
+    clockOffsetMs?: number;
 }
 
 /** Ночное море: слои неба, месяца, облаков, острова и воды с кораблями-участниками. */
-function SeaScene({ members, myId, morseFeeds, ready, berths, onEditShip, onShowShip }: SeaSceneProps) {
+function SeaScene({
+    members,
+    myId,
+    morseFeeds,
+    ready,
+    berths,
+    onEditShip,
+    onShowShip,
+    clockOffsetMs = 0,
+}: SeaSceneProps) {
     // Кто уже был в кадре. Заплывает только тот, кто вошёл при нас; те, что стояли на рейде
     // до нашего прихода, просто оказываются на месте — въезжать им неоткуда, мы пришли к ним.
     //
@@ -467,10 +484,15 @@ function SeaScene({ members, myId, morseFeeds, ready, berths, onEditShip, onShow
      * Отыгрывается манёвр не с начала, а с середины: сколько его прошло мимо этой вкладки,
      * столько она и перемотает (см. `replayLeft`). Иначе корабль, тронувшийся полминуты назад,
      * пошёл бы у пришедшего заново — и разошёлся бы со всеми остальными на целый манёвр.
+     *
+     * `startedAt` в записи манёвра ставят часы сервера, а не этой вкладки (см. functions/src/raid.ts) —
+     * поэтому и сравнивается он не с голым `Date.now()`, а с поправленным на `clockOffsetMs`
+     * (issue #230): спешащие или отстающие часы вкладки иначе съедали бы остаток короткого хода,
+     * и пришедший посреди него заставал бы уже остановившийся корабль.
      */
     if (ready && seenIds.current === null) {
         seenIds.current = new Set(members.map((member) => member.memberId));
-        const now = Date.now();
+        const now = Date.now() + clockOffsetMs;
         for (const member of members) {
             const manoeuvre = member.manoeuvre;
             // Срок манёвра записан настоящими секундами, а идёт он по скорости времени этой
