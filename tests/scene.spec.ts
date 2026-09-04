@@ -1970,6 +1970,65 @@ test('перезагрузка посреди хода застаёт кораб
 });
 
 /**
+ * Тот же случай, что и выше (issue #78, #230), только манёвр не свой, а чужой: сосед трогается
+ * с места на одной вкладке, а перезагружается — другая, вовсе не та, что ходом распоряжается.
+ *
+ * Разница важна. Прошлая проверка перезагружает ту же самую вкладку, что и объявила о ходе, —
+ * `manoeuvre` в этот миг уже лежит в её собственном ответе `updateMe`, до всякой записи
+ * в хранилище. Здесь перезагружается вкладка, которая своего хода не заявляла вовсе и знает
+ * о чужом только тем же путём, что и после обычной перезагрузки, — снимком из `localStorage`.
+ * Если запись манёвра расходится с местом бы хоть чем-то (например, `from` или `startedAt`
+ * не пережили обмена между вкладками), это как раз то расхождение, которое эта проверка
+ * и ловит, а прошлая — нет.
+ */
+test('перезагрузка ловит и чужой манёвр, начавшийся в соседней вкладке', async ({ context }) => {
+    takes(20);
+    const mine = await context.newPage();
+    const theirs = await context.newPage();
+
+    // Свой канал и свой корабль в стороне от чужого пути — просто чтобы во флоте было двое.
+    await openNewChannel(mine, 'sosed-manevr');
+    await mine.getByText('Пограничный сторожевой катер', { exact: true }).click();
+    await mine.locator('[data-berth="5-center"]').click();
+    await join(mine, 'Альбатрос', '001');
+    await myShipParked(mine);
+
+    // Второй корабль встаёт там же, откуда трогается «Стриж» из прошлой проверки: с ближней
+    // линии, чтобы было куда идти — через весь рейд, полным манёвром в три колена.
+    await openChannel(theirs, 'sosed-manevr');
+    await openJoinForm(theirs);
+    await theirs.getByText('Малый ракетный корабль', { exact: true }).click();
+    await theirs.locator('[data-berth="8-center"]').click();
+    await join(theirs, 'Вымпел', '222');
+    await myShipParked(theirs);
+
+    // Сосед трогается с места — и как только его ход виден у него самого, перезагружаем
+    // вкладку, которая этот ход не заявляла: у неё своя память о кадре, и заводится она заново.
+    await openShipForm(theirs);
+    await theirs.locator('[data-berth="1-center"]').click();
+    await theirs.getByRole('button', { name: 'Готово' }).click();
+    await expect(theirs.locator('[data-motion]'), 'сосед не тронулся с места').toHaveCount(1);
+
+    await mine.reload({ waitUntil: 'domcontentloaded' });
+    await sceneReady(mine);
+
+    const lane = mine.locator('[data-motion]');
+    await expect(lane, 'после перезагрузки чужой корабль оказался сразу на новом месте').toHaveCount(1);
+    // Доигрывается манёвр с начала, а не с конца: сосед сперва уходит со старого места
+    // и только потом заходит на новое — оттого и колено первое, уход.
+    await expect(lane, 'манёвр доигрывается не с того колена').toHaveAttribute('data-motion', 'leaving');
+    const delay = await lane.evaluate((node) => Number.parseFloat(getComputedStyle(node).transitionDelay));
+    expect(delay, 'ход начался с начала, а не с середины').toBeLessThan(0);
+
+    // Место на рейде за корабль давно решено: манёвр — только показ того, что уже случилось.
+    const state = await readState(mine);
+    const moved = Object.values(state.channels)
+        .find((one) => one.channel.slug === 'sosed-manevr')!
+        .members.find((member) => member.name === 'Вымпел')!;
+    expect(`${moved.place.slot}-${moved.place.corridor}`, 'сосед встал не на выбранное место').toBe('1-center');
+});
+
+/**
  * Смена раскладки посреди хода не должна сбивать корабль с курса.
  *
  * Место на рейде от кадра не зависит вовсе, а вот проекция зависит: чем уже окно, тем сильнее
