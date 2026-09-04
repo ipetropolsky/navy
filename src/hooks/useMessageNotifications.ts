@@ -165,8 +165,16 @@ export function useMessageNotifications(
             return;
         }
         if (Notification.permission === 'granted') {
-            new Notification(author, { body, tag: channelId ?? undefined });
-            return;
+            try {
+                new Notification(author, { body, tag: channelId ?? undefined });
+                return;
+            } catch {
+                // Разрешение дано, а показать всё равно нечем: у части браузеров (Chrome
+                // на Android) `new Notification(...)` вовсе не работает — решает только
+                // ServiceWorkerRegistration.showNotification(), а сервис-воркера в проекте
+                // нет. Не оставлять человека совсем без знака — мигаем заголовком, как
+                // при отказе.
+            }
         }
         // Пока не решили («default») или отказали («denied») — заголовок мигает в любом
         // случае: разрешение уже спрошено при входе в канал (см. эффект выше), и ждать его

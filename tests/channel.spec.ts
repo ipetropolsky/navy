@@ -382,6 +382,46 @@ test('уведомление не показывается, пока разго�
 });
 
 /**
+ * Разрешение дано, а показать всё равно нечем: у части браузеров (Chrome на Android)
+ * `new Notification(...)` не работает вовсе — конструктор бросает исключение, и решает
+ * только ServiceWorkerRegistration.showNotification(), которого в проекте нет. Заголовок
+ * должен замигать вместо того, чтобы молча ничего не показать.
+ */
+const stubThrowingNotifications = async (page: Page): Promise<void> => {
+    await page.addInitScript(() => {
+        class ThrowingNotification {
+            static permission: NotificationPermission = 'granted';
+
+            static requestPermission(): Promise<NotificationPermission> {
+                return Promise.resolve('granted');
+            }
+
+            constructor() {
+                throw new Error("Failed to construct 'Notification': Illegal constructor.");
+            }
+        }
+        Object.defineProperty(window, 'Notification', { value: ThrowingNotification, writable: true });
+    });
+};
+
+test('заголовок мигает, если разрешение дано, а сам вызов Notification не работает', async ({ context }) => {
+    // Заголовок меняется местами раз в секунду (см. TITLE_FLASH_INTERVAL) — поймать «мигающую»
+    // половину можно не с первой попытки, и запаса на пару интервалов маловато не будет.
+    takes(5);
+    const mine = await context.newPage();
+    const theirs = await context.newPage();
+    await stubThrowingNotifications(mine);
+    await openChannel(mine, DEMO, ALBATROS);
+    await openChannel(theirs, DEMO, VYMPEL);
+    const baseTitle = await mine.title();
+
+    await mine.getByRole('button', { name: 'Убрать панель' }).click();
+    await send(theirs, 'Швартовы отданы');
+
+    await expect.poll(() => mine.title(), { timeout: 4000 }).toBe(`(1) ${baseTitle}`);
+});
+
+/**
  * Убранная панель считает то, что пришло без неё.
  *
  * Разговор с экрана убирают целиком, и тогда о новой реплике не говорит ничто: кнопка, которой
