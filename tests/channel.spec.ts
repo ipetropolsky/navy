@@ -313,6 +313,75 @@ test('сообщение из соседней вкладки доезжает',
 });
 
 /**
+ * Уведомление браузером по чужой реплике, пока разговор убран (issue #83).
+ *
+ * Настоящее всплывающее окно рисует ОС, и снаружи браузера его не увидеть — но сам вызов
+ * `new Notification(...)` виден и без него: подменяем глобальный конструктор до захода
+ * на страницу и смотрим, вызвала ли его вкладка. Заодно и разрешение не приходится
+ * выпрашивать через настоящий диалог — подложенный класс сразу отвечает «granted», как
+ * если бы человек его уже дал.
+ */
+const stubNotifications = async (page: Page): Promise<void> => {
+    await page.addInitScript(() => {
+        class FakeNotification {
+            static permission: NotificationPermission = 'granted';
+
+            static requestPermission(): Promise<NotificationPermission> {
+                return Promise.resolve('granted');
+            }
+
+            title: string;
+
+            options: NotificationOptions | undefined;
+
+            constructor(title: string, options?: NotificationOptions) {
+                this.title = title;
+                this.options = options;
+                (window as unknown as { __notifications: FakeNotification[] }).__notifications.push(this);
+            }
+        }
+        (window as unknown as { __notifications: FakeNotification[] }).__notifications = [];
+        Object.defineProperty(window, 'Notification', { value: FakeNotification, writable: true });
+    });
+};
+
+const notifications = (page: Page): Promise<{ title: string; options?: { body?: string } }[]> =>
+    page.evaluate(
+        () =>
+            (window as unknown as { __notifications: { title: string; options?: { body?: string } }[] }).__notifications
+    );
+
+test('уведомление показывается, пока разговор убран', async ({ context }) => {
+    const mine = await context.newPage();
+    const theirs = await context.newPage();
+    await stubNotifications(mine);
+    await openChannel(mine, DEMO, ALBATROS);
+    await openChannel(theirs, DEMO, VYMPEL);
+
+    await mine.getByRole('button', { name: 'Убрать панель' }).click();
+    await send(theirs, 'Швартовы отданы');
+
+    await expect.poll(() => notifications(mine).then((list) => list.length)).toBe(1);
+    const [notified] = await notifications(mine);
+    expect(notified.title).toBe('Вымпел');
+    expect(notified.options?.body).toBe('Швартовы отданы');
+});
+
+test('уведомление не показывается, пока разговор открыт и виден', async ({ context }) => {
+    const mine = await context.newPage();
+    const theirs = await context.newPage();
+    await stubNotifications(mine);
+    await openChannel(mine, DEMO, ALBATROS);
+    await openChannel(theirs, DEMO, VYMPEL);
+    const before = await bubbles(mine).count();
+
+    await send(theirs, 'Швартовы отданы');
+
+    await expect(bubbles(mine)).toHaveCount(before + 1);
+    expect(await notifications(mine)).toHaveLength(0);
+});
+
+/**
  * Убранная панель считает то, что пришло без неё.
  *
  * Разговор с экрана убирают целиком, и тогда о новой реплике не говорит ничто: кнопка, которой
