@@ -1,10 +1,11 @@
-import { KeyboardEvent, MouseEvent, PointerEvent, memo, useEffect, useLayoutEffect, useRef } from 'react';
+import { Fragment, KeyboardEvent, MouseEvent, PointerEvent, memo, useEffect, useLayoutEffect, useRef } from 'react';
 
 import Avatar from '@/components/ships/Avatar';
 import CodePennant from '@/components/ships/CodePennant';
 import MemberName from '@/components/ships/MemberName';
 import { useSnackbar } from '@/components/ui/Snackbar';
 import { PRELOAD_ABOVE } from '@/config/network';
+import { dayBoundaries, daySeparatorLabel } from '@/utils/dayLabel';
 import { Press, drifted, isTap, selectedSince, startPress } from '@/utils/tap';
 import { AuthorLook, Member, MemberRef, Message, authorLook } from '@shared/types/channel';
 
@@ -16,8 +17,6 @@ import styles from './MessageList.module.less';
 // Хранилище держит время числом, а как его показать — дело интерфейса.
 const formatTime = (at: number): string =>
     new Date(at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-
-const formatDate = (at: number): string => new Date(at).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
 
 interface MessageListProps {
     messages: Message[];
@@ -368,6 +367,14 @@ function MessageList({
         return `${memberId}#${era}`;
     });
 
+    /**
+     * Где в ленте меняется календарный день — считается по одним меткам времени, без разметки
+     * (см. `dayBoundaries` в `@/utils/dayLabel`), поэтому и границу, и подпись на чипе можно
+     * проверить в юните, не поднимая браузер.
+     */
+    const dateSeparators = dayBoundaries(messages.map((message) => message.sentAt));
+    const now = Date.now();
+
     return (
         <div ref={listRef} className={styles.list}>
             {/*
@@ -375,11 +382,6 @@ function MessageList({
              * между ними живут на нём (см. .rows в стилях).
              */}
             <div className={styles.rows}>
-                {messages.length > 0 && (
-                    // Место занято в любом случае, поэтому «Загрузка…» встаёт туда же, где обычно
-                    // дата: подставь дату сразу — лента дёрнулась бы на высоту чипа при её появлении.
-                    <div className={styles.dateChip}>{loadingOlder ? 'Загрузка…' : formatDate(messages[0].sentAt)}</div>
-                )}
                 {messages.map((message, index) => {
                     const own = message.author.memberId === myId;
                     const author = lookOf(message.author);
@@ -467,70 +469,80 @@ function MessageList({
                     const replyTo = thread ? byMessageId.get(thread.messageId) : undefined;
 
                     return (
-                        <div key={message.messageId} className={own ? styles.rowOwn : styles.row}>
-                            {avatar}
-                            <div
-                                role="button"
-                                tabIndex={0}
-                                className={own ? plaque.own : plaque.other}
-                                onPointerDown={handlePress}
-                                onClick={(event) => handleTap(event, message)}
-                                onKeyDown={(event) => handleKey(event, message)}
-                                title="Ответить"
-                            >
-                                {noticeHead}
-                                {!system && !own && firstOfGroup && author && (
-                                    <MemberName name={author.name} color={author.color} />
-                                )}
-                                {replyTo && (
-                                    <span className={styles.replyCell}>
-                                        <ReplyQuote
-                                            author={lookOf(replyTo.author)}
-                                            text={<MessageBody message={replyTo} />}
-                                        />
+                        <Fragment key={message.messageId}>
+                            {dateSeparators[index] && (
+                                // Место занято в любом случае, поэтому у самого верхнего чипа
+                                // «Загрузка…» встаёт туда же, где обычно дата: подставь дату
+                                // сразу — лента дёрнулась бы на высоту чипа при её появлении.
+                                <div className={styles.dateChip}>
+                                    {index === 0 && loadingOlder ? 'Загрузка…' : daySeparatorLabel(message.sentAt, now)}
+                                </div>
+                            )}
+                            <div className={own ? styles.rowOwn : styles.row}>
+                                {avatar}
+                                <div
+                                    role="button"
+                                    tabIndex={0}
+                                    className={own ? plaque.own : plaque.other}
+                                    onPointerDown={handlePress}
+                                    onClick={(event) => handleTap(event, message)}
+                                    onKeyDown={(event) => handleKey(event, message)}
+                                    title="Ответить"
+                                >
+                                    {noticeHead}
+                                    {!system && !own && firstOfGroup && author && (
+                                        <MemberName name={author.name} color={author.color} />
+                                    )}
+                                    {replyTo && (
+                                        <span className={styles.replyCell}>
+                                            <ReplyQuote
+                                                author={lookOf(replyTo.author)}
+                                                text={<MessageBody message={replyTo} />}
+                                            />
+                                        </span>
+                                    )}
+                                    {/*
+                                     * Фраза обёрнута в один блок нарочно: плашка выкладывает содержимое
+                                     * колонкой, и без обёртки каждый кусок строчки — текст, помеченное
+                                     * слово — вставал бы на свою строку.
+                                     */}
+                                    <span className={styles.text}>
+                                        <MessageBody message={message} />
+                                        {delivery?.status === 'pending' && (
+                                            <span
+                                                className={styles.deliveryPending}
+                                                role="status"
+                                                aria-label="Отправляется"
+                                                title="Отправляется"
+                                            />
+                                        )}
+                                        {delivery?.status === 'failed' && (
+                                            <button
+                                                type="button"
+                                                className={styles.deliveryFailed}
+                                                aria-label="Не отправлено. Нажмите, чтобы отправить снова"
+                                                title={
+                                                    delivery.error?.message ??
+                                                    'Не отправлено. Нажмите, чтобы отправить снова'
+                                                }
+                                                // Тот же приём, что и у вымпела над служебной строчкой
+                                                // (см. pennantButton выше): нажатие по значку — про сам
+                                                // значок, а не про ответ на сообщение, которым отвечает
+                                                // вся плашка.
+                                                onPointerDown={(event) => event.stopPropagation()}
+                                                onClick={(event) => {
+                                                    event.stopPropagation();
+                                                    onRetry(message.messageId);
+                                                }}
+                                            >
+                                                !
+                                            </button>
+                                        )}
+                                        <span className={styles.time}>{formatTime(message.sentAt)}</span>
                                     </span>
-                                )}
-                                {/*
-                                 * Фраза обёрнута в один блок нарочно: плашка выкладывает содержимое
-                                 * колонкой, и без обёртки каждый кусок строчки — текст, помеченное
-                                 * слово — вставал бы на свою строку.
-                                 */}
-                                <span className={styles.text}>
-                                    <MessageBody message={message} />
-                                    {delivery?.status === 'pending' && (
-                                        <span
-                                            className={styles.deliveryPending}
-                                            role="status"
-                                            aria-label="Отправляется"
-                                            title="Отправляется"
-                                        />
-                                    )}
-                                    {delivery?.status === 'failed' && (
-                                        <button
-                                            type="button"
-                                            className={styles.deliveryFailed}
-                                            aria-label="Не отправлено. Нажмите, чтобы отправить снова"
-                                            title={
-                                                delivery.error?.message ??
-                                                'Не отправлено. Нажмите, чтобы отправить снова'
-                                            }
-                                            // Тот же приём, что и у вымпела над служебной строчкой
-                                            // (см. pennantButton выше): нажатие по значку — про сам
-                                            // значок, а не про ответ на сообщение, которым отвечает
-                                            // вся плашка.
-                                            onPointerDown={(event) => event.stopPropagation()}
-                                            onClick={(event) => {
-                                                event.stopPropagation();
-                                                onRetry(message.messageId);
-                                            }}
-                                        >
-                                            !
-                                        </button>
-                                    )}
-                                    <span className={styles.time}>{formatTime(message.sentAt)}</span>
-                                </span>
+                                </div>
                             </div>
-                        </div>
+                        </Fragment>
                     );
                 })}
                 {/*

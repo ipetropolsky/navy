@@ -1226,6 +1226,73 @@ test('подгрузка старой страницы не двигает то,
 });
 
 /**
+ * Разделитель-дата на границе календарного дня.
+ *
+ * Сама граница — чистый счёт по меткам времени, и она проверена в юните (см. dayLabel.test.ts,
+ * принцип GH-12). Здесь — только то, что юнит не видит: что чип действительно встаёт в свёрстанную
+ * ленту, перед первым сообщением и перед тем, с которого начался новый день, а не перед каждой
+ * репликой подряд.
+ */
+test('на границе календарного дня в ленте встаёт разделитель-дата', async ({ page }) => {
+    const channelId = 'ch-day-split';
+    const slug = 'day-split';
+    const memberId = 'm-day-split';
+    const state = {
+        version: 15, // STORAGE_VERSION в localBackend.ts: форма та же, шаг миграции не нужен
+        channels: {
+            [channelId]: {
+                channel: { channelId, slug, title: 'Двое суток', createdAt: 0 },
+                members: [
+                    {
+                        memberId,
+                        name: 'Летописец',
+                        hullNumber: '100',
+                        shipKind: 'pr1234',
+                        place: { slot: 0, corridor: 'center', left: 50, facing: 'left', enterFrom: 'left' },
+                    },
+                ],
+                messages: [
+                    // Первые два — один день (сутки от начала эпохи), третье — двумя сутками
+                    // позже: время фиксировано от эпохи, а не от Date.now(), чтобы не зависеть
+                    // от часа, в который выпадет прогон.
+                    { messageId: 'msg-0', author: { memberId }, text: 'День первый, реплика раз.', sentAt: 0 },
+                    { messageId: 'msg-1', author: { memberId }, text: 'День первый, реплика два.', sentAt: 60_000 },
+                    {
+                        messageId: 'msg-2',
+                        author: { memberId },
+                        text: 'День третий.',
+                        sentAt: 2 * 24 * 60 * 60_000,
+                    },
+                ],
+            },
+        },
+    };
+    await page.addInitScript((seeded) => {
+        // eslint-disable-next-line no-restricted-syntax -- та же прямая запись, что и в seedHistory выше
+        localStorage.setItem('kilvater.state', JSON.stringify(seeded));
+    }, state);
+    await openChannel(page, slug, memberId);
+
+    await expect(bubbles(page)).toHaveCount(3);
+    await expect(page.locator('[class*="dateChip"]')).toHaveCount(2);
+
+    // Порядок строк в ленте — прямое доказательство того, где встал каждый чип: перед первой
+    // репликой всегда, а второй раз — только там, где день сменился, а не перед каждой репликой.
+    const order = await page.locator('[class*="rows"] > *').evaluateAll((nodes) =>
+        nodes
+            .map((node) => {
+                const className = (node as HTMLElement).className;
+                if (className.includes('dateChip')) {
+                    return 'date';
+                }
+                return className.includes('row') ? 'msg' : null;
+            })
+            .filter((entry): entry is 'date' | 'msg' => entry !== null)
+    );
+    expect(order).toEqual(['date', 'msg', 'msg', 'date', 'msg']);
+});
+
+/**
  * Две вкладки, переставляющие корабли в один и тот же миг.
  *
  * Состояние «сервера» лежит одним JSON-ом на весь браузер, и всякая перестановка — это
