@@ -2,16 +2,24 @@
  * Сидирует демо-канал в Firestore: три корабля, уже стоящие на рейде, и начатый разговор.
  * Нужен по той же причине, что и `src/backend/seed.ts` у местного бэкенда, — открыть демо
  * на пустой базе и увидеть не пустую ленту, а живой канал, — только пишет не в localStorage
- * вкладки, а в Firestore эмулятора, через Admin SDK, в обход правил безопасности.
+ * вкладки, а в Firestore, через Admin SDK, в обход правил безопасности.
  *
  * Идемпотентен: у канала, участников, брони мест и сообщений — фиксированные id, и каждый
  * документ пишется через set(), а не add(). Повторный запуск переписывает те же документы
  * тем же телом, а не заводит вторые: посчитать корабли и реплики после двух запусков подряд —
  * и оба раза увидеть одно и то же число.
  *
- * Только для эмулятора: без FIRESTORE_EMULATOR_HOST в окружении скрипт не запускается — это
- * не боевой инструмент, а часть проверочного стенда (см. package.json → test:e2e:firebase,
- * куда переменную подставляет сам `firebase emulators:exec`).
+ * По умолчанию — только эмулятор: без FIRESTORE_EMULATOR_HOST в окружении скрипт не запускается,
+ * это часть проверочного стенда (см. package.json → test:e2e:firebase, куда переменную
+ * подставляет сам `firebase emulators:exec`). В `src/backend/localBackend.ts` демо заводится
+ * само, при первой загрузке пустого хранилища, — а вот боевой Firestore-проект так не умеет:
+ * там демо-канала не будет, пока кто-то не засеет его руками, и кнопка «Демо» будет отвечать
+ * «не найден» до этого момента.
+ *
+ * Засеять настоящий проект — `npm run seed:firestore -- --allow-production` при выставленном
+ * `GCLOUD_PROJECT=<id боевого проекта>` и выполненном `firebase login` (Admin SDK берёт учётные
+ * данные из окружения gcloud/firebase CLI). Флаг и переменная — оба сразу и явно, не один
+ * вместо другого: не тот случай, где стоит рисковать опечаткой.
  */
 
 import { initializeApp } from 'firebase-admin/app';
@@ -158,11 +166,32 @@ const buildMessages = (members: Member[]): SeedMessage[] => {
     ];
 };
 
+// Боевой запуск — не по умолчанию: без FIRESTORE_EMULATOR_HOST скрипт годами писал только
+// в эмулятор, и тихо расширять это на настоящий проект по чужому «а вдруг он там нужен»
+// не стоит. Явный флаг плюс совпавший project id — тот же самый рубеж, которым в vite.config.ts
+// огорожен assertBackend: одной опечатки в окружении недостаточно, чтобы попасть не туда.
+const SEED_PRODUCTION_FLAG = '--allow-production';
+
 const seed = async (): Promise<void> => {
-    if (!process.env.FIRESTORE_EMULATOR_HOST) {
+    const productionRequested = process.argv.includes(SEED_PRODUCTION_FLAG);
+    if (!process.env.FIRESTORE_EMULATOR_HOST && !productionRequested) {
         throw new Error(
-            'FIRESTORE_EMULATOR_HOST не задан. Этот скрипт сидирует только эмулятор — ' +
-                'запускайте его через firebase emulators:exec (см. package.json → test:e2e:firebase)'
+            'FIRESTORE_EMULATOR_HOST не задан. Этот скрипт по умолчанию сидирует только эмулятор — ' +
+                'запускайте его через firebase emulators:exec (см. package.json → test:e2e:firebase). ' +
+                `Демо-канал в настоящем проекте: npm run seed:firestore -- ${SEED_PRODUCTION_FLAG} ` +
+                '(нужен вход firebase login и GCLOUD_PROJECT с id боевого проекта).'
+        );
+    }
+    if (productionRequested && process.env.FIRESTORE_EMULATOR_HOST) {
+        throw new Error(
+            `${SEED_PRODUCTION_FLAG} вместе с FIRESTORE_EMULATOR_HOST — противоречие: непонятно, ` +
+                'эмулятор сидировать или настоящий проект. Уберите одно из двух.'
+        );
+    }
+    if (productionRequested && !process.env.GCLOUD_PROJECT) {
+        throw new Error(
+            `${SEED_PRODUCTION_FLAG} требует явный GCLOUD_PROJECT=<id боевого проекта> — ` +
+                'без него легко попасть не в тот проект молча.'
         );
     }
 
