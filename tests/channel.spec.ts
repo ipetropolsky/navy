@@ -16,6 +16,7 @@ import {
     leaveButton,
     leaveRaid,
     openChannel,
+    openCreateForm,
     openJoinForm,
     openNewChannel,
     openSheet,
@@ -36,6 +37,8 @@ import {
 
 test('канал заводится с главной, и в него можно встать в строй', async ({ page }) => {
     await page.goto('/');
+    // Главная встречает списком своих каналов, форма — за кнопкой: см. openCreateForm.
+    await openCreateForm(page);
     await page.getByPlaceholder('Эскадра «Полночь»').fill('Отряд 7');
 
     // Адрес предлагается из названия, транслитерацией, и цифры в нём разрешены.

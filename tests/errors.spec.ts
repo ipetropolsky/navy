@@ -8,6 +8,7 @@ import {
     join,
     leaveButton,
     openChannel,
+    openCreateForm,
     openSheet,
     sceneReady,
     send,
@@ -27,9 +28,9 @@ test('канала по адресу нет: сказано прямо и ест
     await expect(page.getByText('Канала по адресу «nesushchestvuyushchiy» нет')).toBeVisible();
     await expectWayOut(page);
 
-    // Кнопка и правда уводит на главную, где канал заводится заново.
+    // Кнопка и правда уводит на главную, откуда канал заводится заново.
     await page.getByRole('button', { name: 'Создать свой канал' }).click();
-    await expect(page.getByPlaceholder('Эскадра «Полночь»')).toBeVisible();
+    await openCreateForm(page);
 });
 
 test('позывной и бортовой номер заняты: отказ показан, форма остаётся рабочей', async ({ page }) => {
@@ -49,6 +50,7 @@ test('позывной и бортовой номер заняты: отказ �
 
 test('адрес канала не той формы: отправить нельзя, подсказка на месте', async ({ page }) => {
     await page.goto('/');
+    await openCreateForm(page);
     await page.getByPlaceholder('Эскадра «Полночь»').fill('Полночь');
     await page.locator('input[placeholder="eskadra-polnoch"]').fill('-');
 
@@ -99,7 +101,7 @@ test('слишком длинный курс не уводит с рейда, и
  */
 test('нет связи — сказано одной строкой в шапке, и она уходит, когда связь вернулась', async ({ page, context }) => {
     await page.goto('/');
-    await expect(page.getByPlaceholder('Эскадра «Полночь»')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Ваши каналы' })).toBeVisible();
 
     const strip = page.locator('[class*="connectionStrip"]');
     await expect(strip).not.toBeVisible();

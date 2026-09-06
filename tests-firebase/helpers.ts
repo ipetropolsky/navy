@@ -124,8 +124,8 @@ const authBridgeCode = async (): Promise<string> => {
  *
  * `sub` и `name` подставляются здесь: личность у каждой проверки своя, остальные поля общие.
  *
- * Ждём не сам факт входа, а его следствие на экране — форму создания канала: гостя, как
- * и посетителя без канала в адресе, встречает именно она (см. App.tsx).
+ * Ждём не сам факт входа, а его следствие на экране — список своих каналов: вошедшего без
+ * канала в адресе встречает именно он (см. App.tsx), а форма создания стоит за кнопкой.
  */
 export const signIn = async (page: Page, uid: string, name: string): Promise<void> => {
     // Переменную ставит `firebase emulators:exec`. Нет её — эмулятора рядом нет вовсе,
@@ -164,9 +164,18 @@ export const signIn = async (page: Page, uid: string, name: string): Promise<voi
     }
 
     await expect(
-        page.getByPlaceholder('Эскадра «Полночь»'),
-        'после входа не появился экран создания канала'
+        page.getByRole('heading', { name: 'Ваши каналы' }),
+        'после входа не появился список своих каналов'
     ).toBeVisible();
+};
+
+/**
+ * Открыть форму создания канала с главной: главная встречает списком своих каналов, форма —
+ * за кнопкой. См. тот же помощник в tests/helpers.ts.
+ */
+export const openCreateForm = async (page: Page): Promise<void> => {
+    await page.getByRole('button', { name: 'Создать канал' }).click();
+    await expect(page.getByPlaceholder('Эскадра «Полночь»'), 'форма создания канала не открылась').toBeVisible();
 };
 
 /**
@@ -185,6 +194,7 @@ export const sceneReady = async (page: Page): Promise<void> => {
  * остаётся открытым, как и по умолчанию у самой формы.
  */
 export const createChannel = async (page: Page, title: string, slug: string, code?: string): Promise<void> => {
+    await openCreateForm(page);
     await page.getByPlaceholder('Эскадра «Полночь»').fill(title);
     await page.locator('input[placeholder="eskadra-polnoch"]').fill(slug);
     if (code !== undefined) {

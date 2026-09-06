@@ -231,6 +231,13 @@ const seed = async (): Promise<void> => {
             memberId: member.memberId,
             takenAt: member.joinedAt,
         });
+        // Реестр участий — тот же документ, что завела бы настоящая joinChannel (functions/src/raid.ts):
+        // по нему собирается список своих каналов на главной, и без него демо-экипаж заходил бы
+        // в канал, которого потом не видел бы у себя в списке.
+        batch.set(db.doc(paths.userChannel({ userId: member.memberId, channelId: CHANNEL_ID })), {
+            memberId: member.memberId,
+            joinedAt: member.joinedAt,
+        });
     }
 
     for (const { messageId, ...doc } of messages) {

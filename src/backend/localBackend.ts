@@ -23,6 +23,7 @@ import { limitMessage, overLimit } from '@shared/utils/limit';
 
 import { localAccount } from '@/backend/auth';
 import { ServerState, StoredChannel, archiveKey, restoreState } from '@/backend/migrate';
+import { pickMyChannels } from '@/backend/myChannels';
 import {
     discardOutboxMessage,
     listOutboxChannels,
@@ -514,6 +515,19 @@ export function createLocalBackend(): ChannelBackend {
             emit(channelId, { type: 'channel-updated', channel: updated });
             return delay({ channel: updated });
         },
+
+        /**
+         * Реестра участий у местного «сервера» нет и не нужно: все каналы лежат тут же, одним
+         * состоянием, и пройти по ним дешевле, чем держать вторую копию и следить, чтобы она
+         * не разошлась с первой. Отдельный список пришлось бы чинить после каждой правки
+         * состояния — ухода, высадки, приведения формы хранилища (см. `restoreState`).
+         *
+         * `userId` берём из довода, а не из `localAccount()`, хотя здесь это одно и то же лицо:
+         * так велит контракт, и так вкладка, открытая чужим адресом (см. `memberIdFromUrl`
+         * в useChannel.ts), покажет каналы той личности, за которую её просят говорить.
+         */
+        listMyChannels: ({ userId }) =>
+            delay({ channels: pickMyChannels(Object.values(readState().channels), userId) }),
 
         /**
          * Подсказка, не запирающая проверка (см. checkAccessCode в types.ts) — сверяем код

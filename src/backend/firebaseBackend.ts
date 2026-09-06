@@ -54,6 +54,7 @@ import {
 import { limitMessage, overLimit } from '@shared/utils/limit';
 
 import { clockOffset } from '@/backend/clock';
+import { joinMyChannels } from '@/backend/myChannels';
 import { discardOutboxMessage, mergeOutbox, putOutboxMessage, readOutbox, removeOutboxMessage } from '@/backend/outbox';
 import {
     ChannelBackend,
@@ -131,6 +132,16 @@ interface MemberDoc {
      * см. backend/clock.ts), для доигровки манёвра при перезагрузке.
      */
     serverAt?: Timestamp;
+}
+
+/**
+ * users/{userId}/channels/{channelId} — реестр участий, обратная сторона членства: пишет
+ * и стирает его та же транзакция, что ставит корабль на рейд и снимает его (см. тот же
+ * UserChannelDoc в functions/src/raid.ts). Клиенту он только на чтение (firestore.rules).
+ */
+interface UserChannelDoc {
+    memberId: string;
+    joinedAt: number;
 }
 
 /**
@@ -722,6 +733,51 @@ export function createFirebaseBackend({
             // до правки, а slug и title подменяем на то, что только что записали: читать
             // канал заново ради этого незачем, в транзакции и так есть всё, что нужно ответить.
             return { channel: toChannel(channelId, { ...before, slug, title: trimmedTitle }) };
+        },
+
+        /**
+         * Свои каналы читаются из реестра участий (`users/{userId}/channels/{channelId}`) —
+         * того самого, который пишет и стирает та же транзакция, что ставит корабль на рейд
+         * и снимает его оттуда (см. functions/src/raid.ts). Заводить ради этого списка запрос
+         * по группе коллекций `members` (`user.userId == uid`) не пришлось: реестр уже есть,
+         * его правила уже написаны (firestore.rules, `match /users/{userId}/channels/{channelId}`,
+         * allow read: if isMe(userId)) и проверены (firestore/rules.test.ts), и читает он ровно
+         * свою ветку — а запрос по группе коллекций пришлось бы пускать правилом ко всем
+         * документам участников всех каналов сразу.
+         *
+         * Название и адрес берутся из самих каналов, по документу на строчку: в реестре их нет
+         * нарочно (копия устарела бы с первым переименованием). Чтений выходит столько, сколько
+         * у человека каналов, — и это заметно дороже одного запроса, но зато без второй правды
+         * о названии канала. Читаются они разом (Promise.all), а не по очереди: срок один
+         * на весь список, и складывать задержки в цепочку незачем.
+         *
+         * Отказ на отдельном канале не роняет весь список (см. joinMyChannels): корабль могли
+         * снять с рейда прямо между чтением реестра и чтением канала, и правило тогда честно
+         * не пустит — но остальные каналы прочитались, и показать их можно.
+         */
+        listMyChannels: async ({ userId }) => {
+            try {
+                return await withTimeout(async () => {
+                    const registry = await getDocs(collection(db, paths.userChannels({ userId })));
+                    const entries = registry.docs.map((item) => ({
+                        channelId: item.id,
+                        joinedAt: (item.data() as UserChannelDoc).joinedAt,
+                    }));
+                    const found = new Map<string, Pick<Channel, 'slug' | 'title'>>();
+                    await Promise.all(
+                        entries.map(async ({ channelId }) => {
+                            const snap = await getDoc(channelRef(channelId)).catch(() => null);
+                            if (snap?.exists()) {
+                                const { slug, title } = snap.data() as ChannelDoc;
+                                found.set(channelId, { slug, title });
+                            }
+                        })
+                    );
+                    return { channels: joinMyChannels(entries, found) };
+                }, READ_TIMEOUT);
+            } catch (failure) {
+                throw toChannelError(failure);
+            }
         },
 
         /**

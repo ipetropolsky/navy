@@ -28,6 +28,7 @@ import { DEMO_CHANNEL_SLUG } from '@/backend/seed';
 import SeaScene, { BerthChoice } from '@/components/SeaScene/SeaScene';
 import { departureSeconds, manoeuvreSeconds } from '@/components/SeaScene/shipMotion';
 import SignIn from '@/components/auth/SignIn';
+import ChannelsList from '@/components/channel/ChannelsList';
 import ClosedChannel from '@/components/channel/ClosedChannel';
 import CreateChannel from '@/components/channel/CreateChannel';
 import LeaveRaid from '@/components/channel/LeaveRaid';
@@ -53,6 +54,7 @@ import { useClockOffset } from '@/hooks/useClockOffset';
 import { useConnection } from '@/hooks/useConnection';
 import { Layout, chatMagnets, useLayout } from '@/hooks/useLayout';
 import { useMessageNotifications } from '@/hooks/useMessageNotifications';
+import { useMyChannels } from '@/hooks/useMyChannels';
 import { useSlide } from '@/hooks/useSlide';
 import { useSwipe } from '@/hooks/useSwipe';
 import { useUnread } from '@/hooks/useUnread';
@@ -148,6 +150,30 @@ export default function App() {
      * не мгновенно, и без этого ожидания вошедший на миг видел бы приглашение войти.
      */
     const waiting = loading || !auth.known;
+    /**
+     * Свои каналы вошедшего — то, с чего начинается главная (см. `useMyChannels`). Спрашиваем
+     * их и когда открыт канал: стоит это одного чтения на вход, а взамен человек, вернувшийся
+     * из канала на главную, видит список сразу, а не после ещё одного ожидания.
+     */
+    const myChannels = useMyChannels(auth.account?.userId ?? null);
+    /**
+     * Открыта ли на главной форма создания канала. Прежде она и была главной, и состояния
+     * этого не требовалось; теперь главная начинается со списка своих каналов, а форма
+     * встаёт на его место по кнопке — и возвращается «Назад» в шапке.
+     *
+     * Живёт оно здесь, а не в адресе: заводят канал в один присест, и отдельного адреса
+     * (со своей строчкой в истории и своей ссылкой, которую можно переслать) у наполовину
+     * заполненной формы быть не должно.
+     */
+    const [creating, setCreating] = useState(false);
+    // Уход с главной — и выход из аккаунта — форму закрывают: вернувшись, человек видит
+    // список, то же самое, что увидел бы, открыв приложение заново. Форма живёт ровно один
+    // заход на главную, и незачем ей переживать целый разговор в канале.
+    useEffect(() => {
+        if (route.channel || !signedIn) {
+            setCreating(false);
+        }
+    }, [route.channel, signedIn]);
     const [replyTo, setReplyTo] = useState<Message | null>(null);
     /**
      * Что открыто поверх рейда: список кораблей, форма своего корабля, карточка чужого, прощание
@@ -482,6 +508,31 @@ export default function App() {
      * и вышедший оказывается ровно там же, где гость, — у входа.
      */
     const atGate = !waiting && Boolean(channel) && !me && !joinOpen;
+
+    /**
+     * Куда ведёт «Назад» в шапке — и есть ли ему куда вести вовсе (`null` — кнопки нет).
+     *
+     * Экранов, с которых уйти было нечем, было три, и все три — по чужой ссылке: вход гостя
+     * на канал, код закрытой частоты и форма постановки в строй. Из любого из них человек
+     * попадал в тупик: канал ему не нужен, а уйти с экрана можно было только правкой адреса
+     * руками. Отсюда и общее условие — «канал открыт, а корабля в нём ещё нет»: не `atGate`,
+     * потому что тот гаснет, едва раскрыли форму, и кнопка пропадала бы ровно тогда, когда
+     * человек передумал вставать на рейд.
+     *
+     * На главной «Назад» ведёт не домой — она и есть дом, — а из формы создания обратно
+     * к списку своих каналов: это единственный шаг, который на главной вообще делают.
+     *
+     * Ходом на главную служит `route.openHome` — тот же самый, которым уходят с «Канал
+     * не открылся» и «Канала нет» (см. кнопки в разметке ниже).
+     */
+    const atEntry = !waiting && Boolean(channel) && !me;
+    let goBack: (() => void) | null = null;
+    if (creating && !route.channel) {
+        goBack = () => setCreating(false);
+    } else if (atEntry) {
+        goBack = route.openHome;
+    }
+
     // Форма своего корабля: выезжает снизу поверх разговора и уходит туда же. Пока едет —
     // остаётся на экране, см. useSlide.
     const formOpen = editing && inChat;
@@ -1049,23 +1100,41 @@ export default function App() {
             )}
             {/* Главная. Гостю здесь показывать нечего, кроме входа: и свой канал, и демо —
                 действия, а действовать в чате может только тот, за кем стоит человек,
-                а не вкладка. */}
-            {!waiting &&
-                !route.channel &&
-                (signedIn ? (
-                    <CreateChannel
-                        onCreate={handleCreate}
-                        demoHref={`?channel=${DEMO_CHANNEL_SLUG}`}
-                        onOpenDemo={() => route.openChannel(DEMO_CHANNEL_SLUG)}
-                        account={auth.account}
-                        onSignOut={handleSignOut}
-                    />
-                ) : (
-                    <SignIn
-                        hint="Здесь заводят каналы связи и выходят в море под своим позывным. Войдите — и можно ставить корабль на рейд."
-                        onSignIn={auth.signIn}
-                    />
-                ))}
+                а не вкладка.
+
+                Вошедшего встречает список его каналов, а не форма создания: заводят канал
+                редко, а возвращаются в уже заведённый каждый день, — и до недавнего времени
+                вернуться в него можно было только по сохранённой ссылке. Форма никуда
+                не делась, она за кнопкой «Создать канал» (см. `creating`). */}
+            {!waiting && !route.channel && !signedIn && (
+                <SignIn
+                    hint="Здесь заводят каналы связи и выходят в море под своим позывным. Войдите — и можно ставить корабль на рейд."
+                    onSignIn={auth.signIn}
+                />
+            )}
+            {!waiting && !route.channel && signedIn && !creating && (
+                <ChannelsList
+                    channels={myChannels.channels}
+                    loading={myChannels.loading}
+                    error={myChannels.error}
+                    onRetry={myChannels.reload}
+                    onOpen={route.openChannel}
+                    onCreate={() => setCreating(true)}
+                    demoHref={`?channel=${DEMO_CHANNEL_SLUG}`}
+                    onOpenDemo={() => route.openChannel(DEMO_CHANNEL_SLUG)}
+                    account={auth.account}
+                    onSignOut={handleSignOut}
+                />
+            )}
+            {!waiting && !route.channel && signedIn && creating && (
+                <CreateChannel
+                    onCreate={handleCreate}
+                    demoHref={`?channel=${DEMO_CHANNEL_SLUG}`}
+                    onOpenDemo={() => route.openChannel(DEMO_CHANNEL_SLUG)}
+                    account={auth.account}
+                    onSignOut={handleSignOut}
+                />
+            )}
             {/* Форма постановки в строй — это и есть содержимое блока: разговора у того, кто
                 ещё не в строю, нет, и накрывать ей нечего. Переоснащение, наоборот, выезжает
                 поверх разговора — см. ниже.
@@ -1427,6 +1496,25 @@ export default function App() {
                     />
                 </div>
                 <div className={styles.headerBar} style={boxEdge} ref={measureHeader}>
+                    {/* «Назад» — слева от заголовка, там же, где его ищут в любом приложении.
+                        Стоит она только там, где назад и правда есть куда (см. `goBack`):
+                        в разговоре её нет вовсе — уходят оттуда с рейда, а не кнопкой шапки. */}
+                    {goBack && (
+                        <div className={styles.headerBack}>
+                            <IconButton onClick={goBack} aria-label="Назад" title="Назад">
+                                <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+                                    <path
+                                        d="M15 5l-7 7 7 7"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeWidth="2"
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                    />
+                                </svg>
+                            </IconButton>
+                        </div>
+                    )}
                     <div className={styles.headerInfo}>
                         {/* Нет связи — говорим один раз здесь, а не снекбаром на каждое действие
                             (см. docs/FIREBASE.md, «Что видит человек»): повторённый пять раз

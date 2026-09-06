@@ -186,6 +186,19 @@ export const forgetLocalTab = (page: Page): Promise<void> =>
     });
 
 /**
+ * Открыть форму создания канала с главной. Главная встречает вошедшего списком его каналов
+ * (см. `ChannelsList`), а форма стоит за кнопкой — до неё теперь одно нажатие, и делают его
+ * все, кому нужен свой канал.
+ *
+ * Кнопку берём в полосе действий плашки, а не по странице: «Создать канал» — и подпись кнопки
+ * на списке, и подпись отправки в самой форме, и после нажатия их на экране было бы двое.
+ */
+export const openCreateForm = async (page: Page): Promise<void> => {
+    await page.getByRole('button', { name: 'Создать канал' }).click();
+    await expect(page.getByPlaceholder('Эскадра «Полночь»'), 'форма создания канала не открылась').toBeVisible();
+};
+
+/**
  * Завести свой канал и остаться в нём. Нужен там, где важен ровно один корабль в кадре
  * и он же — свой: в демо-канале на рейде уже стоит эскадра.
  *
@@ -195,6 +208,7 @@ export const forgetLocalTab = (page: Page): Promise<void> =>
  */
 export const openNewChannel = async (page: Page, slug: string, code?: string): Promise<void> => {
     await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await openCreateForm(page);
     await page.getByPlaceholder('Эскадра «Полночь»').fill(slug);
     await page.locator('input[placeholder="eskadra-polnoch"]').fill(slug);
     if (code !== undefined) {

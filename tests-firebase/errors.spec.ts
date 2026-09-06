@@ -157,7 +157,7 @@ test('канал открыт офлайн — «нет связи», а не «
     // useChannel перечитывает канал по смене slug, а не по каждому кадру, и повторный заход
     // на тот же адрес без этого не заставил бы его спросить канал заново.
     await pushRoute(page, null);
-    await expect(page.getByPlaceholder('Эскадра «Полночь»'), 'уход на главную не сработал').toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Ваши каналы' }), 'уход на главную не сработал').toBeVisible();
 
     await context.setOffline(true);
     await pushRoute(page, slug);

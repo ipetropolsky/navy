@@ -3,6 +3,8 @@
 import type { MemberDraft } from '@shared/types/calls';
 import { Channel, Member, MemberRef, Message, MessageRef } from '@shared/types/channel';
 
+import { MyChannel } from '@/backend/myChannels';
+
 /**
  * Контракт бэкенда. Фронтенд знает только его и ничего — про то, где лежат данные:
  * сегодня это localStorage в соседней вкладке, завтра Firebase. Поэтому все методы
@@ -40,6 +42,9 @@ export interface ChannelSnapshot {
  * Общая с сервером форма — оба конца провода должны разбирать один и тот же черновик.
  */
 export type { MemberDraft };
+
+/** Строчка списка своих каналов — см. `listMyChannels` ниже и `backend/myChannels.ts`. */
+export type { MyChannel };
 
 /**
  * Что у канала можно задать и потом поменять: адрес и человеческое название. `closed`/`code`
@@ -173,6 +178,22 @@ export interface ChannelBackend {
 
     createChannel(request: { channel: ChannelDraft }): Promise<{ channel: Channel }>;
     updateChannel(request: ChannelAddress & { channel: ChannelDraft }): Promise<{ channel: Channel }>;
+
+    /**
+     * Рейды, на которых стоит корабль этой личности, — то, с чего начинается главная у вошедшего.
+     * «Свой» здесь значит «встал в строй», а не «завёл»: канал заводят пустым, и до первого
+     * корабля в нём нет ни участия, ни старшего, — так что заведённый и брошенный канал в этот
+     * список не попадает, как не попадает и покинутый (см. `leave`).
+     *
+     * `userId` обязателен и приходит доводом, а не берётся бэкендом у себя: у настоящего
+     * бэкенда личность спрашивают у входа (`auth.ts`), и контракт не должен знать, у кого
+     * именно. Не вошедшему звать нечего — у него и `userId` не бывает.
+     *
+     * Ответ — только то, чем строчка списка и является: адрес, название и когда в него встали.
+     * Ни участников, ни ленты: список — это дорога к каналу, а не его содержимое, и платить
+     * за чтение десятка рейдов ради того, чтобы показать десять строк, незачем.
+     */
+    listMyChannels(request: { userId: string }): Promise<{ channels: MyChannel[] }>;
 
     /**
      * Проверить код доступа закрытого канала — для экрана «Закрытая частота», ещё до формы

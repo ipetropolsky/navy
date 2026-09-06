@@ -16,7 +16,7 @@ import { isTouch } from '@/utils/viewport';
 import { ACCESS_CODE_MAX_LENGTH, TITLE_MAX_LENGTH } from '@shared/types/channel';
 import { limitMessage, overLimit } from '@shared/utils/limit';
 
-import styles from './CreateChannel.module.less';
+import HomeFooter from '@/components/channel/HomeFooter';
 
 // Положения переключателя частоты. Список постоянный и лежит снаружи разметки — как и весь
 // набор положений «Огни» в ShipCard.tsx, устроенный точно так же.
@@ -37,8 +37,10 @@ interface CreateChannelProps {
 }
 
 /**
- * Главная сервиса: канал ещё не выбран, поэтому в море пусто — кораблей нет.
- * Отсюда два хода: завести свой канал связи или заглянуть в демо.
+ * Форма создания канала. Прежде она и была главной целиком; теперь главная начинается
+ * со списка своих каналов (см. ChannelsList), а сюда приходят по кнопке «Создать канал» —
+ * заводить новый рейд. Сама форма от этого не изменилась: тот же ход и те же поля, только
+ * добираются до неё на один шаг позже.
  */
 export default function CreateChannel({ onCreate, demoHref, onOpenDemo, account, onSignOut }: CreateChannelProps) {
     const [title, setTitle] = useState('');
@@ -121,38 +123,7 @@ export default function CreateChannel({ onCreate, demoHref, onOpenDemo, account,
                     {busy ? 'Минуту…' : 'Создать канал'}
                 </Button>
             }
-            footer={
-                <>
-                    Или загляни в{' '}
-                    {/* Ссылка настоящая: её видно в строке состояния, можно скопировать и открыть
-                        в новой вкладке. Но обычный клик уводим в приложение — перезагружать страницу
-                        незачем, а со сцены при этом слетают и анимация входа, и загруженные картинки.
-                        Клик с модификатором и средней кнопкой не трогаем: человек метит в новую вкладку. */}
-                    <a
-                        className={styles.demoLink}
-                        href={demoHref}
-                        onClick={(event) => {
-                            if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
-                                return;
-                            }
-                            event.preventDefault();
-                            onOpenDemo();
-                        }}
-                    >
-                        демо-канал
-                    </a>
-                    {/* Кто вошёл — приписка, а не заголовок: имя и почта нужны здесь только
-                        для того, чтобы человек убедился, что он это он, и мог выйти. */}
-                    {account && (
-                        <span className={styles.account}>
-                            {`Вы вошли как ${account.name ?? account.email ?? 'моряк'}. `}
-                            <button type="button" className={styles.signOut} onClick={onSignOut}>
-                                Выйти
-                            </button>
-                        </span>
-                    )}
-                </>
-            }
+            footer={<HomeFooter demoHref={demoHref} onOpenDemo={onOpenDemo} account={account} onSignOut={onSignOut} />}
         >
             <Field label="Название">
                 <Input
