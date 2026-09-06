@@ -166,14 +166,24 @@ export function useMessageNotifications(
         }
         if (Notification.permission === 'granted') {
             try {
-                new Notification(author, { body, tag: channelId ?? undefined });
+                new Notification(author, {
+                    body,
+                    tag: channelId ?? undefined,
+                    // Без явной иконки конструктор показывает не фавикон сайта, а иконку
+                    // самого браузера (так и увидели на Chrome) — Notification API фавикон
+                    // страницы не подхватывает сам, путь нужен явно. Тот же файл, что и
+                    // manifest → icons «any» 192×192, — размер, который у уведомлений и просят
+                    // все платформы. Путь — относительно текущего документа, а не от корня
+                    // сайта: см. комментарий про base: './' в index.html, та же причина.
+                    icon: new URL('android-chrome-192x192.png', document.baseURI).href,
+                });
                 return;
             } catch {
                 // Разрешение дано, а показать всё равно нечем: у части браузеров (Chrome
                 // на Android) `new Notification(...)` вовсе не работает — решает только
-                // ServiceWorkerRegistration.showNotification(), а сервис-воркера в проекте
-                // нет. Не оставлять человека совсем без знака — мигаем заголовком, как
-                // при отказе.
+                // ServiceWorkerRegistration.showNotification(). Сервис-воркер в проекте
+                // уже есть (PWA-кеш), но на него эта отправка не переведена. Не оставлять
+                // человека совсем без знака — мигаем заголовком, как при отказе.
             }
         }
         // Пока не решили («default») или отказали («denied») — заголовок мигает в любом
