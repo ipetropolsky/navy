@@ -68,6 +68,24 @@ export function ShadeStack({ children }: { children: ReactNode }) {
 
     const stack = useMemo(() => ({ enter, leave, order }), [enter, leave, order]);
 
+    // Esc — четвёртый выход шторки, наравне с крестиком, нажатием мимо и свайпом вниз (см.
+    // `ui/Shade`). Слушатель один на всё приложение, а не в каждой шторке: закрывать он обязан
+    // ровно верхнюю, а какая шторка верхняя, знает только сама стопка. Нижние в тот же нажим
+    // не трогаем — ушёл бы весь стек разом, а не один слой, как крестиком.
+    useEffect(() => {
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key !== 'Escape') {
+                return;
+            }
+            const top = layersRef.current.at(-1);
+            if (top) {
+                top.close();
+            }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, []);
+
     return <ShadeStackContext.Provider value={stack}>{children}</ShadeStackContext.Provider>;
 }
 

@@ -122,7 +122,6 @@ export default function MembersList({
                 </>
             }
         >
-            <div className={styles.hint}>Каждый корабль говорит из своей вкладки</div>
             {members.map((member) => {
                 const mine = member.memberId === myId;
                 const senior = member.memberId === seniorId;

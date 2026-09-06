@@ -939,6 +939,30 @@ export default function App() {
         }
     }, [layerOpen, formSlide.mounted, listSlide.mounted]);
 
+    // Esc — то же самое, что и крестик списка кораблей. Своей формы у списка нет, и держать
+    // это здесь, а не в MembersList, приходится по той же причине, по которой здесь же лежит
+    // и сам крестик (см. «Крестик — там же, где у шторки» ниже): список не знает про соседние
+    // слои, а Esc обязан промолчать там, где список закрыт не своим крестиком.
+    //
+    // Поверх списка бывает либо форма своего корабля (закрывает её тогда «Отмена» в MemberForm,
+    // и снимать заодно ещё и список значило бы за один нажим убирать два слоя разом), либо
+    // шторка — карточка чужого корабля или прощание с рейдом (её берёт на себя `ShadeStack`,
+    // и по той же причине список должен остаться в стороне). `shown` проверяем тем же смыслом,
+    // каким список ставят `inert` чуть ниже: закрытый крестик там не нажимается, и Esc с ним
+    // заодно.
+    useEffect(() => {
+        if (!listOpen || !shown || formOpen || shownMember || (leaving && inChat)) {
+            return undefined;
+        }
+        const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+            if (event.key === 'Escape') {
+                act({ type: 'close-list' });
+            }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [listOpen, shown, formOpen, shownMember, leaving, inChat]);
+
     /**
      * Свайп по кадру двигает коробку на соседнее положение: вверх — на ступеньку выше,
      * вниз — на ступеньку ниже, вплоть до нижней, где от разговора остаётся одна ручка.

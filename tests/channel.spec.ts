@@ -1603,3 +1603,90 @@ test('нажатия не подсвечиваются системой, а по
     // А вот текст реплики выделяется — за тем плашка и сделана не кнопкой.
     expect(await look(bubble, 'user-select'), 'реплику в ленте не выделить').not.toBe('none');
 });
+
+/**
+ * Esc — четвёртый выход шторки, наравне с крестиком, нажатием мимо и свайпом вниз (см.
+ * `ui/Shade`, `ui/ShadeStack`). Проверяется тут, а не в layout.spec.ts вместе с остальными
+ * тремя, — потому что там же и список кораблей под карточкой, и важно, что Esc снимает
+ * ровно верхний слой, а не оба разом.
+ */
+test('Esc закрывает карточку корабля, а список кораблей остаётся под ней', async ({ page }) => {
+    await openChannel(page, DEMO, VYMPEL);
+    await openShipCard(page, 'Альбатрос');
+    const card = page.getByRole('region', { name: 'Корабль' });
+    await expect(card).toBeVisible();
+
+    await page.keyboard.press('Escape');
+    await expect(card, 'Esc не закрыл карточку корабля').toHaveCount(0);
+    await expect(
+        page.getByRole('region', { name: 'Корабли на связи' }),
+        'список кораблей ушёл вместе с карточкой'
+    ).toBeVisible();
+});
+
+/**
+ * Та же проверка, что и выше, но для прощания с рейдом — второй шторки, у которой есть Esc.
+ * Список остаётся под ней по той же причине: он свой слой, и снимать его чужим Esc нельзя.
+ */
+test('Esc закрывает шторку прощания с рейдом, а список кораблей остаётся под ней', async ({ page }) => {
+    await openChannel(page, DEMO, ALBATROS);
+    await openSheet(page);
+    await leaveButton(page).click();
+    const shade = page.getByRole('region', { name: 'Вы уходите с рейда' });
+    await expect(shade).toBeVisible();
+
+    await page.keyboard.press('Escape');
+    await expect(shade, 'Esc не закрыл шторку прощания').toHaveCount(0);
+    await expect(
+        page.getByRole('region', { name: 'Корабли на связи' }),
+        'список кораблей ушёл вместе со шторкой прощания'
+    ).toBeVisible();
+});
+
+/**
+ * Форма переоснащения — не шторка, и Esc у неё свой: то же самое, что и «Отмена» рядом
+ * (см. MemberForm). Список кораблей от неё не зависит и Esc не должен снимать оба слоя разом,
+ * поэтому список тоже проверяем — он обязан остаться.
+ */
+test('Esc в форме своего корабля работает как «Отмена»', async ({ page }) => {
+    await openChannel(page, DEMO, ALBATROS);
+    await openSheet(page);
+    await page.getByRole('button', { name: 'Настроить корабль' }).click();
+    await expect(page.locator('[data-berth]').first()).toBeVisible();
+
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('heading', { name: 'Настроить корабль' }), 'форма не закрылась').toHaveCount(0);
+    await expect(
+        page.getByRole('region', { name: 'Корабли на связи' }),
+        'список кораблей ушёл вместе с формой'
+    ).toBeVisible();
+});
+
+/**
+ * У формы постановки в строй тоже есть «Отмена» — она сворачивает форму до закрытого вида,
+ * а не выкидывает гостя с экрана. Но до входа в строй Esc всё равно должен молчать: гостю,
+ * кроме этой формы, вообще ничего не показывают, и падать Esc там некуда (см. MemberForm).
+ */
+test('Esc в форме постановки в строй ничего не делает', async ({ page }) => {
+    await openChannel(page, DEMO);
+    await openJoinForm(page);
+    await page.getByPlaceholder('Гром').fill('Дозорный');
+
+    await page.keyboard.press('Escape');
+    await expect(page.getByPlaceholder('Гром'), 'Esc свернул форму постановки в строй').toBeVisible();
+    await expect(page.getByPlaceholder('Гром'), 'Esc стёр набранный позывной').toHaveValue('Дозорный');
+});
+
+/**
+ * Список кораблей закрывается Esc так же, как и своим крестиком (см. App.tsx) — это тот же
+ * `close-list`, только по клавише, а не по тычку.
+ */
+test('Esc закрывает список кораблей, как и крестик', async ({ page }) => {
+    await openChannel(page, DEMO, ALBATROS);
+    await openSheet(page);
+    const list = page.getByRole('region', { name: 'Корабли на связи' });
+    await expect(list).toBeVisible();
+
+    await page.keyboard.press('Escape');
+    await expect(list, 'Esc не закрыл список кораблей').toHaveCount(0);
+});

@@ -1,4 +1,4 @@
-import { KeyboardEvent, MouseEvent, PointerEvent, Ref, useRef, useState } from 'react';
+import { KeyboardEvent, MouseEvent, PointerEvent, Ref, useEffect, useRef, useState } from 'react';
 
 import { ChannelError, MemberDraft } from '@/backend';
 import MemberName from '@/components/ships/MemberName';
@@ -142,6 +142,25 @@ export default function MemberForm({
     // всегда один и тот же, и по нему двух нажатий не различить.
     const [reply, setReply] = useState<MorseFeed | null>(null);
     const notify = useSnackbar();
+
+    // Esc — то же самое, что и «Отмена», и только при переоснащении: у входа кнопки «Отмена»
+    // нет вовсе, а есть только закрытый вид с одной кнопкой посреди («Встать на рейд»), и падать
+    // Esc там некуда — до входа в строй человек гость, и рейда без формы ему не видно вовсе
+    // (см. `atGate` в App.tsx).
+    useEffect(() => {
+        if (mode !== 'edit' || !onCancel) {
+            return undefined;
+        }
+        // Тип — от window, а не от React: локальный импорт `KeyboardEvent` выше про поле
+        // разметки, а тут настоящее событие браузера, а не синтетическое.
+        const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+            if (event.key === 'Escape') {
+                onCancel();
+            }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [mode, onCancel]);
 
     /** С чего началось нажатие на плашку корабля: откуда и при каком выделении (см. `@/utils/tap`). */
     const pressRef = useRef<Press | null>(null);
