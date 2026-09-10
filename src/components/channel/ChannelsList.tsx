@@ -91,7 +91,7 @@ export default function ChannelsList({
             footer={<HomeFooter demoHref={demoHref} onOpenDemo={onOpenDemo} account={account} onSignOut={onSignOut} />}
         >
             <div className={styles.list}>
-                {loading && <div className={styles.empty}>Спрашиваем…</div>}
+                {loading && <div className={styles.empty}>Загружаем…</div>}
                 {!loading && !error && !channels.length && (
                     <div className={styles.empty}>Пока ни одного: заведите свой канал или загляните в демо.</div>
                 )}

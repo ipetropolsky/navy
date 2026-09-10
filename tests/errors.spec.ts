@@ -29,7 +29,7 @@ test('канала по адресу нет: сказано прямо и ест
     await expectWayOut(page);
 
     // Кнопка и правда уводит на главную, откуда канал заводится заново.
-    await page.getByRole('button', { name: 'Создать свой канал' }).click();
+    await page.getByRole('button', { name: 'Полный назад' }).click();
     await openCreateForm(page);
 });
 

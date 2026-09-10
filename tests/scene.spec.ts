@@ -874,7 +874,7 @@ test('разметка гаснет вместе с флотом, а не кад
         const ship = document.querySelector('[class*="shipRock"] img')!;
         const out: { ms: number; field: number; ship: number }[] = [];
         const step = (): Promise<void> => new Promise((resolve) => requestAnimationFrame(() => resolve()));
-        const cancel = [...document.querySelectorAll('button')].find((one) => one.textContent === 'Отмена');
+        const cancel = [...document.querySelectorAll('button')].find((one) => one.textContent === 'Отставить');
         const at = performance.now();
         cancel!.click();
         const sample = async (): Promise<void> => {
@@ -1456,7 +1456,7 @@ test('пустая вода не открывает ничего, а нажат�
     expect(slot.height, 'дальний силуэт вырос выше мерки, и прибавка ему уже не нужна').toBeLessThan(SHIP_TAP_MIN);
     await page.mouse.click(slot.x + slot.width / 2, slot.y + slot.height + 6);
     await expect(berths(page).first(), 'нажатие рядом с мелким кораблём до него не дошло').toBeVisible();
-    await page.getByRole('button', { name: 'Отмена' }).click();
+    await page.getByRole('button', { name: 'Отставить' }).click();
     await expect(berths(page), 'форма не закрылась').toHaveCount(0);
 
     await page.mouse.move(slot.x + slot.width / 2, sea.y - 0.5);

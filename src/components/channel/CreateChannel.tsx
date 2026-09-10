@@ -27,6 +27,12 @@ const CLOSED_OPTIONS = [
 
 interface CreateChannelProps {
     onCreate: (draft: ChannelDraft) => Promise<void>;
+    /**
+     * Уйти без ответа — обратно к списку своих каналов. Тем же ведёт и крестик у заголовка,
+     * и «Отставить» в полосе кнопок: оба стоят рядом с тем, что закрывают, а не в шапке
+     * приложения, где искать выход с этого экрана было не вполне очевидно.
+     */
+    onClose: () => void;
     /** Адрес демо-канала: обычная ссылка, её видно и можно скопировать. */
     demoHref: string;
     /** Переход в демо без перезагрузки страницы. */
@@ -42,7 +48,14 @@ interface CreateChannelProps {
  * заводить новый рейд. Сама форма от этого не изменилась: тот же ход и те же поля, только
  * добираются до неё на один шаг позже.
  */
-export default function CreateChannel({ onCreate, demoHref, onOpenDemo, account, onSignOut }: CreateChannelProps) {
+export default function CreateChannel({
+    onCreate,
+    onClose,
+    demoHref,
+    onOpenDemo,
+    account,
+    onSignOut,
+}: CreateChannelProps) {
     const [title, setTitle] = useState('');
     // Адрес предлагаем из названия, но как только его правят руками, перестаём перебивать:
     // человек знает, чего хочет, а название он может ещё десять раз поменять.
@@ -118,10 +131,16 @@ export default function CreateChannel({ onCreate, demoHref, onOpenDemo, account,
             title="Создать канал"
             hint="Заведи свой канал связи, поставь корабль на рейд и позови остальных, отправив им адрес."
             onSubmit={handleSubmit}
+            onClose={onClose}
             actions={
-                <Button type="submit" disabled={!canSubmit || busy}>
-                    {busy ? 'Минуту…' : 'Создать канал'}
-                </Button>
+                <>
+                    <Button type="submit" disabled={!canSubmit || busy}>
+                        {busy ? 'Минуту…' : 'Создать канал'}
+                    </Button>
+                    <Button variant="secondary" onClick={onClose}>
+                        Отставить
+                    </Button>
+                </>
             }
             footer={<HomeFooter demoHref={demoHref} onOpenDemo={onOpenDemo} account={account} onSignOut={onSignOut} />}
         >

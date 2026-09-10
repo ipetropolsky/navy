@@ -1,6 +1,7 @@
 import { ReactNode, SyntheticEvent } from 'react';
 
 import Actions from '@/components/ui/Actions';
+import CloseButton from '@/components/ui/CloseButton';
 
 import styles from './Panel.module.less';
 
@@ -28,11 +29,20 @@ interface PanelProps {
     /** Приписка под кнопками: ссылка в сторону, а не действие. */
     footer?: ReactNode;
     onSubmit?: () => void;
+    /**
+     * Крестик у заголовка: закрыть панель без ответа, тем же жестом, каким закрывают лист
+     * и шторку (ui/Sheet, ui/Shade). Стоит он не у всякой панели — у входа и у отказов
+     * («Канала нет», код закрытой частоты) кнопка внизу и так одна, и крестик рядом с ней
+     * повторял бы её же. Нужен он там, где панель можно оставить без ответа и вернуться,
+     * откуда пришли: создание канала, переоснащение корабля.
+     */
+    onClose?: () => void;
 }
 
-export default function Panel({ title, hint, children, actions, footer, onSubmit }: PanelProps) {
+export default function Panel({ title, hint, children, actions, footer, onSubmit, onClose }: PanelProps) {
     const content = (
         <>
+            {onClose && <CloseButton onClick={onClose} />}
             {/* Мотается только тело: кнопки под ним стоят своей строкой и с места не уходят
                 (см. ui/Actions). Поэтому и прокрутка кончается там же, где кончается текст. */}
             <div className={styles.body}>
@@ -47,8 +57,10 @@ export default function Panel({ title, hint, children, actions, footer, onSubmit
         </>
     );
 
+    const look = [styles.card, onClose ? styles.cardWithClose : ''].filter(Boolean).join(' ');
+
     if (!onSubmit) {
-        return <div className={styles.card}>{content}</div>;
+        return <div className={look}>{content}</div>;
     }
 
     const handleSubmit = (event: SyntheticEvent) => {
@@ -57,7 +69,7 @@ export default function Panel({ title, hint, children, actions, footer, onSubmit
     };
 
     return (
-        <form className={styles.card} onSubmit={handleSubmit}>
+        <form className={look} onSubmit={handleSubmit}>
             {content}
         </form>
     );

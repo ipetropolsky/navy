@@ -56,15 +56,24 @@ test('чужой канал в список не попадает', async ({ pag
     await expectWayOut(page);
 });
 
-test('«Создать канал» раскрывает форму, а «Назад» возвращает к списку', async ({ page }) => {
+test('«Создать канал» раскрывает форму, а крестик и «Отставить» возвращают к списку', async ({ page }) => {
     await page.goto('/', { waitUntil: 'domcontentloaded' });
     await openCreateForm(page);
 
-    await page.getByRole('button', { name: 'Назад' }).click();
+    // Крестик у заголовка — тот же выход, что и у любой другой панели с ним (ui/Panel).
+    await page.getByRole('button', { name: 'Закрыть' }).click();
     await expect(page.getByRole('heading', { name: 'Ваши каналы' })).toBeVisible();
     await expect(page.getByPlaceholder('Эскадра «Полночь»')).toHaveCount(0);
-    // На самом списке возвращаться некуда — и кнопки там нет: главная и есть дом.
-    await expect(page.getByRole('button', { name: 'Назад' })).toHaveCount(0);
+
+    // «Отставить» рядом с «Создать канал» в полосе кнопок — тот же ход вторым путём.
+    await openCreateForm(page);
+    await page.getByRole('button', { name: 'Отставить' }).click();
+    await expect(page.getByRole('heading', { name: 'Ваши каналы' })).toBeVisible();
+    await expect(page.getByPlaceholder('Эскадра «Полночь»')).toHaveCount(0);
+
+    // На самом списке возвращаться некуда — и выхода там нет: главная и есть дом.
+    await expect(page.getByRole('button', { name: 'Закрыть' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Отставить' })).toHaveCount(0);
 });
 
 test('«Назад» уводит с канала по чужой ссылке на главную', async ({ page }) => {

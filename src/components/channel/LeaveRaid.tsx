@@ -1,16 +1,16 @@
-import { KeyboardEvent, MouseEvent, PointerEvent, useRef, useState } from 'react';
+import { useState } from 'react';
 
 import Avatar from '@/components/ships/Avatar';
 import MemberName from '@/components/ships/MemberName';
 import Button from '@/components/ui/Button';
 import Field from '@/components/ui/Field';
 import Input from '@/components/ui/Input';
+import ListRow from '@/components/ui/ListRow';
 import Sheet from '@/components/ui/Sheet';
 import { useSnackbar } from '@/components/ui/Snackbar';
 import { LeaveIcon } from '@/components/ui/icons';
-import { Press, isTap, startPress } from '@/utils/tap';
 import { isTouch } from '@/utils/viewport';
-import { MAX_COURSE_LENGTH, Member } from '@shared/types/channel';
+import { MAX_COURSE_LENGTH, Member, SHIP_KIND_LABELS } from '@shared/types/channel';
 import { limitMessage, overLimit } from '@shared/utils/limit';
 
 import styles from './LeaveRaid.module.less';
@@ -60,9 +60,6 @@ export default function LeaveRaid({ others, iAmSenior, onConfirm, onCancel }: Le
     const [nextOwnerId, setNextOwnerId] = useState<string | null>(null);
     const notify = useSnackbar();
 
-    /** С чего началось нажатие на строчку преемника (см. `@/utils/tap`). */
-    const pressRef = useRef<Press | null>(null);
-
     const needsSuccessor = iAmSenior && others.length > 0;
     const wanted = course.trim();
     // Преемник не входит в готовность: выбор ему предлагают, а не требуют — не выбрали,
@@ -71,22 +68,6 @@ export default function LeaveRaid({ others, iAmSenior, onConfirm, onCancel }: Le
     const ready = Boolean(wanted);
 
     const chooseSuccessor = (memberId: string): void => setNextOwnerId(memberId);
-
-    const handleRowTap = (event: MouseEvent<HTMLDivElement>, memberId: string): void => {
-        const press = pressRef.current;
-        pressRef.current = null;
-        if (!isTap(press, event)) {
-            return;
-        }
-        chooseSuccessor(memberId);
-    };
-
-    const handleRowKey = (event: KeyboardEvent<HTMLDivElement>, memberId: string): void => {
-        if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault();
-            chooseSuccessor(memberId);
-        }
-    };
 
     const handleSubmit = () => {
         if (!ready) {
@@ -122,27 +103,24 @@ export default function LeaveRaid({ others, iAmSenior, onConfirm, onCancel }: Le
             onSubmit={handleSubmit}
         >
             {/* Преемник — первым: это то самое решение, ради которого шторка спрашивает больше
-                одного поля, и курс логичнее набирать после него, а не до. */}
+                одного поля, и курс логичнее набирать после него, а не до.
+
+                Строчка — та же, что и в списке «На связи» (ui/ListRow): выбор преемника
+                и есть тот же список кораблей, только тычок в строчку отмечает, а не открывает
+                (см. `active` вместо перехода). Разные роли — не повод рисовать строчку дважды. */}
             {needsSuccessor && (
                 <Field label="Кто останется старшим" group>
                     <div className={styles.successors}>
                         {others.map((member) => (
-                            <div
+                            <ListRow
                                 key={member.memberId}
-                                role="button"
-                                tabIndex={0}
-                                aria-pressed={member.memberId === nextOwnerId}
-                                aria-label={`Оставить старшим «${member.name}»`}
-                                className={member.memberId === nextOwnerId ? styles.successorActive : styles.successor}
-                                onPointerDown={(event: PointerEvent<HTMLDivElement>) => {
-                                    pressRef.current = startPress(event);
-                                }}
-                                onClick={(event) => handleRowTap(event, member.memberId)}
-                                onKeyDown={(event) => handleRowKey(event, member.memberId)}
-                            >
-                                <Avatar number={member.hullNumber} />
-                                <MemberName name={member.name} color={member.color} />
-                            </div>
+                                label={`Оставить старшим «${member.name}»`}
+                                active={member.memberId === nextOwnerId}
+                                onOpen={() => chooseSuccessor(member.memberId)}
+                                icon={<Avatar number={member.hullNumber} large />}
+                                title={<MemberName name={member.name} color={member.color} />}
+                                subtitle={SHIP_KIND_LABELS[member.shipKind]}
+                            />
                         ))}
                     </div>
                 </Field>
