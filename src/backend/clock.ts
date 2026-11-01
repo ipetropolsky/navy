@@ -29,3 +29,22 @@
  */
 export const clockOffset = (serverAtMillis: number | null, receivedAt: number): number | null =>
     serverAtMillis === null ? null : serverAtMillis - receivedAt;
+
+/**
+ * Самая свежая из нескольких серверных меток, мс эпохи — та, по которой стоит мерить сдвиг
+ * (см. `clockOffset`), когда под рукой не одна метка, а целая пачка участников (`readChannel`
+ * в firebaseBackend.ts).
+ *
+ * Метка участника — это не «сейчас», а «когда он последний раз написал в канал»: для того,
+ * кто встал на рейд и с тех пор не шевелился, это может быть и неделя давности. Сверься
+ * `clockOffset` с такой — и разница между её «тогда» и нынешним `Date.now()` читалась бы
+ * сдвигом часов, хотя на деле это просто неделя, которая прошла. Среди всех участников канала
+ * свежее всех пишет тот, кто прямо сейчас в движении, — его метка и есть тот самый случай
+ * «сервер отметил только что», для которого `clockOffset` и годится. Остальных не подтвердивших
+ * ничего свежего (`null`) мимо — сравнивать с ними нечего.
+ */
+export const freshestMillis = (values: (number | null)[]): number | null =>
+    values.reduce<number | null>(
+        (freshest, value) => (value !== null && (freshest === null || value > freshest) ? value : freshest),
+        null
+    );

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { clockOffset } from '@/backend/clock';
+import { clockOffset, freshestMillis } from '@/backend/clock';
 
 /**
  * Чистый расчёт сдвига часов — и только он: сама подписка (кто зовёт эту функцию, по каким
@@ -26,5 +26,23 @@ describe('clockOffset', () => {
 
     it('часы вкладки отстают — сдвиг положительный', () => {
         expect(clockOffset(1_015, 1_000)).toBe(15);
+    });
+});
+
+describe('freshestMillis', () => {
+    it('из нескольких меток берёт самую позднюю, а не первую и не последнюю по списку', () => {
+        expect(freshestMillis([2_000, 5_000, 3_000])).toBe(5_000);
+    });
+
+    it('неподтверждённые (null) пропускает, а не принимает за самые ранние', () => {
+        expect(freshestMillis([null, 4_000, null])).toBe(4_000);
+    });
+
+    it('подтверждённых нет вовсе — сверяться не с чем', () => {
+        expect(freshestMillis([null, null])).toBeNull();
+    });
+
+    it('пустой список — тот же случай, что и сплошные null', () => {
+        expect(freshestMillis([])).toBeNull();
     });
 });

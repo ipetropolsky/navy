@@ -53,7 +53,7 @@ import {
 } from '@shared/types/channel';
 import { limitMessage, overLimit } from '@shared/utils/limit';
 
-import { clockOffset } from '@/backend/clock';
+import { clockOffset, freshestMillis } from '@/backend/clock';
 import { joinMyChannels } from '@/backend/myChannels';
 import { discardOutboxMessage, mergeOutbox, putOutboxMessage, readOutbox, removeOutboxMessage } from '@/backend/outbox';
 import {
@@ -422,15 +422,15 @@ export function createFirebaseBackend({
      * каждую подписку канала, и слушатели, которым нужна свежая оценка сразу при подписке
      * (см. watchClockOffset).
      *
-     * Обновляет её `applyClockOffset` — по каждому документу участника, где нашлась
-     * подтверждённая `serverAt` (readChannel — на первом чтении, подписка на участников —
-     * дальше, на каждой перемене). Не подтверждена — снимок пропускается молча, прежняя оценка
-     * остаётся в силе (см. `clockOffset`).
+     * Обновляет её `applyClockOffset` — по самой свежей из подтверждённых `serverAt`
+     * (readChannel — на первом чтении, подписка на участников — дальше, на каждой перемене).
+     * Свежих нет вовсе — снимок пропускается молча, прежняя оценка остаётся в силе
+     * (см. `clockOffset`).
      */
     let clockOffsetMs = 0;
     const clockOffsetListeners = new Set<(offsetMs: number) => void>();
-    const applyClockOffset = (serverAt: Timestamp | undefined): void => {
-        const offset = clockOffset(serverAt ? serverAt.toMillis() : null, Date.now());
+    const applyClockOffset = (serverAtMillis: number | null): void => {
+        const offset = clockOffset(serverAtMillis, Date.now());
         if (offset === null) {
             return;
         }
@@ -534,10 +534,15 @@ export function createFirebaseBackend({
         // он первый).
         const hasMoreMessages = feedSnap.docs.length > MESSAGE_PAGE;
         const pageDocs = hasMoreMessages ? feedSnap.docs.slice(1) : feedSnap.docs;
-        // Свежая оценка сдвига часов — по каждому пришедшему участнику разом: этот же снимок,
-        // случись он посреди чужого манёвра, и понадобится доигровке, едва отрисуется кадр
-        // (issue #230, см. applyClockOffset выше).
-        membersSnap.docs.forEach((item) => applyClockOffset((item.data() as MemberDoc).serverAt));
+        // Свежая оценка сдвига часов — по самому недавно писавшему участнику, а не по каждому
+        // подряд: запрос сортирует участников по `joinedAt` (см. membersQuery), и без разбора
+        // применённая метка последнего в этом порядке может принадлежать тому, кто не шевелился
+        // неделю, пока сосед в этот самый миг доигрывает манёвр. Такую смесь `clockOffset` читал
+        // бы сдвигом часов в недели — и именно её остаток доигровка потом доедала бы минутами
+        // (issue #230, см. freshestMillis в backend/clock.ts).
+        applyClockOffset(
+            freshestMillis(membersSnap.docs.map((item) => (item.data() as MemberDoc).serverAt?.toMillis() ?? null))
+        );
         return {
             channel: toChannel(channelId, channelSnap.data() as ChannelDoc),
             members: membersSnap.docs.map((item) => toMember(item.id, item.data() as MemberDoc)),
@@ -1194,7 +1199,7 @@ export function createFirebaseBackend({
                     }
                     for (const change of snap.docChanges()) {
                         const data = change.doc.data() as MemberDoc;
-                        applyClockOffset(data.serverAt);
+                        applyClockOffset(data.serverAt ? data.serverAt.toMillis() : null);
                         const member = toMember(change.doc.id, data);
                         if (change.type === 'added') {
                             onEvent({
